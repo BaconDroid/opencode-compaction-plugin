@@ -29,17 +29,17 @@ OpenCode's built-in compaction produces a 7-section summary. This plugin replace
 ### Option 1: One-liner (curl + bash) — macOS / Linux
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/nahuelcio/opencode-live-compaction/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BaconDroid/opencode-live-compaction/master/install.sh | bash
 # or specify a project directory:
-curl -fsSL https://raw.githubusercontent.com/nahuelcio/opencode-live-compaction/master/install.sh | bash -s /path/to/project
+curl -fsSL https://raw.githubusercontent.com/BaconDroid/opencode-live-compaction/master/install.sh | bash -s /path/to/project
 ```
 
 ### Option 2: One-liner (PowerShell) — Windows
 
 ```powershell
-irm https://raw.githubusercontent.com/nahuelcio/opencode-live-compaction/master/install.ps1 | iex
+irm https://raw.githubusercontent.com/BaconDroid/opencode-live-compaction/master/install.ps1 | iex
 # or specify a project directory:
-irm https://raw.githubusercontent.com/nahuelcio/opencode-live-compaction/master/install.ps1 | iex -TargetDir C:\path\to\project
+irm https://raw.githubusercontent.com/BaconDroid/opencode-live-compaction/master/install.ps1 | iex -TargetDir C:\path\to\project
 ```
 
 ### Option 3: npm plugin
@@ -55,13 +55,13 @@ Add to your `opencode.json`:
 ### Option 4: Manual
 
 ```bash
-git clone https://github.com/nahuelcio/opencode-live-compaction.git
+git clone https://github.com/BaconDroid/opencode-live-compaction.git
 cp -r opencode-live-compaction/src/* .opencode/plugins/live-compaction/
 ```
 
 ## How it works
 
-The plugin hooks into five OpenCode plugin events:
+The plugin hooks into several OpenCode plugin events:
 
 ### 1. `tool.execute.after` — Files tracking
 
@@ -205,7 +205,7 @@ or (with comment support):
     // Error input purging: strip inputs from errored tool calls
     "purgeErrors": {
         "enabled": true,
-        "turns": 4  // Not yet used (purges immediately); reserved for future turn-based logic
+        "turns": 4  // Purge errored tool inputs older than N user turns
     },
 
     // Slash commands
@@ -244,7 +244,7 @@ bun run test:coverage
 # (OpenCode loads .ts files directly via Bun)
 ```
 
-Current coverage: **96.2% statements, 100% functions, 97.0% lines, 82.2% branches** (156 tests).
+Current coverage: **98.4% statements, 98.2% functions, 98.7% lines, 86.8% branches** (173 tests).
 
 ## File Structure
 
@@ -265,6 +265,9 @@ test/
   strategies.test.ts — Strategy unit tests
   glob.test.ts      — Glob matcher tests
   compress.test.ts  — Compress tool tests
+docs/
+  context-compaction-research.md — Literature catalog and implementation backlog
+  code-review.md    — Direct source findings
 ```
 
 ## Compatibility

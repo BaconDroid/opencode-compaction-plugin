@@ -1,7 +1,7 @@
 # opencode-live-compaction installer for Windows
 #
 # Usage:
-#   irm https://raw.githubusercontent.com/nahuelcio/opencode-live-compaction/master/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/BaconDroid/opencode-live-compaction/master/install.ps1 | iex
 #   # or from a local clone:
 #   .\install.ps1
 #   .\install.ps1 C:\path\to\project
@@ -29,7 +29,7 @@ if (Test-Path (Join-Path $ScriptDir "src\index.ts")) {
 } else {
     Write-Host "[info]  Downloading from GitHub..." -ForegroundColor Cyan
     $TmpDir = Join-Path $env:TEMP "opencode-live-compaction-$(Get-Random)"
-    git clone --depth 1 https://github.com/nahuelcio/opencode-live-compaction.git "$TmpDir" 2>$null
+    git clone --depth 1 https://github.com/BaconDroid/opencode-live-compaction.git "$TmpDir" 2>$null
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[error] Failed to clone repository" -ForegroundColor Red
         exit 1
