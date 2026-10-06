@@ -103,6 +103,18 @@ describe("FilesTouchedTracker", () => {
 			expect(tracker.renderManifest()).toContain("`D`");
 		});
 
+		it("tracks patch tool calls as edits", () => {
+			const tracker = new FilesTouchedTracker();
+			tracker.processToolCall("patch", { filePath: "src/patched.ts" });
+			expect(tracker.renderManifest()).toContain("`E`");
+		});
+
+		it("tracks multiedit tool calls as edits", () => {
+			const tracker = new FilesTouchedTracker();
+			tracker.processToolCall("multiedit", { filePath: "src/multi.ts" });
+			expect(tracker.renderManifest()).toContain("`E`");
+		});
+
 		it("extracts paths from bash commands", () => {
 			const tracker = new FilesTouchedTracker();
 			tracker.processToolCall("bash", { command: "cat src/config.json" });

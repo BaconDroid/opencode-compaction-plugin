@@ -426,6 +426,31 @@ describe("LiveCompactionPlugin", () => {
 			// Empty focus after trim — treated as plain /compact
 			expect(output.handled).toBe(false);
 		});
+
+		it("scopes the focus directive to the command's session", async () => {
+			const hooks = await getHooks();
+
+			await hooks["command.execute.before"]!(
+				{ command: "compact", args: "focus Scoped goal", sessionID: "sess-scoped" } as any,
+				{ handled: false, message: undefined },
+			);
+
+			// A different session must not receive the directive.
+			const other = { context: [], prompt: undefined };
+			await hooks["experimental.session.compacting"]!(
+				{ sessionID: "sess-other" },
+				other,
+			);
+			expect(other.prompt).not.toContain("Scoped goal");
+
+			// The owning session receives and consumes it.
+			const own = { context: [], prompt: undefined };
+			await hooks["experimental.session.compacting"]!(
+				{ sessionID: "sess-scoped" },
+				own,
+			);
+			expect(own.prompt).toContain("Scoped goal");
+		});
 	});
 
 	// ---------------------------------------------------------------------------
