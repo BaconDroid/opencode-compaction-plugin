@@ -126,6 +126,29 @@ describe("loadConfig()", () => {
 		expect(cfg.enabled).toBe(true);
 	});
 
+	it("loads live-compaction.jsonc with trailing commas", () => {
+		const jsonc = `{
+			"enabled": false,
+			"dedup": { "enabled": false },
+		}`;
+		writeFileSync(join(TMP_DIR, ".opencode", "live-compaction.jsonc"), jsonc);
+		const cfg = loadConfig(TMP_DIR);
+		expect(cfg.enabled).toBe(false);
+		expect(cfg.dedup.enabled).toBe(false);
+	});
+
+	it("reports parse errors through the onError callback", () => {
+		writeFileSync(
+			join(TMP_DIR, ".opencode", "live-compaction.json"),
+			"not valid json {{{",
+		);
+		const errors: string[] = [];
+		const cfg = loadConfig(TMP_DIR, (message) => errors.push(message));
+		expect(errors).toHaveLength(1);
+		expect(errors[0]).toContain("failed to parse");
+		expect(cfg.enabled).toBe(true);
+	});
+
 	it("handles JSONC with escaped quotes in strings", () => {
 		const jsonc = `{ "key": "value with \\"quotes\\" inside" }`;
 		writeFileSync(join(TMP_DIR, ".opencode", "live-compaction.json"), jsonc);

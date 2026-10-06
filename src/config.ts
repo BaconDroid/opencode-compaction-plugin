@@ -141,7 +141,10 @@ const CONFIG_FILE_NAMES = ["live-compaction.json", "live-compaction.jsonc"];
  * Returns merged config (user values override defaults).
  * Returns defaults if no config file is found.
  */
-export function loadConfig(projectDir: string): ReturnType<typeof mergeConfig> {
+export function loadConfig(
+	projectDir: string,
+	onError?: (message: string, error?: unknown) => void,
+): ReturnType<typeof mergeConfig> {
 	const dotDir = join(projectDir, ".opencode");
 
 	for (const name of CONFIG_FILE_NAMES) {
@@ -149,12 +152,13 @@ export function loadConfig(projectDir: string): ReturnType<typeof mergeConfig> {
 		if (existsSync(configPath)) {
 			try {
 				const raw = readFileSync(configPath, "utf-8");
-				// Strip JSONC comments (// and /* */) for .jsonc support
-				const stripped = stripJsonComments(raw);
+				// Strip JSONC comments and trailing commas for .jsonc support
+				const stripped = stripTrailingCommas(stripJsonComments(raw));
 				const parsed = JSON.parse(stripped) as LiveCompactionConfig;
 				return mergeConfig(parsed);
-			} catch {
-				// Fall through to defaults on parse error
+			} catch (error) {
+				// Report and continue to the next candidate / defaults
+				onError?.(`failed to parse ${configPath}`, error);
 			}
 		}
 	}
@@ -248,6 +252,52 @@ function stripJsonComments(json: string): string {
 				}
 				i++; // skip the /
 				continue;
+			}
+		}
+
+		result += ch;
+	}
+
+	return result;
+}
+
+/** Remove trailing commas before `}` or `]`, ignoring commas inside strings. */
+function stripTrailingCommas(json: string): string {
+	let result = "";
+	let inString = false;
+	let escape = false;
+
+	for (let i = 0; i < json.length; i++) {
+		const ch = json[i];
+
+		if (escape) {
+			result += ch;
+			escape = false;
+			continue;
+		}
+
+		if (ch === "\\" && inString) {
+			result += ch;
+			escape = true;
+			continue;
+		}
+
+		if (ch === '"') {
+			inString = !inString;
+			result += ch;
+			continue;
+		}
+
+		if (inString) {
+			result += ch;
+			continue;
+		}
+
+		if (ch === ",") {
+			let j = i + 1;
+			while (j < json.length && /\s/.test(json[j])) j++;
+			if (json[j] === "}" || json[j] === "]") {
+				continue; // drop the trailing comma
 			}
 		}
 

@@ -840,6 +840,50 @@ describe("LiveCompactionPlugin", () => {
 			});
 			expect(messages[0].parts[0].state.output).toBe(longContent);
 		});
+
+		it("detects protected files passed via state.input", async () => {
+			const dotDir = join(TMP_DIR, ".opencode");
+			if (!existsSync(dotDir)) mkdirSync(dotDir, { recursive: true });
+			writeFileSync(
+				join(dotDir, "live-compaction.json"),
+				JSON.stringify({ protectedFilePatterns: ["AGENTS.md"] }),
+			);
+			const hooks = await LiveCompactionPlugin({
+				...mockCtx,
+				directory: TMP_DIR,
+			} as any);
+
+			const longContent = "x".repeat(2000);
+			// Tool at index 0, pushed out of the turn window by 5 user turns.
+			const messages = [
+				{
+					info: { role: "assistant" },
+					parts: [
+						{
+							type: "tool",
+							tool: "read",
+							state: {
+								output: longContent,
+								input: JSON.stringify({ filePath: "AGENTS.md" }),
+							},
+						},
+					],
+				},
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r1" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r2" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r3" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r4" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r5" }] },
+			];
+			await hooks["experimental.chat.messages.transform"]!({} as any, {
+				messages,
+			});
+			expect(messages[0].parts[0].state.output).toBe(longContent);
+		});
 	});
 
 	// ---------------------------------------------------------------------------
