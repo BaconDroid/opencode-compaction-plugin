@@ -1,8 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-	buildCompactionPrompt,
-	COMPACTION_SYSTEM_PROMPT,
-} from "../src/prompt.ts";
+import { buildCompactionPrompt } from "../src/prompt.ts";
 
 describe("buildCompactionPrompt()", () => {
 	it("returns a non-empty string", () => {
@@ -89,16 +86,5 @@ describe("buildCompactionPrompt()", () => {
 		expect(prompt).toContain("## Files Touched Manifest");
 		expect(prompt).toContain("<focus-directive>");
 		expect(prompt).toContain("Update config for production");
-	});
-});
-
-describe("COMPACTION_SYSTEM_PROMPT", () => {
-	it("is a non-empty string", () => {
-		expect(typeof COMPACTION_SYSTEM_PROMPT).toBe("string");
-		expect(COMPACTION_SYSTEM_PROMPT.length).toBeGreaterThan(0);
-	});
-
-	it("mentions summarizer role", () => {
-		expect(COMPACTION_SYSTEM_PROMPT.toLowerCase()).toContain("summariz");
 	});
 });

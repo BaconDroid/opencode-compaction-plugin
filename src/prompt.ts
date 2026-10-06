@@ -80,9 +80,3 @@ Rules:
 - The "Task Continuity" section must describe the exact moment where work stopped so the next agent can resume seamlessly.
 - The "Mandatory Reading" section must list files that hold critical state (e.g., partially edited files, config files being modified, test files being fixed).`;
 }
-
-/**
- * System prompt for the compaction summarizer.
- * This is sent as the system message alongside the user prompt.
- */
-export const COMPACTION_SYSTEM_PROMPT = `You are an expert context summarizer for AI coding sessions. Your summaries preserve every detail needed for seamless continuation after context compaction. You never mention compaction or summarization in your output.`;
