@@ -58,7 +58,9 @@ export class FilesTouchedTracker {
 				break;
 			}
 			case "edit":
-			case "file_edit": {
+			case "file_edit":
+			case "patch":
+			case "multiedit": {
 				const path = extractPath(args, ["filePath", "path", "file"]);
 				if (path) this.record(path, "E");
 				break;
@@ -100,7 +102,7 @@ export class FilesTouchedTracker {
 		return [
 			"## Files Touched Manifest",
 			"",
-			"Operations: `R`=read, `W`=write, `E`=edit, `D`=delete",
+			"Operations: `R`=read, `W`=write, `E`=edit, `M`=move, `D`=delete",
 			"",
 			...lines,
 		].join("\n");

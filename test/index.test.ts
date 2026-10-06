@@ -719,7 +719,42 @@ describe("LiveCompactionPlugin", () => {
 			expect(messages[1].parts[0].state.output).toBe("new content");
 		});
 
-		it("purges large inputs from errored tools", async () => {
+		it("purges large inputs from errored tools outside the recent window", async () => {
+			const hooks = await getHooks();
+			const bigInput = "x".repeat(500);
+			const messages = [
+				{
+					info: { role: "assistant" },
+					parts: [
+						{
+							type: "tool",
+							tool: "bash",
+							state: {
+								status: "error",
+								output: "command failed",
+								input: bigInput,
+							},
+						},
+					],
+				},
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r1" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r2" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r3" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r4" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r5" }] },
+			];
+			await hooks["experimental.chat.messages.transform"]!({} as any, {
+				messages,
+			});
+			expect(messages[0].parts[0].state.input).toContain("purged");
+			expect(messages[0].parts[0].state.output).toBe("command failed");
+		});
+
+		it("preserves recent errored tool inputs", async () => {
 			const hooks = await getHooks();
 			const bigInput = "x".repeat(500);
 			const messages = [
@@ -741,8 +776,7 @@ describe("LiveCompactionPlugin", () => {
 			await hooks["experimental.chat.messages.transform"]!({} as any, {
 				messages,
 			});
-			expect(messages[0].parts[0].state.input).toContain("purged");
-			expect(messages[0].parts[0].state.output).toBe("command failed");
+			expect(messages[0].parts[0].state.input).toBe(bigInput);
 		});
 	});
 
