@@ -144,9 +144,14 @@ export function applyCompressions(
 		// Count how many messages we're replacing
 		const count = end - start + 1;
 
+		// Choose a role that does not collide with the preceding message, so the
+		// synthetic block does not create two consecutive same-role messages.
+		const prevRole = messages[start - 1]?.info?.role;
+		const role = prevRole === "user" ? "assistant" : "user";
+
 		// Create a synthetic summary message
 		const summaryMessage: Message = {
-			info: { role: "user" },
+			info: { role },
 			parts: [
 				{
 					type: "text",
