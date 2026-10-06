@@ -132,12 +132,18 @@ function buildTrimMap(config: LiveCompactionConfig): Record<string, number> {
 	};
 }
 
+const TRIMMED_MARKER = /\n\.\.\. \[trimmed \d+\/\d+ chars\]$/;
+
 function trimToolOutput(
 	toolName: string,
 	output: string,
 	trimMap: Record<string, number>,
 	defaultLimit: number,
 ): string {
+	// Already trimmed in a previous transform pass: leave it as-is so the
+	// retained tail is not re-sliced and eroded on every message batch.
+	if (TRIMMED_MARKER.test(output)) return output;
+
 	const limit = trimMap[toolName] ?? defaultLimit;
 	if (output.length <= limit) return output;
 

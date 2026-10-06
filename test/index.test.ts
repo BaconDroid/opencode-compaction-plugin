@@ -584,6 +584,40 @@ describe("LiveCompactionPlugin", () => {
 			);
 		});
 
+		it("does not re-trim an already trimmed output", async () => {
+			const hooks = await getHooks();
+			const longOutput = "x".repeat(5000);
+			const messages = [
+				{
+					info: { role: "assistant" },
+					parts: [
+						{ type: "tool", tool: "bash", state: { output: longOutput } },
+					],
+				},
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r1" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r2" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r3" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r4" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r5" }] },
+			];
+
+			await hooks["experimental.chat.messages.transform"]!({} as any, {
+				messages,
+			});
+			const firstPass = (messages[0].parts[0] as any).state.output;
+			expect(firstPass).toContain("[trimmed");
+
+			// Second pass must be a no-op on the already trimmed output.
+			await hooks["experimental.chat.messages.transform"]!({} as any, {
+				messages,
+			});
+			expect((messages[0].parts[0] as any).state.output).toBe(firstPass);
+		});
+
 		it("handles messages without tool parts", async () => {
 			const hooks = await getHooks();
 			const messages = [
