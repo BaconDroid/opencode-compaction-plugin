@@ -33,8 +33,8 @@ Replacing an arbitrary index range with a single `role:"user"` message can break
 message-sequence expectations (consecutive user turns / role alternation) on some
 providers. Lower severity than B1/B2 because whole messages are replaced (tool
 parts are not split), but worth guarding.
-→ Deferred: changing the role has provider-specific tradeoffs and no test
-coverage. Documented, not changed.
+→ Resolved (#11): the block now picks a role that avoids a collision with the
+preceding message (assistant after a user turn, otherwise user).
 
 ---
 
@@ -123,22 +123,23 @@ Additional findings surfaced while re-reading the merged result.
 `sessionTrackers`, `focusDirectives`, `pendingFocus`, and `pendingCompressions`
 live at module scope. If `LiveCompactionPlugin` is instantiated more than once in
 the same process, state is shared (tests already rely on this implicitly).
-→ Note: acceptable if OpenCode instantiates once per app; otherwise encapsulate
-per instance. Deferred.
+→ Resolved (#10): state now lives inside `LiveCompactionPlugin`, and the
+compression queue is a per-instance `CompressionStore`.
 
 ### N2 — Deferred compression requests can accumulate
 `src/index.ts:354-378`
 A request whose `callID` never appears in a conversation is re-queued on every
 transform and never expires. Requests carry a `timestamp`, so a max-age drop is
 possible.
-→ Note: low risk (bounded by session lifetime); deferred.
+→ Resolved (#10): deferred requests older than 30 minutes are dropped.
 
 ### N3 — Transform hook `input` is ignored
 `src/index.ts:347`
 `experimental.chat.messages.transform` receives `input` (currently unused). If
 OpenCode supplies a `sessionID` there, scoping could be direct instead of via
 `callID` matching.
-→ Verify against the OpenCode SDK; deferred.
+→ Resolved (#10): the hook now uses `input.sessionID` when present, falling
+back to `callID` matching.
 
 ### N4 — `COMPACTION_SYSTEM_PROMPT` unused by the plugin
 `src/prompt.ts:88`
@@ -146,8 +147,6 @@ Exported and unit-tested, but never wired into the compaction hook. Kept as a
 reserved/public constant.
 → Documented, not changed.
 
-### B3 — role of the compressed block (from above)
-Deferred: `applyCompressions` still emits a `role:"user"` message. Changing the
-role has provider-specific tradeoffs and no test coverage; left as a documented
-limitation.
+### B3 — role of the compressed block
+Resolved (#11): see above.
 
