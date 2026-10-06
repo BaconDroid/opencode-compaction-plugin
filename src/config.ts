@@ -7,6 +7,7 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { homedir } from "node:os";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -134,36 +135,78 @@ export const DEFAULT_CONFIG: Required<
 const CONFIG_FILE_NAMES = ["live-compaction.json", "live-compaction.jsonc"];
 
 /**
- * Load config from a project directory. Searches for:
- *   <projectDir>/.opencode/live-compaction.json
- *   <projectDir>/.opencode/live-compaction.jsonc
+ * Directory of the global OpenCode config. Uses `XDG_CONFIG_HOME` when set
+ * (which also covers the Flatpak layout) and falls back to `~/.config`.
+ */
+export function globalConfigDir(): string {
+	const xdg = process.env.XDG_CONFIG_HOME;
+	const base = xdg && xdg.trim() ? xdg : join(homedir(), ".config");
+	return join(base, "opencode");
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function deepMerge(
+	base: LiveCompactionConfig,
+	override: LiveCompactionConfig,
+): LiveCompactionConfig {
+	const out: Record<string, unknown> = { ...base };
+	for (const [key, value] of Object.entries(override)) {
+		const current = out[key];
+		out[key] =
+			isPlainObject(value) && isPlainObject(current)
+				? deepMerge(
+						current as LiveCompactionConfig,
+						value as LiveCompactionConfig,
+					)
+				: value;
+	}
+	return out as LiveCompactionConfig;
+}
+
+function readConfigDir(
+	dir: string,
+	onError?: (message: string, error?: unknown) => void,
+): LiveCompactionConfig | undefined {
+	for (const name of CONFIG_FILE_NAMES) {
+		const configPath = join(dir, name);
+		if (!existsSync(configPath)) continue;
+		try {
+			const raw = readFileSync(configPath, "utf-8");
+			const stripped = stripTrailingCommas(stripJsonComments(raw));
+			return JSON.parse(stripped) as LiveCompactionConfig;
+		} catch (error) {
+			onError?.(`failed to parse ${configPath}`, error);
+		}
+	}
+	return undefined;
+}
+
+/**
+ * Load config with precedence, low to high:
+ *   defaults < global config file < plugin options < project-local config file.
  *
- * Returns merged config (user values override defaults).
- * Returns defaults if no config file is found.
+ * The global file lives in the OpenCode config directory (see
+ * {@link globalConfigDir}); the project file lives in `<project>/.opencode/`.
  */
 export function loadConfig(
 	projectDir: string,
 	onError?: (message: string, error?: unknown) => void,
+	overrides?: LiveCompactionConfig,
 ): ReturnType<typeof mergeConfig> {
-	const dotDir = join(projectDir, ".opencode");
+	let user: LiveCompactionConfig = {};
 
-	for (const name of CONFIG_FILE_NAMES) {
-		const configPath = join(dotDir, name);
-		if (existsSync(configPath)) {
-			try {
-				const raw = readFileSync(configPath, "utf-8");
-				// Strip JSONC comments and trailing commas for .jsonc support
-				const stripped = stripTrailingCommas(stripJsonComments(raw));
-				const parsed = JSON.parse(stripped) as LiveCompactionConfig;
-				return mergeConfig(parsed);
-			} catch (error) {
-				// Report and continue to the next candidate / defaults
-				onError?.(`failed to parse ${configPath}`, error);
-			}
-		}
-	}
+	const globalConfig = readConfigDir(globalConfigDir(), onError);
+	if (globalConfig) user = deepMerge(user, globalConfig);
 
-	return mergeConfig({});
+	if (overrides) user = deepMerge(user, overrides);
+
+	const projectConfig = readConfigDir(join(projectDir, ".opencode"), onError);
+	if (projectConfig) user = deepMerge(user, projectConfig);
+
+	return mergeConfig(user);
 }
 
 /**

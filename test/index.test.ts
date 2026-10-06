@@ -4,13 +4,19 @@ import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 const TMP_DIR = join(import.meta.dirname, "__tmp_index_test");
+const ORIGINAL_XDG = process.env.XDG_CONFIG_HOME;
 
 function setupTmp() {
 	if (existsSync(TMP_DIR)) rmSync(TMP_DIR, { recursive: true });
 	mkdirSync(TMP_DIR, { recursive: true });
+	mkdirSync(join(TMP_DIR, "xdg"), { recursive: true });
+	// Isolate the global config dir so the machine's real config is not read.
+	process.env.XDG_CONFIG_HOME = join(TMP_DIR, "xdg");
 }
 
 function cleanupTmp() {
+	if (ORIGINAL_XDG === undefined) delete process.env.XDG_CONFIG_HOME;
+	else process.env.XDG_CONFIG_HOME = ORIGINAL_XDG;
 	if (existsSync(TMP_DIR)) rmSync(TMP_DIR, { recursive: true });
 }
 
@@ -815,6 +821,15 @@ describe("LiveCompactionPlugin", () => {
 			const opencodeConfig: Record<string, unknown> = {};
 			await (hooks as any).config(opencodeConfig);
 			expect(opencodeConfig.command).toHaveProperty("compact");
+		});
+
+		it("honors plugin options", async () => {
+			const hooks = await LiveCompactionPlugin(mockCtx as any, {
+				commands: { enabled: false },
+			} as any);
+			const opencodeConfig: Record<string, unknown> = {};
+			await (hooks as any).config(opencodeConfig);
+			expect(opencodeConfig.command).toBeUndefined();
 		});
 	});
 

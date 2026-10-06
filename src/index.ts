@@ -213,12 +213,16 @@ function makeLogger(client: PluginInput["client"], enabled: boolean) {
 // Plugin
 // ---------------------------------------------------------------------------
 
-export const LiveCompactionPlugin: Plugin = async (ctx) => {
-	// Load config from project directory
+export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
+	// Load config (defaults < global file < plugin options < project file)
 	const configWarnings: string[] = [];
-	const config = loadConfig(ctx.directory, (message) => {
-		configWarnings.push(message);
-	});
+	const config = loadConfig(
+		ctx.directory,
+		(message) => {
+			configWarnings.push(message);
+		},
+		options as LiveCompactionConfig | undefined,
+	);
 	const logger = makeLogger(ctx.client, config.debug ?? false);
 
 	// Surface config problems regardless of the debug flag.

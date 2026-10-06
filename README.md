@@ -163,17 +163,26 @@ Tool outputs from recent conversation turns are protected from trimming. The las
 
 ## Configuration
 
-No configuration needed — the plugin works out of the box with sensible defaults. To customize, create a config file at:
+No configuration needed — the plugin works out of the box with sensible defaults. To customize, create a config file at one of:
 
 ```
-.opencode/live-compaction.json
+.opencode/live-compaction.json          # project-local
+$XDG_CONFIG_HOME/opencode/live-compaction.json   # global (~/.config/opencode/...)
 ```
 
-or (with comment support):
+or the same names with the `.jsonc` extension (comments and trailing commas allowed).
 
+You can also configure the plugin inline through the `opencode.json` plugin entry:
+
+```json
+{
+  "plugin": [
+    ["github:BaconDroid/opencode-live-compaction", { "trim": { "bash": 1000 } }]
+  ]
+}
 ```
-.opencode/live-compaction.jsonc
-```
+
+Precedence, low to high: **defaults → global file → plugin options → project file**.
 
 ### Default Configuration
 
