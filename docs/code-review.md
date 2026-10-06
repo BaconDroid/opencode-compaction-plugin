@@ -55,9 +55,10 @@ discarding the user's configuration.
 → Fix: strip trailing commas; surface parse errors via the plugin logger.
 
 ### S3 — `COMPACTION_SYSTEM_PROMPT` never used
-`src/prompt.ts:86-88` exports a system prompt that is never wired into the
+`src/prompt.ts` exports a system prompt that is never wired into the
 compaction hook (only `output.prompt` is set).
-→ Fix: document as reserved, or wire it if the API supports a system message.
+→ Resolved: same as N4 — the constant was removed (the hook has no system
+field).
 
 ---
 
@@ -95,8 +96,10 @@ replaces any existing `compact` command definition.
 → Fix: preserve an existing `compact` command.
 
 ### C3 — `makeLogger` passes a string to `client.app.log`
-`src/index.ts:198-208`. The OpenCode `app.log` API may expect a structured
-object. **Not changed** — API shape unverified and the test asserts a string.
+`src/index.ts`. The OpenCode `app.log` API expects
+`{ body: { service, level, message, extra? } }` (verified in `@opencode-ai/sdk`).
+→ Resolved: the logger and config warnings now call the structured API; the
+logger test asserts on `body.service`/`body.message`.
 
 ---
 
@@ -142,10 +145,10 @@ OpenCode supplies a `sessionID` there, scoping could be direct instead of via
 back to `callID` matching.
 
 ### N4 — `COMPACTION_SYSTEM_PROMPT` unused by the plugin
-`src/prompt.ts:88`
-Exported and unit-tested, but never wired into the compaction hook. Kept as a
-reserved/public constant.
-→ Documented, not changed.
+`src/prompt.ts`
+Exported and unit-tested, but never wired: the `experimental.session.compacting`
+hook output only exposes `context` and `prompt`, with no system-message field.
+→ Resolved: the unused constant and its test were removed.
 
 ### B3 — role of the compressed block
 Resolved (#11): see above.

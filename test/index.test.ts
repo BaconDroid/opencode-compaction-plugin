@@ -77,7 +77,8 @@ describe("LiveCompactionPlugin", () => {
 				directory: TMP_DIR,
 			} as any);
 			expect(logSpy).toHaveBeenCalled();
-			expect(logSpy.mock.calls[0][0]).toContain("[live-compaction]");
+			expect(logSpy.mock.calls[0][0].body.service).toBe("live-compaction");
+			expect(logSpy.mock.calls[0][0].body.message).toContain("initialized");
 		});
 	});
 

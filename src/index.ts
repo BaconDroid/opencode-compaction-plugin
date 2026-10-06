@@ -38,7 +38,18 @@ import {
 // ---------------------------------------------------------------------------
 
 interface PluginInput {
-	client: { app: { log: (input: unknown) => Promise<void> } };
+	client: {
+		app: {
+			log: (input: {
+				body: {
+					service: string;
+					level: "debug" | "info" | "warn" | "error";
+					message: string;
+					extra?: Record<string, unknown>;
+				};
+			}) => Promise<unknown>;
+		};
+	};
 	project: { id: string; name: string };
 	directory: string;
 	worktree: string;
@@ -201,9 +212,14 @@ function makeLogger(client: PluginInput["client"], enabled: boolean) {
 	return {
 		info: (msg: string, data?: unknown) => {
 			if (enabled) {
-				client.app.log(
-					`[live-compaction] ${msg}${data ? " " + JSON.stringify(data) : ""}`,
-				);
+				client.app.log({
+					body: {
+						service: "live-compaction",
+						level: "info",
+						message: msg,
+						extra: data as Record<string, unknown> | undefined,
+					},
+				});
 			}
 		},
 	};
@@ -227,7 +243,9 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 
 	// Surface config problems regardless of the debug flag.
 	for (const warning of configWarnings) {
-		ctx.client.app.log(`[live-compaction] ${warning}`);
+		ctx.client.app.log({
+			body: { service: "live-compaction", level: "warn", message: warning },
+		});
 	}
 
 	// Build trim limits map once
