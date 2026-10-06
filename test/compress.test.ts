@@ -262,6 +262,7 @@ describe("applyCompressions()", () => {
 		expect(msgs[0].parts[0].text).toContain("&quot;");
 		expect(msgs[0].parts[0].text).toContain("&lt;");
 		expect(msgs[0].parts[0].text).toContain("&gt;");
+		expect(msgs[0].parts[0].text).toContain("&amp;");
 	});
 
 	it("handles start > end gracefully", () => {

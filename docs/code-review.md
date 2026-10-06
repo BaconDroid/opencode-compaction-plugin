@@ -155,3 +155,36 @@ hook output only exposes `context` and `prompt`, with no system-message field.
 ### B3 — role of the compressed block
 Resolved (#11): see above.
 
+---
+
+## Re-validation 2
+
+Findings from a fresh pass over the merged code.
+
+### E1 — The `enabled` kill switch was ignored
+`src/config.ts` defines `enabled` (default true) and the README documents it as
+"enable/disable the entire plugin", but `index.ts` never read it.
+→ Resolved: `enabled: false` now returns an empty hooks object (all hooks off).
+
+### E2 — `config` hook corrupted a string permission
+`src/index.ts` spread `opencodeConfig.permission` into an object. When
+permission is the global shorthand string (e.g. `"permission": "allow"`, as in
+the deployed config), `{ ..."allow" }` produced a character map, corrupting the
+permission config.
+→ Resolved: a string permission is left untouched; an object permission gets
+`compress: "allow"` unless it explicitly denies compress.
+
+### E3 — `OP_LABELS` was dead code
+`src/files-touched.ts` defined `OP_LABELS` but `renderManifest` hard-coded the
+legend.
+→ Resolved: the legend is now derived from `OP_LABELS`.
+
+### E4 — `getRecentTurnIndices` with `turns <= 0`
+A non-positive protected-turn count still protected trailing messages.
+→ Resolved: returns an empty set for `turns <= 0`.
+
+### E5 — `escapeAttr` did not escape `&`
+The compressed-block topic escaped quotes and angle brackets but not `&`.
+→ Resolved: `&` is escaped first.
+
+
