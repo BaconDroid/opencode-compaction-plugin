@@ -33,47 +33,42 @@ export interface CompressRequest {
 }
 
 // ---------------------------------------------------------------------------
-// Pending compressions storage (per-session)
+// Pending compressions storage (per instance, per session)
 // ---------------------------------------------------------------------------
 
-const pendingCompressions = new Map<string, CompressRequest[]>();
-
 /**
- * Queue a compression request for a session.
+ * Per-plugin-instance store of pending compression requests. Kept as a class so
+ * state is not shared between plugin instances in the same process.
  */
-export function queueCompression(
-	sessionID: string,
-	request: CompressRequest,
-): void {
-	let queue = pendingCompressions.get(sessionID);
-	if (!queue) {
-		queue = [];
-		pendingCompressions.set(sessionID, queue);
+export class CompressionStore {
+	private queues = new Map<string, CompressRequest[]>();
+
+	/** Queue a compression request for a session. */
+	queue(sessionID: string, request: CompressRequest): void {
+		let queue = this.queues.get(sessionID);
+		if (!queue) {
+			queue = [];
+			this.queues.set(sessionID, queue);
+		}
+		queue.push(request);
 	}
-	queue.push(request);
-}
 
-/**
- * Get and clear pending compressions for a session.
- */
-export function drainCompressions(sessionID: string): CompressRequest[] {
-	const queue = pendingCompressions.get(sessionID) ?? [];
-	pendingCompressions.delete(sessionID);
-	return queue.sort((a, b) => b.start - a.start); // Process from end to start
-}
+	/** Get and clear pending compressions for a session (newest range first). */
+	drain(sessionID: string): CompressRequest[] {
+		const queue = this.queues.get(sessionID) ?? [];
+		this.queues.delete(sessionID);
+		return queue.sort((a, b) => b.start - a.start); // Process from end to start
+	}
 
-/**
- * Clear all pending compressions for a session.
- */
-export function clearCompressions(sessionID: string): void {
-	pendingCompressions.delete(sessionID);
-}
+	/** Clear all pending compressions for a session. */
+	clear(sessionID: string): void {
+		this.queues.delete(sessionID);
+	}
 
-/**
- * Clear all pending compressions (for dispose).
- */
-export function clearAllCompressions(): void {
-	pendingCompressions.clear();
+	/** Clear every pending compression (for dispose). */
+	clearAll(): void {
+		this.queues.clear();
+	}
 }
 
 // ---------------------------------------------------------------------------
