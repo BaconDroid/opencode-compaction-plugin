@@ -3,7 +3,7 @@
 # opencode-live-compaction installer
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/nahuelcio/opencode-live-compaction/master/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/BaconDroid/opencode-live-compaction/master/install.sh | bash
 #   # or from a local clone:
 #   ./install.sh
 #   ./install.sh /path/to/project
@@ -54,7 +54,7 @@ else
 	# Download from GitHub
 	info "Downloading from GitHub..."
 	TMP_DIR="$(mktemp -d)"
-	git clone --depth 1 https://github.com/nahuelcio/opencode-live-compaction.git "$TMP_DIR/repo" 2>/dev/null ||
+	git clone --depth 1 https://github.com/BaconDroid/opencode-live-compaction.git "$TMP_DIR/repo" 2>/dev/null ||
 		error "Failed to clone repository"
 	SRC_DIR="${TMP_DIR}/repo/src"
 fi

@@ -15,6 +15,10 @@
     "ai-coding"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BaconDroid/opencode-live-compaction.git"
+  },
   "peerDependencies": {
     "@opencode-ai/plugin": ">=0.1.0"
   },
