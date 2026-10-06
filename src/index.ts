@@ -30,6 +30,7 @@ import {
 	queueCompression,
 	drainCompressions,
 	applyCompressions,
+	selectCompressions,
 	clearCompressions,
 	clearAllCompressions,
 } from "./compress.js";
@@ -114,6 +115,10 @@ function getTracker(sessionID: string): FilesTouchedTracker {
 
 // Track which sessions have pending focus directives (set via /compact:focus)
 const focusDirectives = new Map<string, string>();
+
+// Fallback when the command hook does not expose a sessionID: a single pending
+// directive consumed by the next compaction, instead of leaking to all sessions.
+let pendingFocus: string | undefined;
 
 // ---------------------------------------------------------------------------
 // Tool output trimming (uses config limits + protected patterns + turn protection)
@@ -258,6 +263,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx) => {
 						end: a.end,
 						summary: a.summary,
 						timestamp: Date.now(),
+						callID: input.callID,
 					});
 					logger.info("compress queued", {
 						sessionID,
@@ -282,10 +288,15 @@ export const LiveCompactionPlugin: Plugin = async (ctx) => {
 			// Clear tracker after compaction since old operations are now in the summary
 			tracker.clear();
 
-			// Check for pending focus directive (from /compact:focus)
-			const focus = focusDirectives.get(sessionID);
+			// Check for pending focus directive (from /compact:focus).
+			// Prefer a session-scoped directive; otherwise consume the single
+			// pending fallback so it is applied at most once.
+			let focus = focusDirectives.get(sessionID);
 			if (focus) {
 				focusDirectives.delete(sessionID);
+			} else if (pendingFocus) {
+				focus = pendingFocus;
+				pendingFocus = undefined;
 			}
 
 			// Build the enhanced prompt
@@ -312,14 +323,22 @@ export const LiveCompactionPlugin: Plugin = async (ctx) => {
 			const messages = output.messages;
 
 			// 0. Apply pending compressions (from compress tool calls)
-			// We need the sessionID but the transform hook doesn't provide it.
-			// Since compressions are rare, we check all sessions.
+			// The transform hook doesn't provide a sessionID, so we scope each
+			// request by the callID of its compress tool call: only requests whose
+			// callID appears in this conversation are applied. Others stay queued.
 			for (const [sid] of sessionTrackers) {
 				const requests = drainCompressions(sid);
-				if (requests.length > 0) {
+				if (requests.length === 0) continue;
+
+				const { applicable, deferred } = selectCompressions(
+					messages as Parameters<typeof selectCompressions>[0],
+					requests,
+				);
+
+				if (applicable.length > 0) {
 					const replaced = applyCompressions(
 						messages as Parameters<typeof applyCompressions>[0],
-						requests,
+						applicable,
 					);
 					if (replaced > 0) {
 						logger.info("compress applied", {
@@ -328,6 +347,9 @@ export const LiveCompactionPlugin: Plugin = async (ctx) => {
 						});
 					}
 				}
+
+				// Re-queue requests that belong to a different conversation.
+				for (const req of deferred) queueCompression(sid, req);
 			}
 
 			// 1. Compute turn-protected indices (messages within last N user turns)
@@ -398,12 +420,15 @@ export const LiveCompactionPlugin: Plugin = async (ctx) => {
 				const focusMatch = args?.match(/^focus\s+(\S.+)$/i);
 				if (focusMatch) {
 					const directive = focusMatch[1].trim();
-					for (const [sid] of sessionTrackers) {
+					const sid = (input as { sessionID?: string }).sessionID;
+					if (sid) {
 						focusDirectives.set(sid, directive);
+					} else {
+						pendingFocus = directive;
 					}
 					output.handled = true;
 					output.message = `Focus directive set: "${directive}"\nWill be applied on next compaction.`;
-					logger.info("focus directive set", { directive });
+					logger.info("focus directive set", { directive, sessionScoped: !!sid });
 				} else {
 					output.handled = false;
 				}
@@ -437,6 +462,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx) => {
 		dispose: async () => {
 			sessionTrackers.clear();
 			focusDirectives.clear();
+			pendingFocus = undefined;
 			clearAllCompressions();
 		},
 

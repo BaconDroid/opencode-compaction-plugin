@@ -28,6 +28,8 @@ export interface CompressRequest {
 	summary: string;
 	/** Timestamp for ordering */
 	timestamp: number;
+	/** callID of the compress tool call that produced this request */
+	callID?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -84,8 +86,44 @@ interface Message {
 		type: string;
 		text?: string;
 		tool?: string;
+		callID?: string;
 		[key: string]: unknown;
 	}>;
+}
+
+/**
+ * Split compression requests into those that belong to the given message array
+ * and those that must be deferred.
+ *
+ * A request is applicable when its originating `callID` appears in the messages
+ * (i.e. the compress tool call is part of this conversation). Requests without a
+ * `callID` are treated as applicable for backward compatibility. This prevents a
+ * compression queued for one session from being applied to another session's
+ * messages by index.
+ */
+export function selectCompressions(
+	messages: Message[],
+	requests: CompressRequest[],
+): { applicable: CompressRequest[]; deferred: CompressRequest[] } {
+	const present = new Set<string>();
+	for (const msg of messages) {
+		for (const part of msg.parts ?? []) {
+			if (typeof part.callID === "string") present.add(part.callID);
+		}
+	}
+
+	const applicable: CompressRequest[] = [];
+	const deferred: CompressRequest[] = [];
+
+	for (const req of requests) {
+		if (!req.callID || present.has(req.callID)) {
+			applicable.push(req);
+		} else {
+			deferred.push(req);
+		}
+	}
+
+	return { applicable, deferred };
 }
 
 /**

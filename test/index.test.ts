@@ -319,6 +319,29 @@ describe("LiveCompactionPlugin", () => {
 			expect(output.prompt).toContain("Fix the auth bug");
 			expect(output.prompt).toContain("<focus-directive>");
 		});
+
+		it("applies the focus directive to only one compaction", async () => {
+			const hooks = await getHooks();
+
+			await hooks["command.execute.before"]!(
+				{ command: "compact", args: "focus Only once" },
+				{ handled: false, message: undefined },
+			);
+
+			const first = { context: [], prompt: undefined };
+			await hooks["experimental.session.compacting"]!(
+				{ sessionID: "sess-f1" },
+				first,
+			);
+			expect(first.prompt).toContain("Only once");
+
+			const second = { context: [], prompt: undefined };
+			await hooks["experimental.session.compacting"]!(
+				{ sessionID: "sess-f2" },
+				second,
+			);
+			expect(second.prompt).not.toContain("Only once");
+		});
 	});
 
 	// ---------------------------------------------------------------------------
@@ -991,7 +1014,15 @@ describe("LiveCompactionPlugin", () => {
 				},
 				{
 					info: { role: "user" },
-					parts: [{ type: "text", text: "next task" }],
+					parts: [
+						{ type: "text", text: "next task" },
+						{
+							type: "tool",
+							tool: "compress",
+							callID: "c-comp",
+							state: { output: "compressed" },
+						},
+					],
 				},
 			];
 
@@ -1004,6 +1035,53 @@ describe("LiveCompactionPlugin", () => {
 			expect(messages[0].parts[0].text).toContain("Auth Bug Fix");
 			expect(messages[0].parts[0].text).toContain("compressed-block");
 			expect(messages[1].parts[0].text).toBe("next task");
+		});
+
+		it("does not apply a compression to a different session's messages", async () => {
+			const hooks = await getHooks();
+
+			await hooks["tool.execute.after"]!(
+				{
+					tool: "compress",
+					sessionID: "sess-A",
+					callID: "c-A",
+					args: { topic: "A", start: 0, end: 1, summary: "sumA" },
+				},
+				{ title: "", output: "", metadata: {} },
+			);
+
+			// Transform a conversation that does NOT contain c-A: untouched.
+			const other = [
+				{ info: { role: "user" }, parts: [{ type: "text", text: "x" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "y" }] },
+			];
+			await hooks["experimental.chat.messages.transform"]!({} as any, {
+				messages: other,
+			});
+			expect(other).toHaveLength(2);
+			expect((other[0].parts[0] as any).text).toBe("x");
+
+			// Transform the owning conversation: compression applies.
+			const own = [
+				{ info: { role: "user" }, parts: [{ type: "text", text: "x" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "y" }] },
+				{
+					info: { role: "assistant" },
+					parts: [
+						{
+							type: "tool",
+							tool: "compress",
+							callID: "c-A",
+							state: { output: "ok" },
+						},
+					],
+				},
+			];
+			await hooks["experimental.chat.messages.transform"]!({} as any, {
+				messages: own,
+			});
+			expect(own).toHaveLength(2); // 3 - 2 + 1 = 2
+			expect((own[0].parts[0] as any).text).toContain("sumA");
 		});
 	});
 });
