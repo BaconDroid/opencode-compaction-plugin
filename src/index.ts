@@ -159,6 +159,7 @@ function getRecentTurnIndices(
 	protectedTurns: number,
 ): Set<number> {
 	const recentIndices = new Set<number>();
+	if (protectedTurns <= 0) return recentIndices;
 	let userTurnsFromEnd = 0;
 
 	// Walk backwards from the end
@@ -246,6 +247,12 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		ctx.client.app.log({
 			body: { service: "live-compaction", level: "warn", message: warning },
 		});
+	}
+
+	// Kill switch: `enabled: false` disables every hook.
+	if (!config.enabled) {
+		logger.info("plugin disabled via config");
+		return {};
 	}
 
 	// Build trim limits map once
@@ -542,15 +549,14 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		// Config: register compress tool + slash commands with OpenCode
 		// -----------------------------------------------------------------------
 		config: async (opencodeConfig: Record<string, unknown>) => {
-			// Register compress tool if permission allows
-			const permission = opencodeConfig.permission as
-				| Record<string, unknown>
-				| undefined;
-			if (!permission || permission.compress !== "deny") {
-				opencodeConfig.permission = {
-					...(permission ?? {}),
-					compress: "allow",
-				};
+			// Ensure the compress tool is permitted, without clobbering a global
+			// permission string (e.g. "permission": "allow") or an explicit deny.
+			const permission = opencodeConfig.permission;
+			if (typeof permission !== "string") {
+				const map = (permission as Record<string, unknown> | undefined) ?? {};
+				if (map.compress !== "deny") {
+					opencodeConfig.permission = { ...map, compress: "allow" };
+				}
 			}
 
 			// Register slash commands (do not clobber a user-defined `compact`)

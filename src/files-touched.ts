@@ -99,10 +99,14 @@ export class FilesTouchedTracker {
 			return `- \`${entry.path}\` ${badges}`;
 		});
 
+		const legend = Object.entries(OP_LABELS)
+			.map(([op, label]) => `\`${op}\`=${label}`)
+			.join(", ");
+
 		return [
 			"## Files Touched Manifest",
 			"",
-			"Operations: `R`=read, `W`=write, `E`=edit, `M`=move, `D`=delete",
+			`Operations: ${legend}`,
 			"",
 			...lines,
 		].join("\n");

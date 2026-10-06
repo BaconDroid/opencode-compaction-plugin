@@ -80,6 +80,21 @@ describe("LiveCompactionPlugin", () => {
 			expect(logSpy.mock.calls[0][0].body.service).toBe("live-compaction");
 			expect(logSpy.mock.calls[0][0].body.message).toContain("initialized");
 		});
+
+		it("returns no hooks when disabled via config", async () => {
+			const dotDir = join(TMP_DIR, ".opencode");
+			if (!existsSync(dotDir)) mkdirSync(dotDir, { recursive: true });
+			writeFileSync(
+				join(dotDir, "live-compaction.json"),
+				JSON.stringify({ enabled: false }),
+			);
+			const hooks = await LiveCompactionPlugin({
+				...mockCtx,
+				directory: TMP_DIR,
+			} as any);
+			expect(hooks["tool.execute.after"]).toBeUndefined();
+			expect((hooks as any).tool).toBeUndefined();
+		});
 	});
 
 	// ---------------------------------------------------------------------------
@@ -860,6 +875,34 @@ describe("LiveCompactionPlugin", () => {
 			const opencodeConfig: Record<string, unknown> = {};
 			await (hooks as any).config(opencodeConfig);
 			expect(opencodeConfig.command).toBeUndefined();
+		});
+
+		it("does not corrupt a global permission string", async () => {
+			const hooks = await getHooks();
+			const opencodeConfig: Record<string, unknown> = { permission: "allow" };
+			await (hooks as any).config(opencodeConfig);
+			expect(opencodeConfig.permission).toBe("allow");
+		});
+
+		it("adds the compress permission to an object permission", async () => {
+			const hooks = await getHooks();
+			const opencodeConfig: Record<string, unknown> = {
+				permission: { bash: "ask" },
+			};
+			await (hooks as any).config(opencodeConfig);
+			expect(opencodeConfig.permission).toEqual({
+				bash: "ask",
+				compress: "allow",
+			});
+		});
+
+		it("respects an explicit compress deny", async () => {
+			const hooks = await getHooks();
+			const opencodeConfig: Record<string, unknown> = {
+				permission: { compress: "deny" },
+			};
+			await (hooks as any).config(opencodeConfig);
+			expect(opencodeConfig.permission).toEqual({ compress: "deny" });
 		});
 	});
 
