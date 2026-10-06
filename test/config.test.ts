@@ -9,14 +9,20 @@ import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 const TMP_DIR = join(import.meta.dirname, "__tmp_config_test");
+const ORIGINAL_XDG = process.env.XDG_CONFIG_HOME;
 
 function setupTmp() {
 	if (existsSync(TMP_DIR)) rmSync(TMP_DIR, { recursive: true });
 	mkdirSync(TMP_DIR, { recursive: true });
 	mkdirSync(join(TMP_DIR, ".opencode"), { recursive: true });
+	mkdirSync(join(TMP_DIR, "xdg"), { recursive: true });
+	// Isolate the global config dir so the machine's real config is not read.
+	process.env.XDG_CONFIG_HOME = join(TMP_DIR, "xdg");
 }
 
 function cleanupTmp() {
+	if (ORIGINAL_XDG === undefined) delete process.env.XDG_CONFIG_HOME;
+	else process.env.XDG_CONFIG_HOME = ORIGINAL_XDG;
 	if (existsSync(TMP_DIR)) rmSync(TMP_DIR, { recursive: true });
 }
 
@@ -147,6 +153,50 @@ describe("loadConfig()", () => {
 		expect(errors).toHaveLength(1);
 		expect(errors[0]).toContain("failed to parse");
 		expect(cfg.enabled).toBe(true);
+	});
+
+	it("loads the global config when no project file exists", () => {
+		mkdirSync(join(TMP_DIR, "xdg", "opencode"), { recursive: true });
+		writeFileSync(
+			join(TMP_DIR, "xdg", "opencode", "live-compaction.json"),
+			JSON.stringify({ trim: { bash: 111 } }),
+		);
+		const cfg = loadConfig(TMP_DIR);
+		expect(cfg.trim.bash).toBe(111);
+	});
+
+	it("lets the project config override the global config", () => {
+		mkdirSync(join(TMP_DIR, "xdg", "opencode"), { recursive: true });
+		writeFileSync(
+			join(TMP_DIR, "xdg", "opencode", "live-compaction.json"),
+			JSON.stringify({ trim: { bash: 111, read: 222 } }),
+		);
+		writeFileSync(
+			join(TMP_DIR, ".opencode", "live-compaction.json"),
+			JSON.stringify({ trim: { bash: 999 } }),
+		);
+		const cfg = loadConfig(TMP_DIR);
+		expect(cfg.trim.bash).toBe(999);
+		expect(cfg.trim.read).toBe(222);
+	});
+
+	it("applies plugin options over the global config", () => {
+		mkdirSync(join(TMP_DIR, "xdg", "opencode"), { recursive: true });
+		writeFileSync(
+			join(TMP_DIR, "xdg", "opencode", "live-compaction.json"),
+			JSON.stringify({ trim: { bash: 111 } }),
+		);
+		const cfg = loadConfig(TMP_DIR, undefined, { trim: { bash: 777 } });
+		expect(cfg.trim.bash).toBe(777);
+	});
+
+	it("lets the project config override plugin options", () => {
+		writeFileSync(
+			join(TMP_DIR, ".opencode", "live-compaction.json"),
+			JSON.stringify({ trim: { bash: 999 } }),
+		);
+		const cfg = loadConfig(TMP_DIR, undefined, { trim: { bash: 777 } });
+		expect(cfg.trim.bash).toBe(999);
 	});
 
 	it("handles JSONC with escaped quotes in strings", () => {
