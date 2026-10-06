@@ -95,6 +95,8 @@ interface Hooks {
 		input: { command: string; args: string },
 		output: { handled: boolean; message?: string },
 	) => Promise<void>;
+	config?: (config: Record<string, unknown>) => Promise<void>;
+	tool?: Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------
@@ -374,11 +376,16 @@ export const LiveCompactionPlugin: Plugin = async (ctx) => {
 				}
 			}
 
-			// 4. Purge errored tool inputs
+			// 4. Purge errored tool inputs (older than purgeErrors.turns)
 			if (config.purgeErrors?.enabled) {
+				const purgeProtected = getRecentTurnIndices(
+					messages,
+					config.purgeErrors.turns ?? 4,
+				);
 				const purged = applyPurgeErrors(
 					messages as Parameters<typeof applyPurgeErrors>[0],
 					config,
+					purgeProtected,
 				);
 				if (purged > 0) {
 					logger.info("error purge applied", { count: purged });
@@ -455,14 +462,14 @@ export const LiveCompactionPlugin: Plugin = async (ctx) => {
 				};
 			}
 
-			// Register slash commands
+			// Register slash commands (do not clobber a user-defined `compact`)
 			if (config.commands?.enabled) {
 				const existing = opencodeConfig.command as
 					| Record<string, unknown>
 					| undefined;
 				opencodeConfig.command = {
 					...(existing ?? {}),
-					compact: {
+					compact: (existing?.compact as Record<string, unknown>) ?? {
 						template: "",
 						description:
 							"Trigger compaction. Use /compact:focus <directive> to set a focus goal.",
@@ -475,7 +482,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx) => {
 		// Compress tool definition
 		// -----------------------------------------------------------------------
 		tool: buildCompressToolDef(),
-	} as Hooks;
+	};
 };
 
 export default LiveCompactionPlugin;

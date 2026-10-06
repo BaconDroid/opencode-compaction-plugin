@@ -153,11 +153,14 @@ export function findErroredParts(
 /**
  * Strip the input content from errored tool calls.
  * The error output is preserved; only the potentially large input is removed.
+ * Message indices in `protectedIndices` (recent turns) are skipped so an error
+ * the agent may still be working on is not purged.
  * Returns the number of parts purged.
  */
 export function applyPurgeErrors(
 	messages: Message[],
 	config: LiveCompactionConfig,
+	protectedIndices?: Set<number>,
 ): number {
 	if (!config.purgeErrors?.enabled) return 0;
 
@@ -165,6 +168,7 @@ export function applyPurgeErrors(
 	let purged = 0;
 
 	for (const { msgIdx, partIdx } of erroredParts) {
+		if (protectedIndices?.has(msgIdx)) continue;
 		const part = messages[msgIdx].parts[partIdx];
 		if (part.state?.input && typeof part.state.input === "string") {
 			const inputLen = part.state.input.length;
