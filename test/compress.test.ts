@@ -294,4 +294,25 @@ describe("applyCompressions()", () => {
 		expect(count).toBe(1);
 		expect(msgs).toHaveLength(2); // 2 - 1 + 1 = 2
 	});
+
+	it("avoids a consecutive user message", () => {
+		const msgs = [
+			makeMsg("user", "u0"),
+			makeMsg("assistant", "a1"),
+			makeMsg("user", "u2"),
+		];
+		applyCompressions(msgs as any, [
+			{ topic: "T", start: 1, end: 1, summary: "S", timestamp: 1000 },
+		]);
+		// Preceding message is a user message, so the block becomes assistant.
+		expect(msgs[1].info.role).toBe("assistant");
+	});
+
+	it("uses user when the preceding message is assistant or absent", () => {
+		const msgs = [makeMsg("assistant", "a0"), makeMsg("user", "u1")];
+		applyCompressions(msgs as any, [
+			{ topic: "T", start: 0, end: 0, summary: "S", timestamp: 1000 },
+		]);
+		expect(msgs[0].info.role).toBe("user");
+	});
 });
