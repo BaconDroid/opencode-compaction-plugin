@@ -181,13 +181,22 @@ function hasProtectedFilePath(
 ): boolean {
 	if (protectedPatterns.length === 0) return false;
 
-	const args = (part as Record<string, unknown>).args;
-	if (typeof args !== "object" || args === null) return false;
+	// Mirror the dedup lookup: args may live under `args` or `state.input`,
+	// and `state.input` may be a JSON string.
+	const raw = (part as Record<string, unknown>).args ?? part.state?.input;
+	let args: Record<string, unknown> | undefined;
+	if (typeof raw === "string") {
+		try {
+			args = JSON.parse(raw) as Record<string, unknown>;
+		} catch {
+			args = undefined;
+		}
+	} else if (raw && typeof raw === "object") {
+		args = raw as Record<string, unknown>;
+	}
+	if (!args) return false;
 
-	const paths = extractFilePaths(
-		part.tool ?? "",
-		args as Record<string, unknown>,
-	);
+	const paths = extractFilePaths(part.tool ?? "", args);
 	return isFileProtected(paths, protectedPatterns);
 }
 
@@ -213,8 +222,16 @@ function makeLogger(client: PluginInput["client"], enabled: boolean) {
 
 export const LiveCompactionPlugin: Plugin = async (ctx) => {
 	// Load config from project directory
-	const config = loadConfig(ctx.directory);
+	const configWarnings: string[] = [];
+	const config = loadConfig(ctx.directory, (message) => {
+		configWarnings.push(message);
+	});
 	const logger = makeLogger(ctx.client, config.debug ?? false);
+
+	// Surface config problems regardless of the debug flag.
+	for (const warning of configWarnings) {
+		ctx.client.app.log(`[live-compaction] ${warning}`);
+	}
 
 	// Build trim limits map once
 	const trimMap = buildTrimMap(config);
