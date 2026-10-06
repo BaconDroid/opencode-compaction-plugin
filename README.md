@@ -38,8 +38,8 @@ curl -fsSL https://raw.githubusercontent.com/BaconDroid/opencode-live-compaction
 
 ```powershell
 irm https://raw.githubusercontent.com/BaconDroid/opencode-live-compaction/master/install.ps1 | iex
-# or specify a project directory:
-irm https://raw.githubusercontent.com/BaconDroid/opencode-live-compaction/master/install.ps1 | iex -TargetDir C:\path\to\project
+# or specify a project directory (iex does not forward parameters):
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/BaconDroid/opencode-live-compaction/master/install.ps1))) -TargetDir C:\path\to\project
 ```
 
 ### Option 3: npm plugin
@@ -51,6 +51,8 @@ Add to your `opencode.json`:
   "plugin": ["opencode-live-compaction"]
 }
 ```
+
+> Requires the package to be published on npm. Until then, use Option 1, 2 or 4.
 
 ### Option 4: Manual
 
