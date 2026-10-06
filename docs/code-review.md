@@ -77,9 +77,11 @@ purging but the purge is immediate.
 → Fix: gate the purge on the protected-turn window.
 
 ### R3 — Session state cleanup is partial
-`src/index.ts:423` only clears on `session.deleted`; sessions ending otherwise
-leave trackers behind.
-→ Note only (OpenCode event coverage unknown).
+`src/index.ts` cleared on `session.deleted`, but the handler read
+`properties.sessionID` while the SDK event carries `properties.info.id`, so the
+cleanup never ran.
+→ Resolved: the handler now reads `info.id` (with a `sessionID` fallback) and
+clears the tracker, focus directive and compression queue.
 
 ---
 

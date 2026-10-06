@@ -514,11 +514,16 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		// -----------------------------------------------------------------------
 		event: async ({ event }) => {
 			if (event.type === "session.deleted") {
-				const props = event.properties as { sessionID?: string } | undefined;
-				if (props?.sessionID) {
-					sessionTrackers.delete(props.sessionID);
-					focusDirectives.delete(props.sessionID);
-					compressions.clear(props.sessionID);
+				// The SDK event carries the session under `info.id`; older
+				// payloads used `sessionID`. Accept both.
+				const props = event.properties as
+					| { sessionID?: string; info?: { id?: string } }
+					| undefined;
+				const sessionID = props?.sessionID ?? props?.info?.id;
+				if (sessionID) {
+					sessionTrackers.delete(sessionID);
+					focusDirectives.delete(sessionID);
+					compressions.clear(sessionID);
 				}
 			}
 		},

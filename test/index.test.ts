@@ -498,6 +498,35 @@ describe("LiveCompactionPlugin", () => {
 			expect(output.prompt).not.toContain("y.ts");
 		});
 
+		it("cleans up trackers on session.deleted with the SDK payload shape", async () => {
+			const hooks = await getHooks();
+
+			await hooks["tool.execute.after"]!(
+				{
+					tool: "read",
+					sessionID: "sess-del2",
+					callID: "c1",
+					args: { filePath: "z.ts" },
+				},
+				{ title: "", output: "", metadata: {} },
+			);
+
+			await hooks.event!({
+				event: {
+					id: "evt-2",
+					type: "session.deleted",
+					properties: { info: { id: "sess-del2" } },
+				},
+			});
+
+			const output = { context: [], prompt: undefined };
+			await hooks["experimental.session.compacting"]!(
+				{ sessionID: "sess-del2" },
+				output,
+			);
+			expect(output.prompt).not.toContain("z.ts");
+		});
+
 		it("ignores other event types", async () => {
 			const hooks = await getHooks();
 			// Should not throw
