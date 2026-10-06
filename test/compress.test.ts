@@ -1,9 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
-	queueCompression,
-	drainCompressions,
-	clearCompressions,
-	clearAllCompressions,
+	CompressionStore,
 	applyCompressions,
 	buildCompressToolDef,
 	type CompressRequest,
@@ -25,16 +22,17 @@ describe("buildCompressToolDef()", () => {
 });
 
 // ---------------------------------------------------------------------------
-// queue / drain / clear
+// CompressionStore: queue / drain / clear
 // ---------------------------------------------------------------------------
 
-describe("compression queue", () => {
+describe("CompressionStore", () => {
+	let store: CompressionStore;
 	beforeEach(() => {
-		clearAllCompressions();
+		store = new CompressionStore();
 	});
 
 	it("queues and drains compressions for a session", () => {
-		queueCompression("sess-1", {
+		store.queue("sess-1", {
 			topic: "Test",
 			start: 0,
 			end: 5,
@@ -42,14 +40,14 @@ describe("compression queue", () => {
 			timestamp: 1000,
 		});
 
-		const drained = drainCompressions("sess-1");
+		const drained = store.drain("sess-1");
 		expect(drained).toHaveLength(1);
 		expect(drained[0].topic).toBe("Test");
 		expect(drained[0].summary).toBe("Summary of messages 0-5");
 	});
 
 	it("drain clears the queue", () => {
-		queueCompression("sess-2", {
+		store.queue("sess-2", {
 			topic: "Test",
 			start: 0,
 			end: 3,
@@ -57,25 +55,25 @@ describe("compression queue", () => {
 			timestamp: 1000,
 		});
 
-		drainCompressions("sess-2");
-		const second = drainCompressions("sess-2");
+		store.drain("sess-2");
+		const second = store.drain("sess-2");
 		expect(second).toHaveLength(0);
 	});
 
 	it("returns empty array for unknown session", () => {
-		const drained = drainCompressions("unknown");
+		const drained = store.drain("unknown");
 		expect(drained).toHaveLength(0);
 	});
 
 	it("drains in reverse order by start index", () => {
-		queueCompression("sess-3", {
+		store.queue("sess-3", {
 			topic: "First",
 			start: 0,
 			end: 3,
 			summary: "First summary",
 			timestamp: 1000,
 		});
-		queueCompression("sess-3", {
+		store.queue("sess-3", {
 			topic: "Second",
 			start: 5,
 			end: 8,
@@ -83,44 +81,58 @@ describe("compression queue", () => {
 			timestamp: 2000,
 		});
 
-		const drained = drainCompressions("sess-3");
+		const drained = store.drain("sess-3");
 		expect(drained).toHaveLength(2);
 		// Should be sorted by start descending (process from end to start)
 		expect(drained[0].start).toBe(5);
 		expect(drained[1].start).toBe(0);
 	});
 
-	it("clearCompressions removes queue for a session", () => {
-		queueCompression("sess-4", {
+	it("clear removes the queue for a session", () => {
+		store.queue("sess-4", {
 			topic: "Test",
 			start: 0,
 			end: 3,
 			summary: "Summary",
 			timestamp: 1000,
 		});
-		clearCompressions("sess-4");
-		const drained = drainCompressions("sess-4");
+		store.clear("sess-4");
+		const drained = store.drain("sess-4");
 		expect(drained).toHaveLength(0);
 	});
 
-	it("clearAllCompressions removes all queues", () => {
-		queueCompression("sess-5", {
+	it("clearAll removes all queues", () => {
+		store.queue("sess-5", {
 			topic: "A",
 			start: 0,
 			end: 3,
 			summary: "A",
 			timestamp: 1000,
 		});
-		queueCompression("sess-6", {
+		store.queue("sess-6", {
 			topic: "B",
 			start: 0,
 			end: 3,
 			summary: "B",
 			timestamp: 2000,
 		});
-		clearAllCompressions();
-		expect(drainCompressions("sess-5")).toHaveLength(0);
-		expect(drainCompressions("sess-6")).toHaveLength(0);
+		store.clearAll();
+		expect(store.drain("sess-5")).toHaveLength(0);
+		expect(store.drain("sess-6")).toHaveLength(0);
+	});
+
+	it("keeps state per instance", () => {
+		const a = new CompressionStore();
+		const b = new CompressionStore();
+		a.queue("s", {
+			topic: "A",
+			start: 0,
+			end: 1,
+			summary: "A",
+			timestamp: 1000,
+		});
+		expect(a.drain("s")).toHaveLength(1);
+		expect(b.drain("s")).toHaveLength(0);
 	});
 });
 

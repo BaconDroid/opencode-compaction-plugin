@@ -27,12 +27,9 @@ import { applyDedup, applyPurgeErrors } from "./strategies.js";
 import { extractFilePaths, isFileProtected } from "./glob.js";
 import {
 	buildCompressToolDef,
-	queueCompression,
-	drainCompressions,
+	CompressionStore,
 	applyCompressions,
 	selectCompressions,
-	clearCompressions,
-	clearAllCompressions,
 } from "./compress.js";
 
 // ---------------------------------------------------------------------------
@@ -101,26 +98,9 @@ interface Hooks {
 }
 
 // ---------------------------------------------------------------------------
-// Per-session state
+// Per-instance state lives inside LiveCompactionPlugin so it is not shared
+// between plugin instances in the same process.
 // ---------------------------------------------------------------------------
-
-const sessionTrackers = new Map<string, FilesTouchedTracker>();
-
-function getTracker(sessionID: string): FilesTouchedTracker {
-	let tracker = sessionTrackers.get(sessionID);
-	if (!tracker) {
-		tracker = new FilesTouchedTracker();
-		sessionTrackers.set(sessionID, tracker);
-	}
-	return tracker;
-}
-
-// Track which sessions have pending focus directives (set via /compact:focus)
-const focusDirectives = new Map<string, string>();
-
-// Fallback when the command hook does not expose a sessionID: a single pending
-// directive consumed by the next compaction, instead of leaking to all sessions.
-let pendingFocus: string | undefined;
 
 // ---------------------------------------------------------------------------
 // Tool output trimming (uses config limits + protected patterns + turn protection)
@@ -261,6 +241,24 @@ export const LiveCompactionPlugin: Plugin = async (ctx) => {
 		turnProtection: turnProtectionEnabled ? protectedTurns : "off",
 	});
 
+	// Per-instance state
+	const sessionTrackers = new Map<string, FilesTouchedTracker>();
+	const focusDirectives = new Map<string, string>();
+	const compressions = new CompressionStore();
+	let pendingFocus: string | undefined;
+
+	const getTracker = (sessionID: string): FilesTouchedTracker => {
+		let tracker = sessionTrackers.get(sessionID);
+		if (!tracker) {
+			tracker = new FilesTouchedTracker();
+			sessionTrackers.set(sessionID, tracker);
+		}
+		return tracker;
+	};
+
+	// Deferred compression requests older than this are dropped (N2).
+	const DEFERRED_COMPRESSION_MAX_AGE_MS = 30 * 60 * 1000;
+
 	return {
 		// -----------------------------------------------------------------------
 		// Track file operations + capture compress tool calls
@@ -282,7 +280,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx) => {
 					typeof a.end === "number" &&
 					typeof a.summary === "string"
 				) {
-					queueCompression(sessionID, {
+					compressions.queue(sessionID, {
 						topic: a.topic,
 						start: a.start,
 						end: a.end,
@@ -344,15 +342,22 @@ export const LiveCompactionPlugin: Plugin = async (ctx) => {
 		// Compress + trim + dedup + purge + protected patterns + turn protection
 		// Runs BEFORE OpenCode's own 2000-char truncation.
 		// -----------------------------------------------------------------------
-		"experimental.chat.messages.transform": async (_input, output) => {
+		"experimental.chat.messages.transform": async (input, output) => {
 			const messages = output.messages;
 
-			// 0. Apply pending compressions (from compress tool calls)
-			// The transform hook doesn't provide a sessionID, so we scope each
-			// request by the callID of its compress tool call: only requests whose
-			// callID appears in this conversation are applied. Others stay queued.
-			for (const [sid] of sessionTrackers) {
-				const requests = drainCompressions(sid);
+			// 0. Apply pending compressions (from compress tool calls).
+			// Prefer the sessionID when the hook provides it; otherwise scope each
+			// request by the callID of its compress tool call, so a compression
+			// queued for one session is never applied to another. Non-matching
+			// requests stay queued until they expire.
+			const inputSession =
+				typeof input.sessionID === "string" ? input.sessionID : undefined;
+			const sessions = inputSession
+				? [inputSession]
+				: [...sessionTrackers.keys()];
+
+			for (const sid of sessions) {
+				const requests = compressions.drain(sid);
 				if (requests.length === 0) continue;
 
 				const { applicable, deferred } = selectCompressions(
@@ -373,8 +378,18 @@ export const LiveCompactionPlugin: Plugin = async (ctx) => {
 					}
 				}
 
-				// Re-queue requests that belong to a different conversation.
-				for (const req of deferred) queueCompression(sid, req);
+				// Re-queue requests for a different conversation, unless stale.
+				const now = Date.now();
+				for (const req of deferred) {
+					if (now - req.timestamp < DEFERRED_COMPRESSION_MAX_AGE_MS) {
+						compressions.queue(sid, req);
+					} else {
+						logger.info("compress deferred request expired", {
+							sessionID: sid,
+							topic: req.topic,
+						});
+					}
+				}
 			}
 
 			// 1. Compute turn-protected indices (messages within last N user turns)
@@ -481,7 +496,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx) => {
 				if (props?.sessionID) {
 					sessionTrackers.delete(props.sessionID);
 					focusDirectives.delete(props.sessionID);
-					clearCompressions(props.sessionID);
+					compressions.clear(props.sessionID);
 				}
 			}
 		},
@@ -493,7 +508,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx) => {
 			sessionTrackers.clear();
 			focusDirectives.clear();
 			pendingFocus = undefined;
-			clearAllCompressions();
+			compressions.clearAll();
 		},
 
 		// -----------------------------------------------------------------------

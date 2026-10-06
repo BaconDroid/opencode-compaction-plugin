@@ -1220,5 +1220,100 @@ describe("LiveCompactionPlugin", () => {
 			expect(own).toHaveLength(2); // 3 - 2 + 1 = 2
 			expect((own[0].parts[0] as any).text).toContain("sumA");
 		});
+
+		it("scopes compression processing to the transform sessionID", async () => {
+			const hooks = await getHooks();
+
+			await hooks["tool.execute.after"]!(
+				{
+					tool: "compress",
+					sessionID: "sess-A",
+					callID: "c-A",
+					args: { topic: "A", start: 0, end: 1, summary: "sumA" },
+				},
+				{ title: "", output: "", metadata: {} },
+			);
+
+			const build = () => [
+				{ info: { role: "user" }, parts: [{ type: "text", text: "x" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "y" }] },
+				{
+					info: { role: "assistant" },
+					parts: [
+						{
+							type: "tool",
+							tool: "compress",
+							callID: "c-A",
+							state: { output: "ok" },
+						},
+					],
+				},
+			];
+
+			// A different sessionID must not process session A's queue.
+			const wrong = build();
+			await hooks["experimental.chat.messages.transform"]!(
+				{ sessionID: "sess-B" } as any,
+				{ messages: wrong },
+			);
+			expect(wrong).toHaveLength(3);
+
+			// The owning sessionID applies it.
+			const right = build();
+			await hooks["experimental.chat.messages.transform"]!(
+				{ sessionID: "sess-A" } as any,
+				{ messages: right },
+			);
+			expect(right).toHaveLength(2);
+			expect((right[0].parts[0] as any).text).toContain("sumA");
+		});
+
+		it("drops stale deferred compressions", async () => {
+			const hooks = await getHooks();
+			await hooks["tool.execute.after"]!(
+				{
+					tool: "compress",
+					sessionID: "sess-stale",
+					callID: "c-stale",
+					args: { topic: "Old", start: 0, end: 1, summary: "old" },
+				},
+				{ title: "", output: "", metadata: {} },
+			);
+
+			// Jump past the 30-minute TTL for deferred requests.
+			const realNow = Date.now;
+			Date.now = () => realNow() + 31 * 60 * 1000;
+			try {
+				// First transform (no c-stale) defers then expires the request.
+				await hooks["experimental.chat.messages.transform"]!({} as any, {
+					messages: [
+						{ info: { role: "user" }, parts: [{ type: "text", text: "x" }] },
+					],
+				});
+
+				// The owning conversation must not see the expired request.
+				const own = [
+					{ info: { role: "user" }, parts: [{ type: "text", text: "x" }] },
+					{
+						info: { role: "assistant" },
+						parts: [
+							{
+								type: "tool",
+								tool: "compress",
+								callID: "c-stale",
+								state: { output: "ok" },
+							},
+						],
+					},
+				];
+				await hooks["experimental.chat.messages.transform"]!({} as any, {
+					messages: own,
+				});
+				expect(own).toHaveLength(2);
+				expect((own[0].parts[0] as any).text).toBe("x");
+			} finally {
+				Date.now = realNow;
+			}
+		});
 	});
 });
