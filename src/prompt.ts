@@ -13,7 +13,7 @@ export function buildCompactionPrompt(input: {
 	focusDirective?: string;
 }): string {
 	const filesBlock = input.filesTouched
-		? `\n\n## Files Touched\n${input.filesTouched}`
+		? `\n\n${input.filesTouched}`
 		: "";
 
 	const focusBlock = input.focusDirective

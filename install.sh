@@ -65,12 +65,14 @@ fi
 mkdir -p "$PLUGIN_DIR"
 
 # --- Copy source files ---
-for file in index.ts prompt.ts files-touched.ts; do
-	if [[ -f "${SRC_DIR}/${file}" ]]; then
-		cp "${SRC_DIR}/${file}" "${PLUGIN_DIR}/${file}"
-	else
-		error "Missing source file: ${file}"
-	fi
+shopt -s nullglob
+src_files=("${SRC_DIR}"/*.ts)
+shopt -u nullglob
+if [[ ${#src_files[@]} -eq 0 ]]; then
+	error "No TypeScript sources found in ${SRC_DIR}"
+fi
+for src in "${src_files[@]}"; do
+	cp "$src" "${PLUGIN_DIR}/$(basename "$src")"
 done
 
 # --- Create entry point barrel file ---
@@ -82,9 +84,10 @@ export { LiveCompactionPlugin, default } from "./live-compaction/index.ts"
 BARREL
 
 # --- Verify ---
-FILES_COUNT="$(find "$PLUGIN_DIR" -name '*.ts' | wc -l)"
-if [[ "$FILES_COUNT" -lt 3 ]]; then
-	error "Expected 3 files, found ${FILES_COUNT}"
+SRC_COUNT="${#src_files[@]}"
+FILES_COUNT="$(find "$PLUGIN_DIR" -maxdepth 1 -name '*.ts' | wc -l | tr -d ' ')"
+if [[ "$FILES_COUNT" -lt "$SRC_COUNT" ]]; then
+	error "Expected ${SRC_COUNT} files, found ${FILES_COUNT}"
 fi
 
 if [[ ! -f "$ENTRY_FILE" ]]; then
@@ -92,10 +95,7 @@ if [[ ! -f "$ENTRY_FILE" ]]; then
 fi
 
 ok "Plugin installed:"
-ok "  ${PLUGIN_DIR}/"
-ok "    ├── index.ts"
-ok "    ├── prompt.ts"
-ok "    └── files-touched.ts"
+ok "  ${PLUGIN_DIR}/ (${FILES_COUNT} TypeScript files)"
 ok "  ${ENTRY_FILE} (entry point)"
 
 # --- Check if opencode.json exists and suggest plugin entry ---

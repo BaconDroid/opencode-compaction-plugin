@@ -46,21 +46,17 @@ if (-not (Test-Path $SrcDir)) {
 New-Item -ItemType Directory -Path $PluginDir -Force | Out-Null
 
 # Copy source files
-$files = @("index.ts", "prompt.ts", "files-touched.ts")
+$files = Get-ChildItem -Path $SrcDir -Filter "*.ts" -File
+if ($files.Count -eq 0) {
+    Write-Host "[error] No TypeScript sources found in $SrcDir" -ForegroundColor Red
+    exit 1
+}
 foreach ($file in $files) {
-    $src = Join-Path $SrcDir $file
-    if (Test-Path $src) {
-        Copy-Item $src (Join-Path $PluginDir $file) -Force
-    } else {
-        Write-Host "[error] Missing source file: $file" -ForegroundColor Red
-        exit 1
-    }
+    Copy-Item $file.FullName (Join-Path $PluginDir $file.Name) -Force
 }
 
-Write-Host "[ok]    Plugin installed to $PluginDir\" -ForegroundColor Green
-Write-Host "[ok]      +-- index.ts" -ForegroundColor Green
-Write-Host "[ok]      +-- prompt.ts" -ForegroundColor Green
-Write-Host "[ok]      +-- files-touched.ts" -ForegroundColor Green
+$installed = (Get-ChildItem -Path $PluginDir -Filter "*.ts" -File).Count
+Write-Host "[ok]    Plugin installed to $PluginDir\ ($installed TypeScript files)" -ForegroundColor Green
 
 # Create entry point barrel file
 # OpenCode scans .opencode/plugins/*.ts (not subdirs)

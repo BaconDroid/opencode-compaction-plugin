@@ -52,9 +52,9 @@ describe("buildCompactionPrompt()", () => {
 
 	it("includes files block when filesTouched is provided", () => {
 		const prompt = buildCompactionPrompt({
-			filesTouched: "- `src/app.ts` `R` `E`",
+			filesTouched: "## Files Touched Manifest\n\n- `src/app.ts` `R` `E`",
 		});
-		expect(prompt).toContain("## Files Touched");
+		expect(prompt).toContain("## Files Touched Manifest");
 		expect(prompt).toContain("- `src/app.ts` `R` `E`");
 	});
 
@@ -83,10 +83,10 @@ describe("buildCompactionPrompt()", () => {
 
 	it("combines files and focus together", () => {
 		const prompt = buildCompactionPrompt({
-			filesTouched: "- `config.json` `W`",
+			filesTouched: "## Files Touched Manifest\n\n- `config.json` `W`",
 			focusDirective: "Update config for production",
 		});
-		expect(prompt).toContain("## Files Touched");
+		expect(prompt).toContain("## Files Touched Manifest");
 		expect(prompt).toContain("<focus-directive>");
 		expect(prompt).toContain("Update config for production");
 	});
