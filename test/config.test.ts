@@ -191,6 +191,25 @@ describe("loadConfig()", () => {
 		expect(cfg.purgeErrors.turns).toBe(10);
 	});
 
+	it("preserves slashes and escapes inside JSONC strings", () => {
+		writeFileSync(
+			join(TMP_DIR, ".opencode", "live-compaction.jsonc"),
+			`{
+				"debug": true,
+				"url": "https://example.com/a//b",
+				"note": "he said \\"hi\\"",
+			}`,
+		);
+		const cfg = loadConfig(TMP_DIR) as unknown as {
+			debug: boolean;
+			url?: string;
+			note?: string;
+		};
+		expect(cfg.debug).toBe(true);
+		expect(cfg.url).toBe("https://example.com/a//b");
+		expect(cfg.note).toBe('he said "hi"');
+	});
+
 	it("falls back to defaults on invalid JSON and reports the error", () => {
 		writeFileSync(
 			join(TMP_DIR, ".opencode", "live-compaction.json"),

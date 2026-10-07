@@ -24,8 +24,6 @@ export interface EvictionConfig {
 	protectPrologue?: boolean;
 	/** Message indices never evicted (e.g. pinned constraints). */
 	protectedIndices?: Set<number>;
-	/** User turns are never evicted. */
-	neverEvictUser?: true;
 }
 
 export interface EvictionResult {

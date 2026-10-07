@@ -21,7 +21,7 @@ const CONFIG_FILE_NAMES = ["live-compaction.json", "live-compaction.jsonc"];
  * Directory of the global OpenCode config. Uses `XDG_CONFIG_HOME` when set
  * (which also covers the Flatpak layout) and falls back to `~/.config`.
  */
-export function globalConfigDir(): string {
+function globalConfigDir(): string {
 	const xdg = process.env.XDG_CONFIG_HOME;
 	const base = xdg && xdg.trim() ? xdg : join(homedir(), ".config");
 	return join(base, "opencode");
@@ -36,8 +36,7 @@ function readConfigDir(
 		if (!existsSync(configPath)) continue;
 		try {
 			const raw = readFileSync(configPath, "utf-8");
-			const stripped = stripTrailingCommas(stripJsonComments(raw));
-			return JSON.parse(stripped) as LiveCompactionConfig;
+			return JSON.parse(stripJsonc(raw)) as LiveCompactionConfig;
 		} catch (error) {
 			onError?.(`failed to parse ${configPath}`, error);
 		}
@@ -64,107 +63,71 @@ export function loadConfig(
 }
 
 /** Strip single-line and block comments from JSONC strings. */
-function stripJsonComments(json: string): string {
-	// Remove single-line comments (// ...) not inside strings
+/**
+ * Strip JSONC comments (`//`, `/* *​/`) and trailing commas before `}`/`]` in a
+ * single pass, ignoring both inside strings.
+ */
+function stripJsonc(json: string): string {
 	let result = "";
 	let inString = false;
 	let escape = false;
+	let i = 0;
 
-	for (let i = 0; i < json.length; i++) {
+	while (i < json.length) {
 		const ch = json[i];
 
 		if (escape) {
 			result += ch;
 			escape = false;
+			i++;
 			continue;
 		}
-
 		if (ch === "\\" && inString) {
 			result += ch;
 			escape = true;
+			i++;
 			continue;
 		}
-
 		if (ch === '"') {
 			inString = !inString;
 			result += ch;
+			i++;
 			continue;
 		}
-
 		if (inString) {
 			result += ch;
+			i++;
 			continue;
 		}
 
-		// Not in string — check for comments
-		if (ch === "/" && i + 1 < json.length) {
-			if (json[i + 1] === "/") {
-				// Single-line comment: skip to end of line
-				while (i < json.length && json[i] !== "\n") i++;
-				result += "\n";
-				continue;
+		// Single-line comment: skip to end of line.
+		if (ch === "/" && json[i + 1] === "/") {
+			while (i < json.length && json[i] !== "\n") i++;
+			result += "\n";
+			if (i < json.length) i++;
+			continue;
+		}
+		// Block comment: skip to the closing */.
+		if (ch === "/" && json[i + 1] === "*") {
+			i += 2;
+			while (i + 1 < json.length && !(json[i] === "*" && json[i + 1] === "/")) {
+				i++;
 			}
-			if (json[i + 1] === "*") {
-				// Block comment: skip to */
-				i += 2;
-				while (
-					i + 1 < json.length &&
-					!(json[i] === "*" && json[i + 1] === "/")
-				) {
-					i++;
-				}
-				i++; // skip the /
-				continue;
-			}
-		}
-
-		result += ch;
-	}
-
-	return result;
-}
-
-/** Remove trailing commas before `}` or `]`, ignoring commas inside strings. */
-function stripTrailingCommas(json: string): string {
-	let result = "";
-	let inString = false;
-	let escape = false;
-
-	for (let i = 0; i < json.length; i++) {
-		const ch = json[i];
-
-		if (escape) {
-			result += ch;
-			escape = false;
+			i += 2;
 			continue;
 		}
-
-		if (ch === "\\" && inString) {
-			result += ch;
-			escape = true;
-			continue;
-		}
-
-		if (ch === '"') {
-			inString = !inString;
-			result += ch;
-			continue;
-		}
-
-		if (inString) {
-			result += ch;
-			continue;
-		}
-
+		// Trailing comma before } or ].
 		if (ch === ",") {
 			let j = i + 1;
 			while (j < json.length && /\s/.test(json[j])) j++;
 			if (json[j] === "}" || json[j] === "]") {
-				continue; // drop the trailing comma
+				i++;
+				continue;
 			}
 		}
 
 		result += ch;
+		i++;
 	}
 
 	return result;

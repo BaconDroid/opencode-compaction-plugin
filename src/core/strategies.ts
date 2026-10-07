@@ -11,15 +11,6 @@ import type { LiveCompactionConfig } from "../config/config.js";
 import { partInput } from "./messages.js";
 import type { Message, MessagePart } from "../types.js";
 
-export interface StrategyContext {
-	/** The config for this session */
-	config: LiveCompactionConfig;
-	/** Per-session turn counter (incremented per message transform) */
-	turnCounter: Map<string, number>;
-	/** Session ID for turn tracking (set from the transform hook) */
-	sessionId?: string;
-}
-
 // ---------------------------------------------------------------------------
 // Deduplication
 // ---------------------------------------------------------------------------
