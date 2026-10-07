@@ -8,7 +8,7 @@ import {
 	renderBlockBody,
 	selectDeterministicSpan,
 	type BlockMessage,
-} from "../src/blocks.ts";
+} from "../src/core/blocks.ts";
 
 function textMsg(role: string, text: string, extra: Record<string, unknown> = {}) {
 	return { info: { role, ...extra }, parts: [{ type: "text", text }] };

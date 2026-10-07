@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { buildCompactionPrompt, extractLatestUserAsk } from "../src/prompt.ts";
+import { buildCompactionPrompt, extractLatestUserAsk } from "../src/core/prompt.ts";
 
 describe("buildCompactionPrompt()", () => {
 	it("contains the 11-section template, rules and status markers", () => {

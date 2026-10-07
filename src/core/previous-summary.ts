@@ -11,7 +11,7 @@
  * right after a compaction replaced the history).
  */
 
-import { partsText } from "./trim.js";
+import { partsText } from "./messages.js";
 
 interface SummaryMessageLike {
 	info?: { role?: string; summary?: boolean; id?: string };

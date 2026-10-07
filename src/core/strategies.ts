@@ -7,9 +7,9 @@
  * Both strategies operate on the messages array in experimental.chat.messages.transform.
  */
 
-import type { LiveCompactionConfig } from "./config.js";
-import { partInput } from "./trim.js";
-import type { Message, MessagePart } from "./types.js";
+import type { LiveCompactionConfig } from "../config/config.js";
+import { partInput } from "./messages.js";
+import type { Message, MessagePart } from "../types.js";
 
 export interface StrategyContext {
 	/** The config for this session */

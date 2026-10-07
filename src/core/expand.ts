@@ -4,7 +4,6 @@
  * them. This is the minimal internal version — no index, no vectors, no disk.
  */
 
-import { tool } from "@opencode-ai/plugin";
 import {
 	orderCompressBlocks,
 	parseCompressBlocks,
@@ -147,44 +146,3 @@ export function applyExpansions(
 	return { expanded, unmatched };
 }
 
-/**
- * Build the `expand` tool: restore a compressed block from the sidecar and keep
- * it expanded on subsequent transforms (sticky).
- */
-export function buildExpandToolDef() {
-	return tool({
-		description: `Expand a compressed block, restoring its original messages.
-
-Reference the block by its [bN] label (or durable id). The expansion is sticky:
-the block stays expanded on later turns.`,
-		args: {
-			block: tool.schema
-				.string()
-				.describe("Block label (e.g. 'b0') or durable id to expand"),
-		},
-		async execute(args) {
-			return `Expansion queued for block ${args.block}. It will be applied on the next message transform.`;
-		},
-	});
-}
-
-/**
- * Build the `recall` tool: restore a compressed block for a single transform
- * (one-shot).
- */
-export function buildRecallToolDef() {
-	return tool({
-		description: `Recall a compressed block's original messages for the next turn only.
-
-Reference the block by its [bN] label (or durable id). Unlike expand, the
-expansion is one-shot and the block re-compresses afterwards.`,
-		args: {
-			block: tool.schema
-				.string()
-				.describe("Block label (e.g. 'b0') or durable id to recall"),
-		},
-		async execute(args) {
-			return `Recall queued for block ${args.block}. It will be applied on the next message transform.`;
-		},
-	});
-}

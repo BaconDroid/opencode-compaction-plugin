@@ -3,7 +3,7 @@ import {
 	applyEviction,
 	estimateTokens,
 	type EvictionConfig,
-} from "../src/eviction.ts";
+} from "../src/core/eviction.ts";
 
 const cfg = (over: Partial<EvictionConfig> = {}): EvictionConfig => ({
 	enabled: true,

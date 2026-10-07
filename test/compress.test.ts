@@ -4,11 +4,13 @@ import {
 	SquashStore,
 	applyCompressions,
 	applySquash,
-	buildCompressToolDef,
-	buildSquashToolDef,
 	type CompressRequest,
 	type SquashRequest,
-} from "../src/compress.ts";
+} from "../src/core/compress.ts";
+import {
+	buildCompressToolDef,
+	buildSquashToolDef,
+} from "../src/opencode/tools.ts";
 
 // ---------------------------------------------------------------------------
 // buildCompressToolDef
@@ -26,13 +28,17 @@ describe("buildCompressToolDef()", () => {
 		expect(typeof def.execute).toBe("function");
 	});
 
-	it("accepts a request without indices (auto-selected range)", async () => {
+	it("executes for auto-selected and explicit ranges", async () => {
 		const def = buildCompressToolDef();
-		const result = await def.execute(
-			{ topic: "T", summary: "S" },
-			{} as any,
-		);
-		expect(result).toContain("auto-selected range");
+		expect(
+			await def.execute({ topic: "T", summary: "S" }, {} as any),
+		).toContain("auto-selected range");
+		expect(
+			await def.execute(
+				{ topic: "T", summary: "S", start: 0, end: 1 },
+				{} as any,
+			),
+		).toContain("messages 0-1");
 	});
 });
 
@@ -397,14 +403,19 @@ describe("applyCompressions()", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildSquashToolDef()", () => {
-	it("exposes from/to/topic/summary and an execute", () => {
+	it("exposes from/to/topic/summary and executes", async () => {
 		const def = buildSquashToolDef();
 		expect(def.description).toContain("Merge");
 		expect(def.args).toHaveProperty("from");
 		expect(def.args).toHaveProperty("to");
 		expect(def.args).toHaveProperty("topic");
 		expect(def.args).toHaveProperty("summary");
-		expect(typeof def.execute).toBe("function");
+		expect(
+			await def.execute(
+				{ from: "b0", to: "b1", topic: "T", summary: "S" },
+				{} as any,
+			),
+		).toContain("b0-b1");
 	});
 });
 

@@ -27,39 +27,36 @@
  *   compress.ts · expand.ts · strategies.ts · eviction.ts · config.ts · …
  */
 
-import { buildCompactionPrompt, extractLatestUserAsk } from "./prompt.js";
-import { FilesTouchedTracker } from "./files-touched.js";
-import { loadConfig, type LiveCompactionConfig } from "./config.js";
+import { buildCompactionPrompt, extractLatestUserAsk } from "./core/prompt.js";
+import { FilesTouchedTracker } from "./core/files-touched.js";
+import { loadConfig } from "./config/config-loader.js";
+import type { LiveCompactionConfig } from "./config/config.js";
+import { CompressionStore, SquashStore } from "./core/compress.js";
+import { ExpansionSidecar, ExpandStore } from "./core/expand.js";
 import {
 	buildCompressToolDef,
 	buildSquashToolDef,
-	CompressionStore,
-	SquashStore,
-} from "./compress.js";
-import {
-	ExpansionSidecar,
-	ExpandStore,
 	buildExpandToolDef,
 	buildRecallToolDef,
-} from "./expand.js";
+} from "./opencode/tools.js";
 import {
 	TodoPreserver,
 	extractTodos,
 	renderTaskState,
 	type TodoSnapshot,
-} from "./todo-preserver.js";
-import type { TokenInfo } from "./preemption.js";
+} from "./core/todo-preserver.js";
+import type { TokenInfo } from "./core/preemption.js";
 import {
 	DegradationMonitor,
 	countTrailingNoTextAssistant,
-} from "./degradation-monitor.js";
+} from "./core/degradation-monitor.js";
 import {
 	extractPreviousSummary,
 	type SlidingState,
-} from "./previous-summary.js";
-import { buildTrimMap } from "./trim.js";
-import { PreemptionController } from "./preemption.js";
-import { applyTransform } from "./transform.js";
+} from "./core/previous-summary.js";
+import { buildTrimMap } from "./core/trim.js";
+import { PreemptionController } from "./core/preemption.js";
+import { applyTransform } from "./core/transform.js";
 import type { Hooks, Logger, Plugin, PluginInput } from "./types.js";
 
 /** Model-driven tools registered by this plugin (used for permission wiring). */

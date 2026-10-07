@@ -8,7 +8,7 @@
  * Diagnostic only: it never modifies messages.
  */
 
-import { hasText } from "./trim.js";
+import { hasText } from "./messages.js";
 
 /** True when a message's parts include a non-empty text part. */
 export function messageHasText(parts: unknown): boolean {

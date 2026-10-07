@@ -13,8 +13,7 @@
  *      summary message
  */
 
-import { tool } from "@opencode-ai/plugin";
-import type { Message } from "./types.js";
+import type { Message } from "../types.js";
 import {
 	blockId,
 	collectExistingBlockIds,
@@ -329,91 +328,3 @@ function escapeAttr(s: string): string {
 		.replace(/>/g, "&gt;");
 }
 
-// ---------------------------------------------------------------------------
-// Tool definition (for OpenCode plugin API)
-// ---------------------------------------------------------------------------
-
-/**
- * Build the compress tool definition via the plugin SDK helper, so OpenCode
- * receives a valid `ToolDefinition` (Zod args + execute).
- */
-export function buildCompressToolDef() {
-	return tool({
-		description: `Compress a range of conversation messages into a summary.
-
-Use this tool when you have completed a task phase and want to reduce context size.
-You write the summary — you have the full context. Be thorough but concise.
-
-When to compact:
-- After a phase is finished and verified (tests passing, task done), not mid-edit.
-- When the context is growing with completed, self-contained work you no longer need verbatim.
-- Not when the context is small or the recent turns are still being actively worked on.
-
-The compressed range will be replaced with your summary in the conversation.
-Message indices are 0-based. Use the message order visible in the conversation.`,
-		args: {
-			topic: tool.schema
-				.string()
-				.describe("Short label (3-5 words) for display, e.g., 'Auth Bug Fix'"),
-			summary: tool.schema
-				.string()
-				.describe(
-					"Complete technical summary replacing all messages in the range. Include file paths, decisions, error strings, and code snippets that are still relevant.",
-				),
-			scale: tool.schema
-				.enum(["granular", "deep"])
-				.optional()
-				.describe(
-					"granular compresses a single message; deep compresses a whole range (default: deep)",
-				),
-			start: tool.schema
-				.number()
-				.optional()
-				.describe(
-					"Legacy start message index (inclusive, 0-based). Omit to auto-select the range.",
-				),
-			end: tool.schema
-				.number()
-				.optional()
-				.describe(
-					"Legacy end message index (inclusive, 0-based). Omit to auto-select the range.",
-				),
-		},
-		async execute(args) {
-			const range =
-				typeof args.start === "number" && typeof args.end === "number"
-					? `messages ${args.start}-${args.end}`
-					: "an auto-selected range";
-			return `Compression queued for ${range} (${args.topic}). It will be applied on the next message transform.`;
-		},
-	});
-}
-
-/**
- * Build the `squash` tool definition: merge two or more contiguous compressed
- * blocks (referenced by their `bN` labels) into a single block.
- */
-export function buildSquashToolDef() {
-	return tool({
-		description: `Merge contiguous compressed blocks into a single block.
-
-Use this after several compressions have accumulated to collapse them into one
-coherent summary. Reference blocks by their [bN] labels. The blocks must be
-adjacent; ambiguous requests are refused.`,
-		args: {
-			from: tool.schema
-				.string()
-				.describe("First block label to merge, e.g. 'b0'"),
-			to: tool.schema.string().describe("Last block label to merge, e.g. 'b2'"),
-			topic: tool.schema
-				.string()
-				.describe("Short label (3-5 words) for the merged block"),
-			summary: tool.schema
-				.string()
-				.describe("Merged summary replacing the selected blocks"),
-		},
-		async execute(args) {
-			return `Squash queued for blocks ${args.from}-${args.to} (${args.topic}). It will be applied on the next message transform.`;
-		},
-	});
-}

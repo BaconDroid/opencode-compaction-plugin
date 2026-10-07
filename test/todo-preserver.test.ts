@@ -3,7 +3,7 @@ import {
 	extractTodos,
 	renderTaskState,
 	TodoPreserver,
-} from "../src/todo-preserver.ts";
+} from "../src/core/todo-preserver.ts";
 
 describe("extractTodos()", () => {
 	it("extracts from { data: [...] }", () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { matchesGlob, extractFilePaths, isFileProtected } from "../src/glob.ts";
+import { matchesGlob, extractFilePaths, isFileProtected } from "../src/core/glob.ts";
 
 describe("matchesGlob()", () => {
 	it("matches the expected patterns", () => {

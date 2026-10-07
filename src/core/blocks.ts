@@ -8,8 +8,8 @@
  * block, minus the protected tail.
  */
 
-import { nthUserTurnFromEnd } from "./trim.js";
-import type { Message } from "./types.js";
+import { nthUserTurnFromEnd } from "./messages.js";
+import type { Message } from "../types.js";
 
 export type Scale = "granular" | "deep";
 

@@ -3,10 +3,12 @@ import {
 	ExpansionSidecar,
 	ExpandStore,
 	applyExpansions,
+	type ExpandRequest,
+} from "../src/core/expand.ts";
+import {
 	buildExpandToolDef,
 	buildRecallToolDef,
-	type ExpandRequest,
-} from "../src/expand.ts";
+} from "../src/opencode/tools.ts";
 
 function blockMsg(id: string, label: string, body: string) {
 	return {
@@ -95,10 +97,12 @@ describe("applyExpansions()", () => {
 });
 
 describe("expand/recall tool definitions", () => {
-	it("expose a block argument and execute", () => {
-		for (const def of [buildExpandToolDef(), buildRecallToolDef()]) {
-			expect(def.args).toHaveProperty("block");
-			expect(typeof def.execute).toBe("function");
-		}
+	it("expose a block argument and execute", async () => {
+		const expand = buildExpandToolDef();
+		expect(expand.args).toHaveProperty("block");
+		expect(await expand.execute({ block: "b0" }, {} as any)).toContain("b0");
+		const recall = buildRecallToolDef();
+		expect(recall.args).toHaveProperty("block");
+		expect(await recall.execute({ block: "b1" }, {} as any)).toContain("b1");
 	});
 });
