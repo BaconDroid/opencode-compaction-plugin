@@ -208,6 +208,7 @@ Each feature below lists **what** it does, its **config** keys and how it
 | Auto-continue | — | — |
 | Compression tools | `compress.{protectedTurns,reversible,maxBlocksPerSquash,searchMaxResults}` | `3`, `false`, `8`, `5` |
 | Semantic retrieval (optional) | `adapters.embeddings.*` | disabled |
+| Semantic constraint validation (optional) | `adapters.judge.*` | disabled |
 
 ### Structured compaction prompt
 - **What** — replaces (or augments) OpenCode's default prompt with the 11-section
@@ -307,6 +308,15 @@ Each feature below lists **what** it does, its **config** keys and how it
 - **Interactions** — semantic hits are tried first; any error (timeout, bad
   response) or an empty result falls back to the deterministic keyword search.
   Never changes the transform/compaction path.
+
+### Semantic constraint validation (optional adapter)
+- **What** — after compaction, the pinned constraints are already checked by a
+  deterministic substring test. When `adapters.judge` is configured and a clause
+  looks missing, the judge is asked whether the summary preserves it semantically
+  (paraphrase allowed).
+- **Config** — `adapters.judge.*` (opt-in; off when absent).
+- **Interactions** — only runs for clauses the substring check flagged; a `YES`
+  suppresses the warning, a `NO`/unclear answer or any judge error keeps it.
 
 ## Strategy order & interactions
 
@@ -452,9 +462,11 @@ logged and falls back to the internal behaviour, so a broken adapter can never
 break compaction. No dependency is added: adapters talk to an endpoint/command
 you already run.
 
-Only one adapter exists today: the **semantic retrieval adapter** for `search`
-(E4). It is enabled by adding an `adapters.embeddings` block (there is no
-default value, so it is off unless present).
+Two adapters exist today, both enabled by adding a block (there is no default
+value, so each is off unless present):
+
+- **`adapters.embeddings`** — semantic retrieval for `search` (E4).
+- **`adapters.judge`** — semantic constraint validation after compaction (E6).
 
 ```jsonc
 {
@@ -466,23 +478,35 @@ default value, so it is off unless present).
             "model": "nomic-embed-text",     // optional, forwarded to the provider
             "timeoutMs": 10000,              // optional request timeout
             "minScore": 0.25                 // optional minimum cosine score for a hit
+        },
+        "judge": {
+            "provider": "http",
+            "url": "http://localhost:11434/v1/chat/completions",
+            "model": "llama3.2",
+            "timeoutMs": 20000
         }
     }
 }
 ```
 
-**Provider `http`** — POSTs an OpenAI-style request
-(`{ "model"?, "input": ["text", …] }`) to `url` and accepts the response as a
-bare `number[][]`, `{ "embeddings": number[][] }` or OpenAI's
-`{ "data": [{ "embedding": number[] }] }`. This covers local servers such as
-Ollama, llama.cpp, LM Studio or vLLM.
+**Provider `http`** — for `embeddings`, POSTs an OpenAI-style request
+(`{ "model"?, "input": ["text", …] }`) and accepts the response as a bare
+`number[][]`, `{ "embeddings": number[][] }` or OpenAI's
+`{ "data": [{ "embedding": number[] }] }`. For `judge`, POSTs a chat request
+(`{ "model"?, "messages": [{ "role": "user", "content": prompt }] }`) and
+accepts `{ "choices": [{ "message": { "content": "…" } }] }`, `{ "response" }`,
+`{ "content" }`, `{ "text" }` or `{ "answer" }`. This covers local servers such
+as Ollama, llama.cpp, LM Studio or vLLM.
 
-**Provider `command`** — spawns `command`, writes `{ "model"?, "input": [...] }`
-on stdin and reads an embeddings JSON document (same shapes as above) on stdout.
-The process is non-interactive (stdin is closed) and killed on timeout.
+**Provider `command`** — spawns `command` and writes `{ "model"?, "input": [...] }`
+(`embeddings`) or `{ "model"?, "prompt": "…" }` (`judge`) on stdin. It reads the
+same response shapes as the HTTP provider on stdout; for `judge`, plain text
+stdout is accepted too. The process is non-interactive (stdin is closed) and
+killed on timeout.
 
 **Provider `mcp`** — recognised but **not supported yet**; it logs a warning and
-uses the keyword search. `mcp` requires SDK surface the plugin does not have.
+uses the deterministic fallback. `mcp` requires SDK surface the plugin does not
+have.
 
 Security: `url` and `command` are user-supplied and are never logged; put any
 token in the URL/command/env yourself. A `command` value is executed by your
@@ -511,7 +535,7 @@ bun run test:coverage
 # (OpenCode loads .ts files directly via Bun)
 ```
 
-Current coverage: **95.8% functions, 99.4% lines** (226 tests).
+Current coverage: **96.5% functions, 99.6% lines** (238 tests).
 
 ## File Structure
 
@@ -529,6 +553,7 @@ src/
     blocks.ts           — durable block ids + deterministic span selection
     expand.ts           — reversible sidecar + inspection/search
     adapters.ts         — optional adapter contracts + in-memory vector index
+    judge.ts            — optional judge orchestration for constraint validation
     strategies.ts       — dedup, error purge, cascade purge
     eviction.ts         — graduated, LLM-free eviction
     pin.ts              — constraint pinning (E6)
@@ -564,7 +589,8 @@ test/
   degradation-monitor.test.ts — Degradation monitor tests
   previous-summary.test.ts — Previous summary and sliding-state tests
   pin.test.ts       — Constraint pinning tests
-  adapters.test.ts  — Optional adapter contracts, providers and fallback tests
+  adapters.test.ts  — Optional embedding adapter contracts, providers and fallback
+  judge.test.ts     — Optional judge adapter, verdict parsing and E6 validation
 docs/
   context-compaction-research.md — Consolidated literature catalog, categories and implementation backlog
   research-prompt.md — Reusable prompt (bootstrap + sweep) to reproduce the literature sweep

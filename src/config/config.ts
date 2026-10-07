@@ -144,10 +144,31 @@ export interface EmbeddingsAdapterConfig {
 	minScore?: number;
 }
 
+/**
+ * Optional model-judge adapter (E1/E5/E6). Opt-in: disabled unless present.
+ * The judge answers a prompt; callers build the prompt and read the verdict.
+ */
+export interface JudgeAdapterConfig {
+	/** Enable the adapter (default: true when the block is present) */
+	enabled?: boolean;
+	/** Transport: `http` (default), `command`, or `mcp` (not yet supported) */
+	provider?: AdapterProvider;
+	/** Endpoint URL (required for provider "http") */
+	url?: string;
+	/** Shell command (required for provider "command"); see README for the contract */
+	command?: string;
+	/** Optional model/identifier forwarded to the provider */
+	model?: string;
+	/** Request timeout in ms (default: 10000) */
+	timeoutMs?: number;
+}
+
 /** Optional external adapters (all off by default). */
 export interface AdaptersConfig {
 	/** Semantic embedding/retrieval adapter */
 	embeddings?: EmbeddingsAdapterConfig;
+	/** Model-judge adapter (semantic validation) */
+	judge?: JudgeAdapterConfig;
 }
 
 export interface DegradationMonitorConfig {

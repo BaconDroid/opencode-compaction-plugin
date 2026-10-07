@@ -26,6 +26,14 @@ export interface VectorIndex {
 	search(query: string, k: number): Promise<VectorHit[]>;
 }
 
+/**
+ * Optional model judge: returns the model's answer to a prompt. The caller owns
+ * the prompt and the interpretation; the provider only transports it.
+ */
+export interface Judge {
+	ask(prompt: string): Promise<string>;
+}
+
 /** A corpus entry fed to an in-memory vector index. */
 export interface CorpusItem {
 	id: string;

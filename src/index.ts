@@ -38,7 +38,8 @@ import {
 	recordText,
 } from "./core/expand.js";
 import { EmbeddingVectorIndex } from "./core/adapters.js";
-import { resolveEmbedder } from "./opencode/adapters.js";
+import { judgeClausesPreserved } from "./core/judge.js";
+import { resolveEmbedder, resolveJudge } from "./opencode/adapters.js";
 import {
 	buildCompressToolDef,
 	buildSquashToolDef,
@@ -214,6 +215,9 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		});
 	}
 
+	// Optional model judge (opt-in) for semantic constraint validation (E6).
+	const judge = resolveJudge(config.adapters?.judge, { logger });
+
 	const getTracker = (sessionID: string): FilesTouchedTracker => {
 		let tracker = sessionTrackers.get(sessionID);
 		if (!tracker) {
@@ -274,16 +278,37 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			const summary = (list as Message[]).find(
 				(message) => message.info?.summary === true,
 			);
-			const missing = missingClauses(
-				summary ? partsText(summary.parts) : "",
-				clauses,
-			);
-			if (missing.length > 0) {
-				logger.info("pinned constraints missing from summary", {
-					sessionID,
-					missing,
-				});
+			const summaryText = summary ? partsText(summary.parts) : "";
+			const missing = missingClauses(summaryText, clauses);
+			if (missing.length === 0) return;
+
+			// Optional semantic validation (E6): a paraphrase may satisfy a clause
+			// the substring check flagged. Any judge error keeps the warning.
+			if (judge) {
+				try {
+					const preserved = await judgeClausesPreserved(
+						judge,
+						summaryText,
+						missing,
+					);
+					if (preserved === true) {
+						logger.info("pinned constraints judged preserved", {
+							sessionID,
+							count: missing.length,
+						});
+						return;
+					}
+				} catch (error) {
+					logger.info("pinned semantic validation failed", {
+						error: String(error),
+					});
+				}
 			}
+
+			logger.info("pinned constraints missing from summary", {
+				sessionID,
+				missing,
+			});
 		} catch (error) {
 			logger.info("pinned integrity check failed", { error: String(error) });
 		}
