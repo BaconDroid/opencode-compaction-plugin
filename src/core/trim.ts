@@ -65,6 +65,6 @@ export function hasProtectedFilePath(
 	}
 	if (!args) return false;
 
-	const paths = extractFilePaths(part.tool ?? "", args);
+	const paths = extractFilePaths(args);
 	return isFileProtected(paths, protectedPatterns);
 }
