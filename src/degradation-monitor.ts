@@ -35,12 +35,94 @@ export function countTrailingNoTextAssistant(
 	return count;
 }
 
+// ---------------------------------------------------------------------------
+// Judge-free halting rule (semantic-halting-problem style)
+// ---------------------------------------------------------------------------
+
+export interface HaltingConfig {
+	/** Distance below which consecutive drafts are considered converged. */
+	convergenceThreshold: number;
+	/** Number of consecutive converged steps required to halt. */
+	convergencePatience: number;
+	/** Failsafe: halt after this many rounds regardless of distance. */
+	maxRounds: number;
+}
+
+export interface HaltDecision {
+	shouldHalt: boolean;
+	reason?: "entropy" | "max_rounds";
+}
+
+/** Normalized Jaccard distance between two texts (0 identical, 1 disjoint). */
+export function textDistance(a: string, b: string): number {
+	const normalize = (value: string) =>
+		value.toLowerCase().replace(/\s+/g, " ").trim();
+	const na = normalize(a);
+	const nb = normalize(b);
+	if (!na && !nb) return 0;
+	if (!na || !nb) return 1;
+	const setA = new Set(na.split(" "));
+	const setB = new Set(nb.split(" "));
+	let intersection = 0;
+	for (const token of setA) {
+		if (setB.has(token)) intersection++;
+	}
+	const union = setA.size + setB.size - intersection;
+	return union === 0 ? 0 : 1 - intersection / union;
+}
+
+/**
+ * Decide whether to stop a loop from the distance history between consecutive
+ * drafts: halt once the last `convergencePatience` distances are all below
+ * `convergenceThreshold`, or at `maxRounds` as a failsafe.
+ */
+export function shpShouldHalt(
+	loopCount: number,
+	distanceHistory: number[],
+	config: HaltingConfig,
+): HaltDecision {
+	if (loopCount >= config.maxRounds) {
+		return { shouldHalt: true, reason: "max_rounds" };
+	}
+	if (
+		config.convergencePatience > 0 &&
+		distanceHistory.length >= config.convergencePatience
+	) {
+		const recent = distanceHistory.slice(-config.convergencePatience);
+		if (recent.every((d) => d < config.convergenceThreshold)) {
+			return { shouldHalt: true, reason: "entropy" };
+		}
+	}
+	return { shouldHalt: false };
+}
+
 /** Per-plugin-instance record of the last compaction time per session. */
 export class DegradationMonitor {
 	private compactedAt = new Map<string, number>();
+	private drafts = new Map<string, string>();
+	private distances = new Map<string, number[]>();
 
 	markCompacted(sessionID: string, now: number): void {
 		this.compactedAt.set(sessionID, now);
+	}
+
+	/**
+	 * Record a draft for a session and return the halting decision based on the
+	 * distance from the previous draft.
+	 */
+	pushDraft(
+		sessionID: string,
+		draft: string,
+		config: HaltingConfig,
+	): HaltDecision {
+		const previous = this.drafts.get(sessionID);
+		const history = this.distances.get(sessionID) ?? [];
+		if (previous !== undefined) {
+			history.push(textDistance(previous, draft));
+		}
+		this.drafts.set(sessionID, draft);
+		this.distances.set(sessionID, history);
+		return shpShouldHalt(history.length, history, config);
 	}
 
 	/** Whether a check should run: within the post-compaction window. */
@@ -56,9 +138,13 @@ export class DegradationMonitor {
 
 	clear(sessionID: string): void {
 		this.compactedAt.delete(sessionID);
+		this.drafts.delete(sessionID);
+		this.distances.delete(sessionID);
 	}
 
 	clearAll(): void {
 		this.compactedAt.clear();
+		this.drafts.clear();
+		this.distances.clear();
 	}
 }

@@ -25,6 +25,40 @@ export function extractTodos(response: unknown): TodoSnapshot[] {
 	return [];
 }
 
+const STATUS_MARKERS: Record<string, string> = {
+	completed: "[x]",
+	done: "[x]",
+	in_progress: "[~]",
+	"in-progress": "[~]",
+	active: "[~]",
+	cancelled: "[-]",
+	canceled: "[-]",
+	pending: "[ ]",
+	todo: "[ ]",
+};
+
+/**
+ * Render a todo snapshot as a deterministic `<task-state>` body: IDs, status
+ * markers and priorities are preserved so continuity survives compaction.
+ */
+export function renderTaskState(todos: TodoSnapshot[]): string {
+	if (todos.length === 0) return "(none)";
+	return todos
+		.map((todo) => {
+			const status = (todo.status ?? "").toLowerCase();
+			const marker = STATUS_MARKERS[status] ?? "[ ]";
+			const meta = [
+				todo.id ? `id=${todo.id}` : undefined,
+				todo.status ? `status=${todo.status}` : undefined,
+				todo.priority ? `priority=${todo.priority}` : undefined,
+			]
+				.filter((value): value is string => Boolean(value))
+				.join(", ");
+			return `- ${marker} ${todo.content}${meta ? ` (${meta})` : ""}`;
+		})
+		.join("\n");
+}
+
 /** Per-plugin-instance store of todo snapshots, keyed by session. */
 export class TodoPreserver {
 	private snapshots = new Map<string, TodoSnapshot[]>();
@@ -42,6 +76,11 @@ export class TodoPreserver {
 		const snapshot = this.snapshots.get(sessionID);
 		this.snapshots.delete(sessionID);
 		return snapshot;
+	}
+
+	/** Return the snapshot without forgetting it. */
+	peek(sessionID: string): TodoSnapshot[] | undefined {
+		return this.snapshots.get(sessionID);
 	}
 
 	clear(sessionID: string): void {

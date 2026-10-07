@@ -65,10 +65,58 @@ describe("mergeConfig()", () => {
 		expect(cfg.purgeErrors.turns).toBe(8);
 	});
 
+	it("defaults wholeAttempt to true and allows disabling it", () => {
+		expect(mergeConfig({}).purgeErrors.wholeAttempt).toBe(true);
+		expect(
+			mergeConfig({ purgeErrors: { wholeAttempt: false } }).purgeErrors
+				.wholeAttempt,
+		).toBe(false);
+	});
+
+	it("defaults the compress settings", () => {
+		const cfg = mergeConfig({});
+		expect(cfg.compress.protectedTurns).toBe(3);
+		expect(cfg.compress.reversible).toBe(true);
+		expect(cfg.compress.maxBlocksPerSquash).toBe(8);
+	});
+
+	it("overrides the compress settings", () => {
+		const cfg = mergeConfig({
+			compress: { protectedTurns: 5, reversible: false, maxBlocksPerSquash: 2 },
+		});
+		expect(cfg.compress.protectedTurns).toBe(5);
+		expect(cfg.compress.reversible).toBe(false);
+		expect(cfg.compress.maxBlocksPerSquash).toBe(2);
+	});
+
+	it("defaults eviction off with all levels", () => {
+		const cfg = mergeConfig({});
+		expect(cfg.eviction.enabled).toBe(false);
+		expect(cfg.eviction.thresholdTokens).toBe(80000);
+		expect(cfg.eviction.protectPrologue).toBe(true);
+		expect(cfg.eviction.levels).toEqual([
+			"reasoning",
+			"bulk_output",
+			"intermediate",
+			"episode",
+		]);
+	});
+
+	it("overrides the eviction settings", () => {
+		const cfg = mergeConfig({
+			eviction: { enabled: true, thresholdTokens: 1000, levels: ["episode"] },
+		});
+		expect(cfg.eviction.enabled).toBe(true);
+		expect(cfg.eviction.thresholdTokens).toBe(1000);
+		expect(cfg.eviction.levels).toEqual(["episode"]);
+	});
+
 	it("defaults preemptive compaction to disabled", () => {
 		const cfg = mergeConfig({});
 		expect(cfg.preemptiveCompaction.enabled).toBe(false);
 		expect(cfg.preemptiveCompaction.threshold).toBe(0.78);
+		expect(cfg.preemptiveCompaction.countCacheTokens).toBe(false);
+		expect(cfg.preemptiveCompaction.absoluteTokenThreshold).toBeUndefined();
 	});
 
 	it("overrides preemptive compaction", () => {
@@ -77,6 +125,41 @@ describe("mergeConfig()", () => {
 		});
 		expect(cfg.preemptiveCompaction.enabled).toBe(true);
 		expect(cfg.preemptiveCompaction.contextLimit).toBe(1234);
+	});
+
+	it("overrides the hybrid threshold and cache policy", () => {
+		const cfg = mergeConfig({
+			preemptiveCompaction: {
+				absoluteTokenThreshold: 330_000,
+				countCacheTokens: true,
+			},
+		});
+		expect(cfg.preemptiveCompaction.absoluteTokenThreshold).toBe(330_000);
+		expect(cfg.preemptiveCompaction.countCacheTokens).toBe(true);
+	});
+
+	it("defaults the deterministic gates off", () => {
+		const cfg = mergeConfig({});
+		expect(cfg.preemptiveCompaction.minTokensSinceLast).toBe(0);
+		expect(cfg.preemptiveCompaction.minMessagesSinceLast).toBe(0);
+		expect(cfg.preemptiveCompaction.tailGuard.enabled).toBe(false);
+		expect(cfg.preemptiveCompaction.tailGuard.minNewToolCalls).toBe(3);
+	});
+
+	it("overrides the deterministic gates and tail guard", () => {
+		const cfg = mergeConfig({
+			preemptiveCompaction: {
+				minTokensSinceLast: 20_000,
+				minMessagesSinceLast: 6,
+				tailGuard: { enabled: true, minNewToolCalls: 5 },
+			},
+		});
+		expect(cfg.preemptiveCompaction.minTokensSinceLast).toBe(20_000);
+		expect(cfg.preemptiveCompaction.minMessagesSinceLast).toBe(6);
+		expect(cfg.preemptiveCompaction.tailGuard).toEqual({
+			enabled: true,
+			minNewToolCalls: 5,
+		});
 	});
 
 	it("defaults promptMode to replace and the degradation monitor to off", () => {
@@ -93,6 +176,26 @@ describe("mergeConfig()", () => {
 		expect(cfg.promptMode).toBe("augment");
 		expect(cfg.degradationMonitor.enabled).toBe(true);
 		expect(cfg.degradationMonitor.threshold).toBe(2);
+	});
+
+	it("defaults the judge-free halting parameters", () => {
+		const cfg = mergeConfig({});
+		expect(cfg.degradationMonitor.convergenceThreshold).toBe(0.05);
+		expect(cfg.degradationMonitor.convergencePatience).toBe(3);
+		expect(cfg.degradationMonitor.maxRounds).toBe(12);
+	});
+
+	it("overrides the judge-free halting parameters", () => {
+		const cfg = mergeConfig({
+			degradationMonitor: {
+				convergenceThreshold: 0.02,
+				convergencePatience: 5,
+				maxRounds: 20,
+			},
+		});
+		expect(cfg.degradationMonitor.convergenceThreshold).toBe(0.02);
+		expect(cfg.degradationMonitor.convergencePatience).toBe(5);
+		expect(cfg.degradationMonitor.maxRounds).toBe(20);
 	});
 
 	it("overrides debug", () => {

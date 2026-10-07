@@ -1,9 +1,13 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
 	CompressionStore,
+	SquashStore,
 	applyCompressions,
+	applySquash,
 	buildCompressToolDef,
+	buildSquashToolDef,
 	type CompressRequest,
+	type SquashRequest,
 } from "../src/compress.ts";
 
 // ---------------------------------------------------------------------------
@@ -18,7 +22,17 @@ describe("buildCompressToolDef()", () => {
 		expect(def.args).toHaveProperty("start");
 		expect(def.args).toHaveProperty("end");
 		expect(def.args).toHaveProperty("summary");
+		expect(def.args).toHaveProperty("scale");
 		expect(typeof def.execute).toBe("function");
+	});
+
+	it("accepts a request without indices (auto-selected range)", async () => {
+		const def = buildCompressToolDef();
+		const result = await def.execute(
+			{ topic: "T", summary: "S" },
+			{} as any,
+		);
+		expect(result).toContain("auto-selected range");
 	});
 });
 
@@ -316,5 +330,175 @@ describe("applyCompressions()", () => {
 			{ topic: "T", start: 0, end: 0, summary: "S", timestamp: 1000 },
 		]);
 		expect(msgs[0].info.role).toBe("user");
+	});
+
+	it("auto-selects a deterministic span when no indices are given", () => {
+		const msgs = [
+			makeMsg("user", "u0"),
+			makeMsg("assistant", "a0"),
+			makeMsg("user", "u1"),
+			makeMsg("assistant", "a1"),
+			makeMsg("user", "u2"),
+			makeMsg("assistant", "a2"),
+			makeMsg("user", "u3"),
+		];
+		const count = applyCompressions(
+			msgs as any,
+			[{ topic: "Auto", summary: "AutoSummary", timestamp: 1000 }],
+			{ protectedTurns: 3 },
+		);
+		expect(count).toBe(2);
+		expect(msgs).toHaveLength(6);
+		expect(msgs[0].parts[0].text).toContain("AutoSummary");
+		expect(msgs[0].parts[0].text).toContain("compressed-block");
+	});
+
+	it("records the scale attribute", () => {
+		const msgs = [makeMsg("user", "u0")];
+		applyCompressions(msgs as any, [
+			{
+				topic: "T",
+				start: 0,
+				end: 0,
+				summary: "S",
+				scale: "granular",
+				timestamp: 1000,
+			},
+		]);
+		expect(msgs[0].parts[0].text).toContain('scale="granular"');
+	});
+
+	it("returns 0 when auto-selection finds nothing eligible", () => {
+		const msgs = [makeMsg("user", "u0"), makeMsg("assistant", "a0")];
+		const count = applyCompressions(
+			msgs as any,
+			[{ topic: "Auto", summary: "S", timestamp: 1000 }],
+			{ protectedTurns: 3 },
+		);
+		expect(count).toBe(0);
+	});
+
+	it("assigns a durable id and a [bN] label", () => {
+		const msgs = [
+			{ info: { role: "user", timestamp: 7 }, parts: [{ type: "text", text: "u0" }] },
+			{ info: { role: "assistant" }, parts: [{ type: "text", text: "a1" }] },
+		];
+		applyCompressions(msgs as any, [
+			{ topic: "T", start: 0, end: 1, summary: "S", timestamp: 1000 },
+		]);
+		expect(msgs[0].parts[0].text).toContain('label="b0"');
+		expect(msgs[0].parts[0].text).toContain("[b0]");
+		expect(msgs[0].parts[0].text).toContain('id="u:7"');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// squash
+// ---------------------------------------------------------------------------
+
+describe("buildSquashToolDef()", () => {
+	it("exposes from/to/topic/summary and an execute", () => {
+		const def = buildSquashToolDef();
+		expect(def.description).toContain("Merge");
+		expect(def.args).toHaveProperty("from");
+		expect(def.args).toHaveProperty("to");
+		expect(def.args).toHaveProperty("topic");
+		expect(def.args).toHaveProperty("summary");
+		expect(typeof def.execute).toBe("function");
+	});
+});
+
+describe("SquashStore", () => {
+	it("queues, drains and clears per session", () => {
+		const store = new SquashStore();
+		store.queue("s", {
+			from: "b0",
+			to: "b1",
+			topic: "T",
+			summary: "S",
+			timestamp: 1,
+		});
+		expect(store.drain("s")).toHaveLength(1);
+		expect(store.drain("s")).toHaveLength(0);
+		store.queue("s", {
+			from: "b0",
+			to: "b1",
+			topic: "T",
+			summary: "S",
+			timestamp: 1,
+		});
+		store.clear("s");
+		expect(store.drain("s")).toHaveLength(0);
+	});
+});
+
+describe("applySquash()", () => {
+	function blockMsg(id: string, topic: string, text: string) {
+		return {
+			info: { role: "assistant" },
+			parts: [
+				{
+					type: "text",
+					text: `<compressed-block id="${id}" label="x" topic="${topic}">${text}</compressed-block>`,
+				},
+			],
+		};
+	}
+
+	it("merges two contiguous blocks into one", () => {
+		const msgs = [
+			blockMsg("a", "A", "[b0]\n\nfirst"),
+			blockMsg("b", "B", "[b1]\n\nsecond"),
+		];
+		const merged = applySquash(msgs as any, [
+			{ from: "b0", to: "b1", topic: "Merged", summary: "combined", timestamp: 1 },
+		]);
+		expect(merged).toBe(2);
+		expect(msgs).toHaveLength(1);
+		expect(msgs[0].parts[0].text).toContain("combined");
+		expect(msgs[0].parts[0].text).toContain('squashed="true"');
+	});
+
+	it("refuses a single-block request", () => {
+		const msgs = [blockMsg("a", "A", "[b0]\n\nfirst")];
+		const merged = applySquash(msgs as any, [
+			{ from: "b0", to: "b0", topic: "T", summary: "S", timestamp: 1 },
+		]);
+		expect(merged).toBe(0);
+		expect(msgs).toHaveLength(1);
+	});
+
+	it("refuses non-contiguous blocks", () => {
+		const msgs = [
+			blockMsg("a", "A", "[b0]\n\nfirst"),
+			{ info: { role: "user" }, parts: [{ type: "text", text: "interrupt" }] },
+			blockMsg("b", "B", "[b1]\n\nsecond"),
+		];
+		const merged = applySquash(msgs as any, [
+			{ from: "b0", to: "b1", topic: "T", summary: "S", timestamp: 1 },
+		]);
+		expect(merged).toBe(0);
+	});
+
+	it("refuses unknown labels", () => {
+		const msgs = [blockMsg("a", "A", "[b0]\n\nfirst")];
+		const merged = applySquash(msgs as any, [
+			{ from: "b0", to: "b9", topic: "T", summary: "S", timestamp: 1 },
+		]);
+		expect(merged).toBe(0);
+	});
+
+	it("refuses more blocks than maxBlocks", () => {
+		const msgs = [
+			blockMsg("a", "A", "[b0]\n\na"),
+			blockMsg("b", "B", "[b1]\n\nb"),
+			blockMsg("c", "C", "[b2]\n\nc"),
+		];
+		const merged = applySquash(
+			msgs as any,
+			[{ from: "b0", to: "b2", topic: "T", summary: "S", timestamp: 1 }],
+			{ maxBlocks: 2 },
+		);
+		expect(merged).toBe(0);
 	});
 });
