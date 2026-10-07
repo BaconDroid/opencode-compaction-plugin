@@ -42,6 +42,10 @@ import {
 	type CachedUsage,
 	type TokenInfo,
 } from "./preemptive-compaction.js";
+import {
+	DegradationMonitor,
+	countTrailingNoTextAssistant,
+} from "./degradation-monitor.js";
 
 // ---------------------------------------------------------------------------
 // Types — inlined from @opencode-ai/plugin to avoid requiring it as a dep.
@@ -62,6 +66,7 @@ interface PluginInput {
 		};
 		session?: {
 			todo?: (input: { path: { id: string } }) => Promise<unknown>;
+			messages?: (input: { path: { id: string } }) => Promise<unknown>;
 			summarize?: (input: {
 				path: { id: string };
 				body: { providerID: string; modelID: string; auto?: boolean };
@@ -301,6 +306,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 	const preemptInProgress = new Set<string>();
 	const preemptLast = new Map<string, number>();
 	const contextLimitCache = new Map<string, number>();
+	const degradation = new DegradationMonitor();
 	let pendingFocus: string | undefined;
 
 	const getTracker = (sessionID: string): FilesTouchedTracker => {
@@ -532,13 +538,19 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 				focusDirective: focus,
 			});
 
-			// Replace the default compaction prompt entirely
-			output.prompt = enhancedPrompt;
+			if (config.promptMode === "augment") {
+				// Keep OpenCode's default prompt and append our instructions.
+				output.context.push(enhancedPrompt);
+			} else {
+				// Replace the default compaction prompt entirely.
+				output.prompt = enhancedPrompt;
+			}
 
 			logger.info("compaction triggered", {
 				sessionID,
 				hasFiles: !!filesManifest,
 				hasFocus: !!focus,
+				mode: config.promptMode,
 			});
 		},
 
@@ -738,12 +750,14 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 					preemptUsage.delete(sessionID);
 					preemptInProgress.delete(sessionID);
 					preemptLast.delete(sessionID);
+					degradation.clear(sessionID);
 				}
 				return;
 			}
 
 			if (event.type === "session.compacted") {
 				if (sessionID) {
+					degradation.markCompacted(sessionID, Date.now());
 					await restoreTodos(sessionID);
 				}
 				return;
@@ -764,6 +778,47 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 						tokens: info.tokens,
 					});
 				}
+
+				// Post-compaction degradation diagnostic (opt-in).
+				const cfgDeg = config.degradationMonitor;
+				if (
+					cfgDeg?.enabled &&
+					info?.role === "assistant" &&
+					info.finish &&
+					info.sessionID &&
+					degradation.shouldCheck(info.sessionID, Date.now(), cfgDeg.windowMs)
+				) {
+					const fetchMessages = ctx.client.session?.messages;
+					if (fetchMessages) {
+						try {
+							const response = await fetchMessages({
+								path: { id: info.sessionID },
+							});
+							const list = Array.isArray(response)
+								? response
+								: (((response as { data?: unknown })?.data as
+										| unknown[]
+										| undefined) ?? []);
+							const count = countTrailingNoTextAssistant(
+								list as Array<{
+									info?: { role?: string };
+									parts?: unknown;
+								}>,
+							);
+							if (count >= cfgDeg.threshold) {
+								logger.info("post-compaction degradation detected", {
+									sessionID: info.sessionID,
+									consecutiveNoText: count,
+								});
+								degradation.clear(info.sessionID);
+							}
+						} catch (error) {
+							logger.info("degradation check failed", {
+								error: String(error),
+							});
+						}
+					}
+				}
 				return;
 			}
 		},
@@ -781,6 +836,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			preemptInProgress.clear();
 			preemptLast.clear();
 			contextLimitCache.clear();
+			degradation.clearAll();
 		},
 
 		// -----------------------------------------------------------------------

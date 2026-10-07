@@ -36,14 +36,9 @@ plugin adopted or deferred.
 | Preserve subagent `task_id`s ("resume, don't restart") | compaction prompt |
 | Todo list captured before and restored after compaction | `src/todo-preserver.ts` |
 | Preemptive (proactive) compaction near the context limit | `preemptiveCompaction` config + `session.summarize` |
+| Configurable prompt application (replace vs augment) | `promptMode` config |
+| Post-compaction degradation diagnostic | `degradationMonitor` config + `degradation-monitor.ts` |
 
 ## Deferred
 
-### D1 — `output.context` (augment) vs `output.prompt` (replace)
-omo augments OpenCode's default compaction prompt; this plugin replaces it to
-enforce its 11-section format. A configurable mode (`promptMode: replace |
-augment`) would let users keep OpenCode's default prompt and add sections.
-
-### D2 — Post-compaction degradation monitor
-omo watches for consecutive assistant messages with no text after compaction and
-re-injects agent config. Specific to its multi-agent setup; not adopted.
+None remaining: D1 (prompt mode) and D2 (degradation diagnostic) were adopted.

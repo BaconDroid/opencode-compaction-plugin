@@ -24,6 +24,8 @@ OpenCode's built-in compaction produces a 7-section summary. This plugin replace
 | **Recent turn protection** | None | **Last N turns** protected from trimming (default: 4) |
 | **Auto-continue** | Always on | Skipped for the compaction agent and duplicate triggers |
 | **Proactive compaction** | Only at the context limit | Optional **preemptive** compaction near the limit (opt-in) |
+| **Prompt application** | Replaces the default | Configurable: `replace` (default) or `augment` (keep the default prompt) |
+| **Post-compaction health** | None | Opt-in diagnostic for assistant messages without text |
 | **Todo list** | Not managed | **Captured before compaction and restored after** (best-effort) |
 | **Compress tool** | None | Model-driven **compress** tool for proactive context management |
 
@@ -236,6 +238,17 @@ Precedence, low to high: **defaults → global file → plugin options → proje
         "contextLimit": 200000   // optional override; else resolved from the provider
     },
 
+    // How the compaction prompt is applied: "replace" (default) or "augment"
+    // ("augment" keeps OpenCode's default prompt and appends these instructions)
+    "promptMode": "replace",
+
+    // Post-compaction diagnostic: warn when assistant messages lose text (opt-in)
+    "degradationMonitor": {
+        "enabled": false,
+        "threshold": 4,          // consecutive assistant messages without text
+        "windowMs": 120000       // only checked within this window after compaction
+    },
+
     // Glob patterns for files whose outputs should never be trimmed
     "protectedFilePatterns": []
 }
@@ -261,7 +274,7 @@ bun run test:coverage
 # (OpenCode loads .ts files directly via Bun)
 ```
 
-Current coverage: **95.2% statements, 96.1% functions, 97.3% lines, 86.5% branches** (213 tests).
+Current coverage: **95.5% statements, 96.4% functions, 97.3% lines, 87.0% branches** (225 tests).
 
 ## File Structure
 
@@ -276,6 +289,7 @@ src/
   compress.ts       — Compress tool definition and queue management
   todo-preserver.ts — Todo snapshot/restore around compaction
   preemptive-compaction.ts — Proactive compaction decision logic
+  degradation-monitor.ts — Post-compaction degradation diagnostic
 test/
   index.test.ts     — Plugin integration tests
   prompt.test.ts    — Prompt template tests
@@ -286,6 +300,7 @@ test/
   compress.test.ts  — Compress tool tests
   todo-preserver.test.ts — Todo preserver tests
   preemptive-compaction.test.ts — Preemptive compaction tests
+  degradation-monitor.test.ts — Degradation monitor tests
 docs/
   context-compaction-research.md — Literature catalog and implementation backlog
   code-review.md    — Direct source findings
