@@ -292,6 +292,7 @@ docs/
   context-compaction-research.md — Literature catalog and implementation backlog
   code-review.md    — Direct source findings
   omo-compaction.md — oh-my-openagent compaction review and adopted ideas
+  research-prompt.md — Reusable prompt to reproduce the literature sweep
 ```
 
 ## Compatibility
