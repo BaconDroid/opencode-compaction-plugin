@@ -187,6 +187,25 @@ Each feature below lists **what** it does, its **config** keys and how it
 [Default Configuration](#default-configuration); ordering guarantees in
 [Strategy order & interactions](#strategy-order--interactions).
 
+| Feature | Config | Default |
+|---|---|---|
+| Structured prompt | `promptMode` | `replace` |
+| Previous-summary continuity | — | — |
+| Task state (todos) | — | — |
+| Latest user ask | — | — |
+| Files-touched manifest | — | — |
+| Tool-output trimming | `trim.*` | see Default Configuration |
+| Turn protection | `turnProtection.{enabled,turns}` | `true`, `4` |
+| Protected files | `protectedFilePatterns` | `[]` |
+| Deduplication | `dedup.{enabled,protectedTools}` | `true`, `[]` |
+| Error purge | `purgeErrors.{enabled,turns,wholeAttempt,cascade}` | `true`, `4`, `false`, `false` |
+| Graduated eviction | `eviction.{enabled,thresholdTokens,levels,protectPrologue}` | `false`, `80000`, all levels, `true` |
+| Constraint pinning | `pinning.{enabled,patterns,maxClauses}` | `true`, `[]`, `20` |
+| Preemptive compaction | `preemptiveCompaction.*` | disabled |
+| Degradation monitor | `degradationMonitor.{enabled,threshold,windowMs}` | `false`, `4`, `120000` |
+| Auto-continue | — | — |
+| Compression tools | `compress.{protectedTurns,reversible,maxBlocksPerSquash,searchMaxResults}` | `3`, `true`, `8`, `5` |
+
 ### Structured compaction prompt
 - **What** — replaces (or augments) OpenCode's default prompt with the 11-section
   template and carries the continuity blocks `<previous-summary>`,
