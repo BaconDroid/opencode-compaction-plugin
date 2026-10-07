@@ -128,4 +128,5 @@ déjà : le signaler « déjà couvert », sans le re-développer.
 Outgoing non-arXiv links (repos, docs, tools) are **not** followed here; they are
 left for a second phase.
 
-See `context-compaction-research.md` for the result of an earlier, broader sweep.
+See `context-compaction-research.md` — the consolidated reference document
+(both sweep passes merged into a single catalog).

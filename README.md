@@ -1,6 +1,6 @@
 # opencode-live-compaction
 
-Enhanced context compaction plugin for [OpenCode](https://opencode.ai) — structured summaries with files-touched manifests, task-state continuity, tool output trimming, deduplication, error purging, protected file patterns, turn protection, and a compress tool.
+Enhanced context compaction plugin for [OpenCode](https://opencode.ai) — structured summaries with files-touched manifests, task-state continuity, deterministic triggering, multi-scale folding, reversible compression, tool output trimming, deduplication, error purging, graduated eviction, protected file patterns, and turn protection.
 
 ## What it does
 
@@ -18,7 +18,7 @@ OpenCode's built-in compaction produces a 7-section summary. This plugin replace
 | **Prompt** | Hardcoded | Replaced via plugin hook (customizable) |
 | **Tool output size** | Unmanaged | **Configurable per-tool trim limits** |
 | **Duplicate tool calls** | Kept as-is | **Deduplicated** (keeps only latest) |
-| **Errored tool inputs** | Kept forever | **Purged** after N turns (error output preserved) |
+| **Errored tool calls** | Kept forever | **Whole failed attempt purged** after N turns (input + output, compact error extract kept); cascades to dependent calls |
 | **Manual compaction** | `/compact` (built-in) | left to OpenCode (the plugin does not override it) |
 | **Protected files** | None | **Glob patterns** (`AGENTS.md`, `**/*.config.ts`) never trimmed |
 | **Recent turn protection** | None | **Last N turns** protected from trimming (default: 4) |
@@ -27,7 +27,15 @@ OpenCode's built-in compaction produces a 7-section summary. This plugin replace
 | **Prompt application** | Replaces the default | Configurable: `replace` (default) or `augment` (keep the default prompt) |
 | **Post-compaction health** | None | Opt-in diagnostic for assistant messages without text |
 | **Todo list** | Not managed | **Captured before compaction and restored after** (best-effort) |
-| **Compress tool** | None | Model-driven **compress** tool for proactive context management |
+| **Compress tool** | None | Model-driven **compress** tool (deterministic span selection — no indices needed) |
+| **Block folding** | None | Stable `[bN]` block labels + **squash** tool to merge contiguous blocks |
+| **Reversible compression** | None | **expand** (sticky) / **recall** (one-shot) restore the original messages from an in-memory sidecar |
+| **Trigger threshold** | Fixed | Hybrid `min(contextLimit × ratio, absolute)`; cache tokens excluded by default |
+| **Deterministic gates** | None | Optional minimum new tokens/messages since the last compaction + tail guard |
+| **Graduated eviction** | None | LLM-free `reasoning → bulk output → intermediate → episode` (never evicts `user` turns) |
+| **Task state** | "Goal" prose | `<task-state>` block with todo ids/statuses/priorities |
+| **Focus** | None | `<latest-user-ask>` block anchored to the current user request |
+| **Judge-free stop** | None | Draft-convergence detection (text distance + patience + failsafe) |
 
 ## Install
 
@@ -82,22 +90,26 @@ Records every file operation (read, write, edit, delete) during the session. Pro
 
 ### 2. `experimental.chat.messages.transform` — Context optimization
 
-Runs on every message batch sent to the LLM. Applies three strategies in order:
+Runs on every message batch sent to the LLM. Applies the following strategies in order:
 
-1. **Tool output trimming** — Truncates long tool outputs (bash, read, grep, etc.) to configurable limits. Keeps the *end* of the output (usually has the result/error).
-2. **Deduplication** — When the same tool is called with the same args multiple times, only the latest output is kept. Earlier duplicates are replaced with a short marker.
-3. **Error input purging** — Strips the large input content from errored tool calls (the error message is preserved).
+1. **Pending compressions** — Applies queued `compress` calls (deterministic span selection) as `<compressed-block>` messages with stable `[bN]` labels.
+2. **Squash** — Merges contiguous compressed blocks requested via the `squash` tool (fail-closed on ambiguous requests).
+3. **Expand / recall** — Restores a block's original messages from the in-memory sidecar (`expand` is sticky, `recall` is one-shot).
+4. **Tool output trimming** — Truncates long tool outputs (bash, read, grep, etc.) to configurable limits. Keeps the *end* of the output (usually has the result/error).
+5. **Deduplication** — When the same tool is called with the same args multiple times, only the latest output is kept. Earlier duplicates are replaced with a short marker.
+6. **Error purge** — Strips the whole failed attempt (input + output) from errored tool calls older than N turns, keeping a compact error extract; optionally cascades to calls that depend on the purged call.
+7. **Graduated eviction** — Opt-in, LLM-free eviction (`reasoning → bulk output → intermediate → episode`) once the estimated budget is exceeded; user turns are never evicted.
 
 ### 3. `experimental.session.compacting` — Enhanced prompt
 
-When compaction triggers (automatic or manual `/compact`), applies the enhanced 11-section template. By default (`promptMode: "replace"`) it replaces the default prompt; with `"augment"` it keeps OpenCode's default prompt and appends the template. In replace mode the previous compaction summary is fetched and re-injected as `<previous-summary>` so continuity is preserved across repeated compactions.
+When compaction triggers (automatic or manual `/compact`), applies the enhanced 11-section template. By default (`promptMode: "replace"`) it replaces the default prompt; with `"augment"` it keeps OpenCode's default prompt and appends the template. In replace mode the previous compaction summary is fetched and re-injected as `<previous-summary>` so continuity is preserved across repeated compactions (a sliding state avoids re-emitting the same summary). The prompt also carries `<task-state>` (captured todos with ids/statuses/priorities), `<latest-user-ask>` (the current user request), and status markers (`[DONE]`, `[IN PROGRESS]`, `[TODO]`, `[BLOCKED]`, `[FAILED]`, `[UNVERIFIED]`).
 
 1. **Brief** — Executive summary
 2. **User Intent Trail** — Chronological goals with direction changes
 3. **Constraints & Preferences** — User constraints and specs
 4. **Errors & Dead Ends** — Failed approaches and why
 5. **Key Decisions** — Decision log with rationale
-6. **Status** — Done / In Progress / Blocked
+6. **Status** — Done / In Progress / Blocked, tagged with status markers
 7. **Task Continuity** — Exact state when compaction triggered
 8. **Open Issues & Questions** — Unresolved items
 9. **Next Steps** — Ordered actions to resume
@@ -108,18 +120,31 @@ When compaction triggers (automatic or manual `/compact`), applies the enhanced 
 
 Enables the synthetic "continue" turn after compaction, except for the compaction agent itself and duplicate triggers (a short per-session guard prevents auto-continue loops).
 
-## Compress Tool
+## Compression Tools
 
-The plugin exposes a `compress` tool to the model, enabling proactive context management. The model decides when to compress and writes the summary itself (it has full context).
+The plugin exposes four model-driven tools for proactive context management. The model decides when to compress and writes the summaries itself (it has full context).
+
+### `compress`
 
 | Parameter | Type | Description |
 |---|---|---|
 | `topic` | string | Short label (3-5 words) for display |
-| `start` | number | Start message index (inclusive, 0-based) |
-| `end` | number | End message index (inclusive, 0-based) |
 | `summary` | string | Complete technical summary replacing the range |
+| `scale` | `"granular"` \| `"deep"` *(optional)* | One message vs. a whole range (default: deep) |
+| `start` | number *(optional, legacy)* | Explicit start message index (inclusive, 0-based) |
+| `end` | number *(optional, legacy)* | Explicit end message index (inclusive, 0-based) |
 
-When the model calls `compress`, the specified message range is replaced with a `<compressed-block>` containing the summary. This happens on the next message transform cycle.
+When `start`/`end` are omitted, the plugin selects the range **deterministically**: everything after the newest existing compressed block, excluding the last `compress.protectedTurns` user turns. The range is replaced with a `<compressed-block>` carrying a durable `id` and a stable `[bN]` label. The originals are kept in memory when `compress.reversible` is enabled (default).
+
+### `squash`
+
+Merges two or more **contiguous** compressed blocks (referenced by `[bN]` labels) into a single block: `{ from, to, topic, summary }`. Ambiguous requests (unknown labels, fewer than two blocks, non-contiguous, or more than `compress.maxBlocksPerSquash`) are refused.
+
+### `expand` / `recall`
+
+Restore a compressed block's original messages from the in-memory sidecar, referenced by `[bN]` label or durable id. `expand` is **sticky** (stays expanded on later turns); `recall` is **one-shot**.
+
+All four tools are applied on the next message transform cycle.
 
 ## Protected File Patterns
 
@@ -203,10 +228,27 @@ Precedence, low to high: **defaults → global file → plugin options → proje
         "protectedTools": []  // Tool names to exclude from dedup
     },
 
-    // Error input purging: strip inputs from errored tool calls
+    // Error purge: strip the whole failed attempt (input + output) from errored calls
     "purgeErrors": {
         "enabled": true,
-        "turns": 4  // Purge errored tool inputs older than N user turns
+        "turns": 4,             // Purge errored calls older than N user turns
+        "wholeAttempt": true,   // Also replace the output with a compact error extract
+        "cascade": true         // Cascade the purge to calls that depend on a purged call
+    },
+
+    // Model-driven compression tools
+    "compress": {
+        "protectedTurns": 3,        // Trailing user turns excluded from deterministic selection
+        "reversible": true,         // Keep originals in memory for expand/recall
+        "maxBlocksPerSquash": 8     // Max blocks merged by a single squash
+    },
+
+    // Graduated, LLM-free eviction (opt-in)
+    "eviction": {
+        "enabled": false,
+        "thresholdTokens": 80000,   // Eviction runs only above this estimated budget
+        "levels": ["reasoning", "bulk_output", "intermediate", "episode"],
+        "protectPrologue": true     // Never evict the first message
     },
 
     // Turn protection: protect recent tool outputs from trimming
@@ -217,10 +259,15 @@ Precedence, low to high: **defaults → global file → plugin options → proje
 
     // Proactive compaction before the context overflows (opt-in)
     "preemptiveCompaction": {
-        "enabled": false,        // enable to compact before the context is full
-        "threshold": 0.78,       // fraction of the context limit that triggers it
-        "cooldownMs": 60000,     // minimum delay between proactive compactions
-        "contextLimit": 200000   // optional override; else resolved from the provider
+        "enabled": false,             // enable to compact before the context is full
+        "threshold": 0.78,            // fraction of the context limit that triggers it
+        "absoluteTokenThreshold": 0,  // optional absolute ceiling (0 = disabled); min(ratio, this) wins
+        "countCacheTokens": false,    // count cache read/write tokens (off avoids premature triggers)
+        "minTokensSinceLast": 0,      // gate: minimum new tokens since the last compaction
+        "minMessagesSinceLast": 0,    // gate: minimum new messages since the last compaction
+        "tailGuard": { "enabled": false, "minNewToolCalls": 3 },  // gate: minimum new tool calls
+        "cooldownMs": 60000,          // minimum delay between proactive compactions
+        "contextLimit": 200000        // optional override; else resolved from the provider
     },
 
     // How the compaction prompt is applied: "replace" (default) or "augment"
@@ -230,8 +277,11 @@ Precedence, low to high: **defaults → global file → plugin options → proje
     // Post-compaction diagnostic: warn when assistant messages lose text (opt-in)
     "degradationMonitor": {
         "enabled": false,
-        "threshold": 4,          // consecutive assistant messages without text
-        "windowMs": 120000       // only checked within this window after compaction
+        "threshold": 4,               // consecutive assistant messages without text
+        "windowMs": 120000,           // only checked within this window after compaction
+        "convergenceThreshold": 0.05, // judge-free stop: converged draft distance
+        "convergencePatience": 3,     // consecutive converged steps required to halt
+        "maxRounds": 12               // judge-free stop: failsafe round cap
     },
 
     // Glob patterns for files whose outputs should never be trimmed
@@ -259,7 +309,7 @@ bun run test:coverage
 # (OpenCode loads .ts files directly via Bun)
 ```
 
-Current coverage: **95.8% statements, 96.5% functions, 97.7% lines, 87.2% branches** (223 tests).
+Current coverage: **95.9% statements, 96.2% functions, 97.7% lines, 85.2% branches** (332 tests).
 
 ## File Structure
 
@@ -269,13 +319,16 @@ src/
   prompt.ts         — Compaction prompt template (11 sections)
   files-touched.ts  — File operation tracker with manifest renderer
   config.ts         — Config loading and defaults
-  strategies.ts     — Dedup and error purge strategies
+  strategies.ts     — Dedup, error purge and cascade purge strategies
   glob.ts           — Glob matcher for protected file patterns
-  compress.ts       — Compress tool definition and queue management
-  todo-preserver.ts — Todo snapshot/restore around compaction
-  preemptive-compaction.ts — Proactive compaction decision logic
-  degradation-monitor.ts — Post-compaction degradation diagnostic
-  previous-summary.ts — Previous compaction summary extraction
+  compress.ts       — Compress/squash tools, queue management, block rendering
+  blocks.ts         — Durable block ids and deterministic span selection
+  expand.ts         — Reversible sidecar + expand/recall tools
+  eviction.ts       — Graduated, LLM-free eviction
+  todo-preserver.ts — Todo snapshot/restore and <task-state> rendering
+  preemptive-compaction.ts — Trigger threshold, gates and preemptive decision logic
+  degradation-monitor.ts — Degradation diagnostic + judge-free halting rule
+  previous-summary.ts — Previous summary extraction + sliding state
 test/
   index.test.ts     — Plugin integration tests
   prompt.test.ts    — Prompt template tests
@@ -283,16 +336,20 @@ test/
   config.test.ts    — Config loading tests
   strategies.test.ts — Strategy unit tests
   glob.test.ts      — Glob matcher tests
-  compress.test.ts  — Compress tool tests
-  todo-preserver.test.ts — Todo preserver tests
-  preemptive-compaction.test.ts — Preemptive compaction tests
-  degradation-monitor.test.ts — Degradation monitor tests
-  previous-summary.test.ts — Previous summary tests
+  compress.test.ts  — Compress/squash tool tests
+  blocks.test.ts    — Block id and span selection tests
+  expand.test.ts    — Reversible expand/recall tests
+  eviction.test.ts  — Graduated eviction tests
+  todo-preserver.test.ts — Todo preserver and task-state tests
+  preemptive-compaction.test.ts — Trigger, gates and preemptive tests
+  degradation-monitor.test.ts — Degradation monitor and halting tests
+  previous-summary.test.ts — Previous summary and sliding-state tests
 docs/
   context-compaction-research.md — Consolidated literature catalog, categories and implementation backlog
   code-review.md    — Direct source findings
   omo-compaction.md — oh-my-openagent compaction review and adopted ideas
   research-prompt.md — Reusable prompt to reproduce the literature sweep
+  ensembles/        — Per-ensemble research, plans and results (E1–E5)
 ```
 
 ## Compatibility

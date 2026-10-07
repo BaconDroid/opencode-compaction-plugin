@@ -78,9 +78,9 @@ niveau suivant) puis DEMANDE-MOI si je veux continuer (et jusqu'où : +N niveaux
 - Pour chaque entrée 🟢 direct : une phrase « comment ça pourrait améliorer le
   plugin », mappée à un fichier/hook précis.
 - Les entrées 🟡 indirect : ce qu'on pourrait en tirer éventuellement.
-- Optionnel (si je le demande) : écrire l'INDEX dans
-  `docs/context-compaction-research-2.md` — jamais écraser
-  `docs/context-compaction-research.md`.
+- Optionnel (si je le demande) : consolider l'INDEX dans
+  `docs/context-compaction-research.md` (document de référence unique,
+  toutes les passes fusionnées) plutôt que de créer un fichier par passe.
 
 # Contraintes
 - N'invente jamais un titre/auteur/ID/URL ; si non récupérable →
