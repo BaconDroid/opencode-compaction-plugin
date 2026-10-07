@@ -36,6 +36,12 @@ import {
 	extractTodos,
 	type TodoSnapshot,
 } from "./todo-preserver.js";
+import {
+	totalInputTokens,
+	shouldTriggerPreemptiveCompaction,
+	type CachedUsage,
+	type TokenInfo,
+} from "./preemptive-compaction.js";
 
 // ---------------------------------------------------------------------------
 // Types — inlined from @opencode-ai/plugin to avoid requiring it as a dep.
@@ -56,6 +62,14 @@ interface PluginInput {
 		};
 		session?: {
 			todo?: (input: { path: { id: string } }) => Promise<unknown>;
+			summarize?: (input: {
+				path: { id: string };
+				body: { providerID: string; modelID: string; auto?: boolean };
+				query: { directory: string };
+			}) => Promise<unknown>;
+		};
+		provider?: {
+			list?: (input?: Record<string, unknown>) => Promise<unknown>;
 		};
 	};
 	project: { id: string; name: string };
@@ -283,6 +297,10 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 	const focusDirectives = new Map<string, string>();
 	const compressions = new CompressionStore();
 	const todoPreserver = new TodoPreserver();
+	const preemptUsage = new Map<string, CachedUsage>();
+	const preemptInProgress = new Set<string>();
+	const preemptLast = new Map<string, number>();
+	const contextLimitCache = new Map<string, number>();
 	let pendingFocus: string | undefined;
 
 	const getTracker = (sessionID: string): FilesTouchedTracker => {
@@ -348,6 +366,89 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		}
 	};
 
+	// Resolve the model context limit: config override first, else the provider
+	// catalog. Cached per provider/model.
+	const resolveContextLimit = async (
+		providerID: string,
+		modelID: string,
+	): Promise<number | undefined> => {
+		const override = config.preemptiveCompaction?.contextLimit;
+		if (typeof override === "number" && override > 0) return override;
+
+		const key = `${providerID}/${modelID}`;
+		const cached = contextLimitCache.get(key);
+		if (cached !== undefined) return cached;
+
+		const list = ctx.client.provider?.list;
+		if (!list) return undefined;
+		try {
+			const response = (await list({})) as {
+				all?: Array<{
+					id?: string;
+					models?: Record<string, { limit?: { context?: number } }>;
+				}>;
+			};
+			const limit = response?.all?.find((p) => p.id === providerID)?.models?.[
+				modelID
+			]?.limit?.context;
+			if (typeof limit === "number" && limit > 0) {
+				contextLimitCache.set(key, limit);
+				return limit;
+			}
+		} catch (error) {
+			logger.info("context limit resolution failed", { error: String(error) });
+		}
+		return undefined;
+	};
+
+	// Trigger proactive compaction when the reported usage nears the limit.
+	const maybePreempt = async (sessionID: string): Promise<void> => {
+		const cfg = config.preemptiveCompaction;
+		if (!cfg?.enabled) return;
+		const usage = preemptUsage.get(sessionID);
+		if (!usage) return;
+		if (preemptInProgress.has(sessionID)) return;
+
+		const limit = await resolveContextLimit(usage.providerID, usage.modelID);
+		if (limit === undefined) return;
+
+		const trigger = shouldTriggerPreemptiveCompaction({
+			totalInputTokens: totalInputTokens(usage.tokens),
+			contextLimit: limit,
+			threshold: cfg.threshold,
+			cooldownMs: cfg.cooldownMs,
+			now: Date.now(),
+			lastCompactionAt: preemptLast.get(sessionID),
+			inProgress: false,
+		});
+		if (!trigger) return;
+
+		const summarize = ctx.client.session?.summarize;
+		if (!summarize) return;
+
+		preemptInProgress.add(sessionID);
+		preemptLast.set(sessionID, Date.now());
+		try {
+			await summarize({
+				path: { id: sessionID },
+				body: {
+					providerID: usage.providerID,
+					modelID: usage.modelID,
+					auto: true,
+				},
+				query: { directory: ctx.directory },
+			});
+			logger.info("preemptive compaction triggered", {
+				sessionID,
+				ratio: totalInputTokens(usage.tokens) / limit,
+			});
+		} catch (error) {
+			logger.info("preemptive compaction failed", { error: String(error) });
+		} finally {
+			preemptInProgress.delete(sessionID);
+		}
+	};
+
 	const hooks: Hooks = {
 		// -----------------------------------------------------------------------
 		// Track file operations + capture compress tool calls
@@ -384,6 +485,9 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 					});
 				}
 			}
+
+			// Proactive compaction check (opt-in).
+			await maybePreempt(sessionID);
 		},
 
 		// -----------------------------------------------------------------------
@@ -606,12 +710,24 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		// Cleanup on session events
 		// -----------------------------------------------------------------------
 		event: async ({ event }) => {
-			// The SDK carries the session under `info.id` for some events and
-			// `sessionID` for others; accept both.
+			// The SDK carries the session under `info.id` for some events,
+			// `info.sessionID` for messages, and `sessionID` for others.
 			const props = event.properties as
-				| { sessionID?: string; info?: { id?: string } }
+				| {
+						sessionID?: string;
+						info?: {
+							id?: string;
+							sessionID?: string;
+							role?: string;
+							providerID?: string;
+							modelID?: string;
+							finish?: unknown;
+							tokens?: TokenInfo;
+						};
+					}
 				| undefined;
-			const sessionID = props?.sessionID ?? props?.info?.id;
+			const sessionID =
+				props?.sessionID ?? props?.info?.id ?? props?.info?.sessionID;
 
 			if (event.type === "session.deleted") {
 				if (sessionID) {
@@ -619,6 +735,9 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 					focusDirectives.delete(sessionID);
 					compressions.clear(sessionID);
 					todoPreserver.clear(sessionID);
+					preemptUsage.delete(sessionID);
+					preemptInProgress.delete(sessionID);
+					preemptLast.delete(sessionID);
 				}
 				return;
 			}
@@ -626,6 +745,24 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			if (event.type === "session.compacted") {
 				if (sessionID) {
 					await restoreTodos(sessionID);
+				}
+				return;
+			}
+
+			if (event.type === "message.updated") {
+				const info = props?.info;
+				if (
+					info?.role === "assistant" &&
+					info.finish &&
+					info.sessionID &&
+					info.providerID &&
+					info.tokens
+				) {
+					preemptUsage.set(info.sessionID, {
+						providerID: info.providerID,
+						modelID: info.modelID ?? "",
+						tokens: info.tokens,
+					});
 				}
 				return;
 			}
@@ -640,6 +777,10 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			pendingFocus = undefined;
 			compressions.clearAll();
 			todoPreserver.clearAll();
+			preemptUsage.clear();
+			preemptInProgress.clear();
+			preemptLast.clear();
+			contextLimitCache.clear();
 		},
 
 		// -----------------------------------------------------------------------

@@ -66,6 +66,20 @@ describe("mergeConfig()", () => {
 		expect(cfg.purgeErrors.turns).toBe(8);
 	});
 
+	it("defaults preemptive compaction to disabled", () => {
+		const cfg = mergeConfig({});
+		expect(cfg.preemptiveCompaction.enabled).toBe(false);
+		expect(cfg.preemptiveCompaction.threshold).toBe(0.78);
+	});
+
+	it("overrides preemptive compaction", () => {
+		const cfg = mergeConfig({
+			preemptiveCompaction: { enabled: true, contextLimit: 1234 },
+		});
+		expect(cfg.preemptiveCompaction.enabled).toBe(true);
+		expect(cfg.preemptiveCompaction.contextLimit).toBe(1234);
+	});
+
 	it("overrides commands settings", () => {
 		const cfg = mergeConfig({ commands: { enabled: false } });
 		expect(cfg.commands.enabled).toBe(false);
