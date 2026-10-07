@@ -749,6 +749,8 @@ describe("LiveCompactionPlugin", () => {
 				squash: "allow",
 				expand: "allow",
 				recall: "allow",
+				inspect: "allow",
+				search: "allow",
 			});
 		});
 
@@ -763,6 +765,8 @@ describe("LiveCompactionPlugin", () => {
 				squash: "allow",
 				expand: "allow",
 				recall: "allow",
+				inspect: "allow",
+				search: "allow",
 			});
 		});
 

@@ -50,8 +50,11 @@ export function applyPendingRequests(
 				const replaced = applyCompressions(messages, applicable, {
 					protectedTurns: config.compress?.protectedTurns ?? 3,
 					record: reversible
-						? ({ id, original }) =>
-								expansions.save(sid, id, original as unknown[])
+						? ({ id, label, topic, original }) =>
+								expansions.save(sid, id, original as unknown[], {
+									label,
+									topic,
+								})
 						: undefined,
 				});
 				if (replaced > 0) {

@@ -60,6 +60,8 @@ export interface CompressConfig {
 	reversible?: boolean;
 	/** Maximum number of blocks merged by a single squash (default: 8) */
 	maxBlocksPerSquash?: number;
+	/** Maximum hits returned by the `search` tool (default: 5) */
+	searchMaxResults?: number;
 }
 
 export interface EvictionSettings {
@@ -205,6 +207,7 @@ export const DEFAULT_CONFIG: Required<
 		protectedTurns: 3,
 		reversible: true,
 		maxBlocksPerSquash: 8,
+		searchMaxResults: 5,
 	},
 	eviction: {
 		enabled: false,
