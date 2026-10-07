@@ -1204,13 +1204,14 @@ describe("LiveCompactionPlugin", () => {
 	describe("compress tool", () => {
 		it("exposes a valid compress tool definition", async () => {
 			const hooks = await getHooks();
-			expect((hooks as any).tool).toBeDefined();
-			expect((hooks as any).tool.description).toContain("Compress");
-			expect((hooks as any).tool.args).toHaveProperty("topic");
-			expect((hooks as any).tool.args).toHaveProperty("start");
-			expect((hooks as any).tool.args).toHaveProperty("end");
-			expect((hooks as any).tool.args).toHaveProperty("summary");
-			expect(typeof (hooks as any).tool.execute).toBe("function");
+			const def = (hooks as any).tool.compress;
+			expect(def).toBeDefined();
+			expect(def.description).toContain("Compress");
+			expect(def.args).toHaveProperty("topic");
+			expect(def.args).toHaveProperty("start");
+			expect(def.args).toHaveProperty("end");
+			expect(def.args).toHaveProperty("summary");
+			expect(typeof def.execute).toBe("function");
 		});
 
 		it("queues compression on compress tool call", async () => {

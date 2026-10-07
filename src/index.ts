@@ -559,7 +559,8 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		// -----------------------------------------------------------------------
 		// Compress tool definition
 		// -----------------------------------------------------------------------
-		tool: buildCompressToolDef(),
+		// The `tool` hook maps a tool name to its definition.
+		tool: { compress: buildCompressToolDef() },
 	};
 };
 

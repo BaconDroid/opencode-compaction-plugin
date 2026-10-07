@@ -242,3 +242,15 @@ parts with a string `output`. Tests updated accordingly.
 
 
 
+
+---
+
+## Re-validation 5
+
+### F7 — The `tool` hook was not a map
+`src/index.ts`. The SDK type is `tool?: { [key: string]: ToolDefinition }`, but
+the plugin passed a single `ToolDefinition` (`tool: buildCompressToolDef()`), so
+OpenCode would iterate `description`/`args`/`execute` as if they were tool names.
+The compress tool was registered incorrectly.
+→ Resolved: `tool: { compress: buildCompressToolDef() }`; the test now reads
+`tool.compress`.
