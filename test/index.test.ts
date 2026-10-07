@@ -382,6 +382,48 @@ describe("LiveCompactionPlugin", () => {
 			await hooks["experimental.compaction.autocontinue"]!({} as any, output);
 			expect(output.enabled).toBe(true);
 		});
+
+		it("disables autocontinue for the compaction agent", async () => {
+			const hooks = await getHooks();
+			const output = { enabled: true };
+			await hooks["experimental.compaction.autocontinue"]!(
+				{ sessionID: "s", agent: "compaction" } as any,
+				output,
+			);
+			expect(output.enabled).toBe(false);
+		});
+
+		it("suppresses duplicate autocontinue for a session", async () => {
+			const hooks = await getHooks();
+			const first = { enabled: false };
+			await hooks["experimental.compaction.autocontinue"]!(
+				{ sessionID: "sess-dup", agent: "build" } as any,
+				first,
+			);
+			expect(first.enabled).toBe(true);
+
+			const second = { enabled: false };
+			await hooks["experimental.compaction.autocontinue"]!(
+				{ sessionID: "sess-dup", agent: "build" } as any,
+				second,
+			);
+			expect(second.enabled).toBe(false);
+		});
+	});
+
+	// ---------------------------------------------------------------------------
+	// hook error isolation
+	// ---------------------------------------------------------------------------
+
+	describe("hook error isolation", () => {
+		it("does not reject when a hook throws", async () => {
+			const hooks = await getHooks();
+			await expect(
+				hooks["experimental.chat.messages.transform"]!({} as any, {
+					messages: null,
+				} as any),
+			).resolves.toBeUndefined();
+		});
 	});
 
 	// ---------------------------------------------------------------------------

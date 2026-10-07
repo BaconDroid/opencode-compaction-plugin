@@ -101,7 +101,7 @@ When compaction triggers (automatic or manual `/compact`), replaces the default 
 
 ### 4. `experimental.compaction.autocontinue` — Auto-resume
 
-Ensures the session continues automatically after compaction so work isn't interrupted.
+Enables the synthetic "continue" turn after compaction, except for the compaction agent itself and duplicate triggers (a short per-session guard prevents auto-continue loops).
 
 ## Slash Commands
 

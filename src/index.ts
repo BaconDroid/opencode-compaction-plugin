@@ -93,7 +93,7 @@ interface Hooks {
 		output: { context: string[]; prompt?: string },
 	) => Promise<void>;
 	"experimental.compaction.autocontinue"?: (
-		input: Record<string, unknown>,
+		input: { sessionID?: string; agent?: string; [key: string]: unknown },
 		output: { enabled: boolean },
 	) => Promise<void>;
 	"experimental.chat.messages.transform"?: (
@@ -288,7 +288,34 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 	// Deferred compression requests older than this are dropped (N2).
 	const DEFERRED_COMPRESSION_MAX_AGE_MS = 30 * 60 * 1000;
 
-	return {
+	// Isolate hook failures: a thrown error is logged and swallowed so it cannot
+	// break compaction or the message pipeline.
+	const safe = <T extends (...args: any[]) => any>(name: string, fn: T): T =>
+		(async (...args: Parameters<T>) => {
+			try {
+				return await fn(...args);
+			} catch (error) {
+				logger.info(`hook error: ${name}`, { error: String(error) });
+				return undefined;
+			}
+		}) as T;
+
+	// Autocontinue hardening: never auto-continue for the compaction agent, and
+	// suppress duplicate auto-continue for the same session within a short window.
+	const AUTOCONTINUE_GUARD_MS = 10_000;
+	const autocontinueGuard = new Map<string, ReturnType<typeof setTimeout>>();
+	const markAutocontinue = (sessionID: string) => {
+		const existing = autocontinueGuard.get(sessionID);
+		if (existing) clearTimeout(existing);
+		const timer = setTimeout(
+			() => autocontinueGuard.delete(sessionID),
+			AUTOCONTINUE_GUARD_MS,
+		);
+		(timer as { unref?: () => void }).unref?.();
+		autocontinueGuard.set(sessionID, timer);
+	};
+
+	const hooks: Hooks = {
 		// -----------------------------------------------------------------------
 		// Track file operations + capture compress tool calls
 		// -----------------------------------------------------------------------
@@ -505,9 +532,29 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		},
 
 		// -----------------------------------------------------------------------
-		// Auto-continue: always enable after compaction to keep the session flowing
+		// Auto-continue: enabled after compaction, except for the compaction agent
+		// and duplicate triggers.
 		// -----------------------------------------------------------------------
-		"experimental.compaction.autocontinue": async (_input, output) => {
+		"experimental.compaction.autocontinue": async (input, output) => {
+			if (
+				typeof input.agent === "string" &&
+				input.agent.trim().toLowerCase() === "compaction"
+			) {
+				output.enabled = false;
+				return;
+			}
+
+			const sessionID =
+				typeof input.sessionID === "string" ? input.sessionID : undefined;
+			if (sessionID) {
+				if (autocontinueGuard.has(sessionID)) {
+					output.enabled = false;
+					logger.info("autocontinue suppressed (duplicate)");
+					return;
+				}
+				markAutocontinue(sessionID);
+			}
+
 			output.enabled = true;
 		},
 
@@ -562,6 +609,19 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		// The `tool` hook maps a tool name to its definition.
 		tool: { compress: buildCompressToolDef() },
 	};
+
+	// Wrap every hook so a thrown error is isolated (see `safe`).
+	for (const key of Object.keys(hooks) as (keyof Hooks)[]) {
+		const value = hooks[key];
+		if (typeof value === "function") {
+			(hooks as Record<string, unknown>)[key] = safe(
+				key as string,
+				value as (...args: unknown[]) => unknown,
+			);
+		}
+	}
+
+	return hooks;
 };
 
 export default LiveCompactionPlugin;
