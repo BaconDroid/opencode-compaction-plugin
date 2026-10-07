@@ -44,6 +44,7 @@ describe("mergeConfig()", () => {
 			protectedTurns: 3,
 			reversible: true,
 			maxBlocksPerSquash: 8,
+			searchMaxResults: 5,
 		});
 		expect(cfg.eviction).toMatchObject({
 			enabled: false,
@@ -119,6 +120,7 @@ describe("mergeConfig()", () => {
 			protectedTurns: 5,
 			reversible: false,
 			maxBlocksPerSquash: 2,
+			searchMaxResults: 5,
 		});
 		expect(cfg.eviction).toMatchObject({
 			enabled: true,

@@ -38,6 +38,8 @@ import {
 	buildSquashToolDef,
 	buildExpandToolDef,
 	buildRecallToolDef,
+	buildInspectToolDef,
+	buildSearchToolDef,
 } from "./opencode/tools.js";
 import {
 	TodoPreserver,
@@ -60,7 +62,14 @@ import { applyTransform } from "./core/transform.js";
 import type { Hooks, Logger, Plugin, PluginInput } from "./types.js";
 
 /** Model-driven tools registered by this plugin (used for permission wiring). */
-const PLUGIN_TOOL_NAMES = ["compress", "squash", "expand", "recall"] as const;
+const PLUGIN_TOOL_NAMES = [
+	"compress",
+	"squash",
+	"expand",
+	"recall",
+	"inspect",
+	"search",
+] as const;
 
 function makeLogger(
 	client: PluginInput["client"],
@@ -578,6 +587,11 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			squash: buildSquashToolDef(),
 			expand: buildExpandToolDef(),
 			recall: buildRecallToolDef(),
+			inspect: buildInspectToolDef(expansions),
+			search: buildSearchToolDef(
+				expansions,
+				config.compress?.searchMaxResults ?? 5,
+			),
 		},
 	};
 

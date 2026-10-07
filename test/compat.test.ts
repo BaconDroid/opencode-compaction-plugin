@@ -12,7 +12,14 @@ import { join } from "node:path";
 const TMP_DIR = join(import.meta.dirname, "__tmp_compat_test");
 const ORIGINAL_XDG = process.env.XDG_CONFIG_HOME;
 
-const PLUGIN_TOOLS = ["compress", "squash", "expand", "recall"];
+const PLUGIN_TOOLS = [
+	"compress",
+	"squash",
+	"expand",
+	"recall",
+	"inspect",
+	"search",
+];
 
 // Documented omo-slim tool names/prefixes.
 const OMO_SLIM_PREFIXES = ["task", "ast_grep_", "marketplace_"];

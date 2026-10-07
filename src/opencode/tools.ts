@@ -4,6 +4,11 @@
  */
 
 import { tool } from "@opencode-ai/plugin";
+import {
+	renderInspector,
+	renderSearch,
+	type ExpansionSidecar,
+} from "../core/expand.js";
 
 /**
  * Build the `compress` tool definition: replace a range of messages with a
@@ -128,6 +133,44 @@ expansion is one-shot and the block re-compresses afterwards.`,
 		},
 		async execute(args) {
 			return `Recall queued for block ${args.block}. It will be applied on the next message transform.`;
+		},
+	});
+}
+
+/**
+ * Build the `inspect` tool: list the compressed blocks currently held in the
+ * in-memory sidecar.
+ */
+export function buildInspectToolDef(sidecar: ExpansionSidecar) {
+	return tool({
+		description: `List the compressed blocks currently held in memory.
+
+Use this to see which [bN] blocks exist and can be recalled or expanded.`,
+		args: {},
+		async execute() {
+			return renderInspector(sidecar);
+		},
+	});
+}
+
+/**
+ * Build the `search` tool: deterministic keyword search over the originals of
+ * the compressed blocks (no embeddings).
+ */
+export function buildSearchToolDef(
+	sidecar: ExpansionSidecar,
+	maxResults: number,
+) {
+	return tool({
+		description: `Search the originals of the compressed blocks by keyword.
+
+Deterministic (case-insensitive substring), no embeddings. Returns matching
+[bN] labels and a snippet; use expand or recall to restore a match.`,
+		args: {
+			query: tool.schema.string().describe("Keyword to search for"),
+		},
+		async execute(args) {
+			return renderSearch(sidecar, args.query, maxResults);
 		},
 	});
 }

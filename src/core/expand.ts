@@ -9,12 +9,28 @@ import {
 	parseCompressBlocks,
 	type BlockMessage,
 } from "./blocks.js";
+import { partsText } from "./messages.js";
 
 export interface ExpansionRecord {
 	id: string;
 	label?: string;
+	topic?: string;
 	original: unknown[];
 	createdAt: number;
+}
+
+export interface SearchHit {
+	id: string;
+	label?: string;
+	topic?: string;
+	snippet: string;
+}
+
+function recordText(record: ExpansionRecord): string {
+	return (record.original as Array<{ parts?: unknown }>)
+		.map((message) => partsText(message?.parts))
+		.filter(Boolean)
+		.join("\n");
 }
 
 export type ExpandMode = "sticky" | "once";
@@ -32,8 +48,19 @@ export class ExpansionSidecar {
 	private records = new Map<string, ExpansionRecord>();
 	private bySession = new Map<string, Set<string>>();
 
-	save(sessionID: string, id: string, original: unknown[]): void {
-		this.records.set(id, { id, original, createdAt: Date.now() });
+	save(
+		sessionID: string,
+		id: string,
+		original: unknown[],
+		meta?: { label?: string; topic?: string },
+	): void {
+		this.records.set(id, {
+			id,
+			label: meta?.label,
+			topic: meta?.topic,
+			original,
+			createdAt: Date.now(),
+		});
 		let ids = this.bySession.get(sessionID);
 		if (!ids) {
 			ids = new Set();
@@ -44,6 +71,41 @@ export class ExpansionSidecar {
 
 	get(id: string): ExpansionRecord | undefined {
 		return this.records.get(id);
+	}
+
+	/** All stored records, newest first. */
+	list(): ExpansionRecord[] {
+		return [...this.records.values()].sort(
+			(a, b) => b.createdAt - a.createdAt,
+		);
+	}
+
+	/**
+	 * Deterministic keyword search over the stored originals (case-insensitive
+	 * substring, no embeddings). Returns up to `maxResults` hits with a snippet.
+	 */
+	search(query: string, maxResults: number): SearchHit[] {
+		const needle = query.trim().toLowerCase();
+		if (!needle || maxResults <= 0) return [];
+		const hits: SearchHit[] = [];
+		for (const record of this.list()) {
+			const text = recordText(record);
+			const index = text.toLowerCase().indexOf(needle);
+			if (index === -1) continue;
+			const start = Math.max(0, index - 40);
+			const end = Math.min(text.length, index + needle.length + 80);
+			hits.push({
+				id: record.id,
+				label: record.label,
+				topic: record.topic,
+				snippet:
+					(start > 0 ? "…" : "") +
+					text.slice(start, end).replace(/\s+/g, " ") +
+					(end < text.length ? "…" : ""),
+			});
+			if (hits.length >= maxResults) break;
+		}
+		return hits;
 	}
 
 	clear(sessionID: string): void {
@@ -144,5 +206,35 @@ export function applyExpansions(
 	}
 
 	return { expanded, unmatched };
+}
+
+/** List the stored blocks as a short human-readable report. */
+export function renderInspector(sidecar: ExpansionSidecar): string {
+	const records = sidecar.list();
+	if (records.length === 0) return "No compressed blocks are stored.";
+	return records
+		.map((record) => {
+			const label = record.label ?? record.id;
+			const topic = record.topic ? ` — ${record.topic}` : "";
+			return `- [${label}]${topic} (${record.original.length} messages, id=${record.id})`;
+		})
+		.join("\n");
+}
+
+/** Search the stored blocks and format the hits. */
+export function renderSearch(
+	sidecar: ExpansionSidecar,
+	query: string,
+	maxResults: number,
+): string {
+	const hits = sidecar.search(query, maxResults);
+	if (hits.length === 0) return `No stored block matches "${query}".`;
+	return hits
+		.map((hit) => {
+			const label = hit.label ?? hit.id;
+			const topic = hit.topic ? ` — ${hit.topic}` : "";
+			return `- [${label}]${topic}: ${hit.snippet}`;
+		})
+		.join("\n");
 }
 

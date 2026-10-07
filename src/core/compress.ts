@@ -132,6 +132,7 @@ export interface ApplyCompressionOptions {
 	record?: (info: {
 		id: string;
 		label: string;
+		topic: string;
 		original: Message[];
 	}) => void;
 }
@@ -195,7 +196,12 @@ export function applyCompressions(
 
 		// Capture the originals before they are replaced (for expand).
 		if (opts.record) {
-			opts.record({ id, label, original: messages.slice(start, end + 1) });
+			opts.record({
+				id,
+				label,
+				topic: req.topic,
+				original: messages.slice(start, end + 1),
+			});
 		}
 
 		// Create a synthetic summary message

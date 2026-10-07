@@ -141,9 +141,11 @@ Merges two or more **contiguous** compressed blocks (referenced by `[bN]` labels
 
 ### `expand` / `recall`
 
-Restore a compressed block's original messages from the in-memory sidecar, referenced by `[bN]` label or durable id. `expand` is **sticky** (stays expanded on later turns); `recall` is **one-shot**.
+Restore a compressed block's original messages from the in-memory sidecar, referenced by `[bN]` label or durable id. `expand` is **sticky** (stays expanded on later turns); `recall` is **one-shot**. Both are applied on the next message transform cycle.
 
-All four tools are applied on the next message transform cycle.
+### `inspect` / `search`
+
+`inspect` lists the compressed blocks currently held in memory (labels, topics, sizes). `search` runs a **deterministic** case-insensitive keyword search over the stored originals (no embeddings) and returns matching `[bN]` labels with a snippet; use `expand`/`recall` to restore a match. Both return their result directly and are bounded by `compress.searchMaxResults`.
 
 ## Protected File Patterns
 
@@ -239,7 +241,8 @@ Precedence, low to high: **defaults → global file → plugin options → proje
     "compress": {
         "protectedTurns": 3,        // Trailing user turns excluded from deterministic selection
         "reversible": true,         // Keep originals in memory for expand/recall
-        "maxBlocksPerSquash": 8     // Max blocks merged by a single squash
+        "maxBlocksPerSquash": 8,    // Max blocks merged by a single squash
+        "searchMaxResults": 5       // Max hits returned by the `search` tool
     },
 
     // Graduated, LLM-free eviction (opt-in)
@@ -324,7 +327,7 @@ src/
     requests.ts         — queued compress/squash/expand application
     compress.ts         — compress/squash domain + block rendering
     blocks.ts           — durable block ids + deterministic span selection
-    expand.ts           — reversible sidecar (expand/recall domain)
+    expand.ts           — reversible sidecar + inspection/search
     strategies.ts       — dedup, error purge, cascade purge
     eviction.ts         — graduated, LLM-free eviction
     trim.ts             — tool-output trimming + protected files
@@ -375,7 +378,7 @@ Compatible with [`oh-my-opencode-slim`](https://github.com/alvinunreal/oh-my-ope
 - `experimental.session.compacting` — omo-slim only marks the session (it does not touch `output.prompt`/`output.context`), so this plugin's prompt handling is unaffected.
 - `experimental.chat.messages.transform` — omo-slim rewrites user text and image parts; this plugin trims/dedups/purges tool parts and applies compressions. Load omo-slim **before** this plugin so its in-place rewrites run before this plugin's structural compression.
 - `config` — omo-slim manages agents, MCPs and commands; this plugin only ensures permissions for its own tools (`compress`, `squash`, `expand`, `recall`) and leaves a global permission string untouched.
-- No shared tool names (omo-slim: `task*`, `waitForUser`, `acpRun`, `webfetch`, `ast_grep_*`, `marketplace_*`; this plugin: `compress`, `squash`, `expand`, `recall`).
+- No shared tool names (omo-slim: `task*`, `waitForUser`, `acpRun`, `webfetch`, `ast_grep_*`, `marketplace_*`; this plugin: `compress`, `squash`, `expand`, `recall`, `inspect`, `search`).
 - omo-slim does not use `experimental.compaction.autocontinue` and does not mutate `permission`.
 
 Recommended `plugin` order in `opencode.json`:

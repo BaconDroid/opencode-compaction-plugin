@@ -3,11 +3,15 @@ import {
 	ExpansionSidecar,
 	ExpandStore,
 	applyExpansions,
+	renderInspector,
+	renderSearch,
 	type ExpandRequest,
 } from "../src/core/expand.ts";
 import {
 	buildExpandToolDef,
 	buildRecallToolDef,
+	buildInspectToolDef,
+	buildSearchToolDef,
 } from "../src/opencode/tools.ts";
 
 function blockMsg(id: string, label: string, body: string) {
@@ -96,7 +100,38 @@ describe("applyExpansions()", () => {
 	});
 });
 
-describe("expand/recall tool definitions", () => {
+describe("inspection & deterministic search", () => {
+	it("lists stored blocks and renders an inspector", () => {
+		const sidecar = new ExpansionSidecar();
+		sidecar.save("s", "id-1", [textMsg("user", "alpha")], {
+			label: "b0",
+			topic: "Auth",
+		});
+		const report = renderInspector(sidecar);
+		expect(report).toContain("[b0]");
+		expect(report).toContain("Auth");
+		expect(renderInspector(new ExpansionSidecar())).toContain(
+			"No compressed blocks",
+		);
+	});
+
+	it("searches stored originals by keyword", () => {
+		const sidecar = new ExpansionSidecar();
+		sidecar.save("s", "id-1", [textMsg("user", "fix the login bug")], {
+			label: "b0",
+		});
+		sidecar.save("s", "id-2", [textMsg("user", "unrelated")], { label: "b1" });
+		expect(sidecar.search("LOGIN", 5)).toHaveLength(1);
+		expect(sidecar.search("login", 5)[0].label).toBe("b0");
+		expect(sidecar.search("missing", 5)).toHaveLength(0);
+		expect(renderSearch(sidecar, "login", 5)).toContain("[b0]");
+		expect(renderSearch(sidecar, "missing", 5)).toContain(
+			"No stored block matches",
+		);
+	});
+});
+
+describe("expand/recall/inspect/search tool definitions", () => {
 	it("expose a block argument and execute", async () => {
 		const expand = buildExpandToolDef();
 		expect(expand.args).toHaveProperty("block");
@@ -104,5 +139,19 @@ describe("expand/recall tool definitions", () => {
 		const recall = buildRecallToolDef();
 		expect(recall.args).toHaveProperty("block");
 		expect(await recall.execute({ block: "b1" }, {} as any)).toContain("b1");
+	});
+
+	it("expose inspect/search backed by the sidecar", async () => {
+		const sidecar = new ExpansionSidecar();
+		sidecar.save("s", "id-1", [textMsg("user", "hello world")], {
+			label: "b0",
+		});
+		const inspect = buildInspectToolDef(sidecar);
+		expect(await inspect.execute({}, {} as any)).toContain("[b0]");
+		const search = buildSearchToolDef(sidecar, 5);
+		expect(search.args).toHaveProperty("query");
+		expect(await search.execute({ query: "world" }, {} as any)).toContain(
+			"[b0]",
+		);
 	});
 });
