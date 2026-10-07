@@ -43,6 +43,27 @@ describe("LiveCompactionPlugin", () => {
 		return await LiveCompactionPlugin(mockCtx as any);
 	}
 
+	const emit = (hooks: any, type: string, properties: unknown) =>
+		hooks.event!({ event: { id: "e", type, properties } });
+
+	const compact = (hooks: any, sessionID: string, output: any) =>
+		hooks["experimental.session.compacting"]!({ sessionID }, output);
+
+	const transform = (hooks: any, messages: unknown) =>
+		hooks["experimental.chat.messages.transform"]!({} as any, { messages });
+
+	const afterTool = (
+		hooks: any,
+		tool: string,
+		sessionID: string,
+		callID: string,
+		args: unknown,
+	) =>
+		hooks["tool.execute.after"](
+			{ tool, sessionID, callID, args },
+			{ title: "", output: "", metadata: {} },
+		);
+
 	beforeEach(() => {
 		setupTmp();
 		mock.clearAllMocks();
@@ -121,56 +142,28 @@ describe("LiveCompactionPlugin", () => {
 					{ title: "", output: "", metadata: {} },
 				);
 				const output = { context: [], prompt: undefined };
-				await hooks["experimental.session.compacting"]!({ sessionID }, output);
+				await compact(hooks, sessionID, output);
 				expect(output.prompt, tool).toContain(filePath);
 			}
 		});
 
 		it("ignores calls without sessionID or args", async () => {
 			const hooks = await getHooks();
-			await hooks["tool.execute.after"]!(
-				{ tool: "read", sessionID: "", callID: "call-4", args: { filePath: "x.ts" } },
-				{ title: "", output: "", metadata: {} },
-			);
-			await hooks["tool.execute.after"]!(
-				{ tool: "read", sessionID: "sess-5", callID: "call-5", args: null as any },
-				{ title: "", output: "", metadata: {} },
-			);
+			await afterTool(hooks, "read", "", "call-4", { filePath: "x.ts" });
+			await afterTool(hooks, "read", "sess-5", "call-5", null as any);
 
 			const output = { context: [], prompt: undefined };
-			await hooks["experimental.session.compacting"]!(
-				{ sessionID: "sess-5" },
-				output,
-			);
+			await compact(hooks, "sess-5", output);
 			expect(output.prompt).not.toContain("## Files Touched Manifest");
 		});
 
 		it("tracks multiple files in same session", async () => {
 			const hooks = await getHooks();
-			await hooks["tool.execute.after"]!(
-				{
-					tool: "read",
-					sessionID: "sess-multi",
-					callID: "c1",
-					args: { filePath: "a.ts" },
-				},
-				{ title: "", output: "", metadata: {} },
-			);
-			await hooks["tool.execute.after"]!(
-				{
-					tool: "write",
-					sessionID: "sess-multi",
-					callID: "c2",
-					args: { filePath: "b.ts" },
-				},
-				{ title: "", output: "", metadata: {} },
-			);
+			await afterTool(hooks, "read", "sess-multi", "c1", { filePath: "a.ts" });
+			await afterTool(hooks, "write", "sess-multi", "c2", { filePath: "b.ts" });
 
 			const output = { context: [], prompt: undefined };
-			await hooks["experimental.session.compacting"]!(
-				{ sessionID: "sess-multi" },
-				output,
-			);
+			await compact(hooks, "sess-multi", output);
 			expect(output.prompt).toContain("a.ts");
 			expect(output.prompt).toContain("b.ts");
 		});
@@ -184,10 +177,7 @@ describe("LiveCompactionPlugin", () => {
 		it("replaces output.prompt with enhanced prompt", async () => {
 			const hooks = await getHooks();
 			const output = { context: [], prompt: undefined };
-			await hooks["experimental.session.compacting"]!(
-				{ sessionID: "sess-compact" },
-				output,
-			);
+			await compact(hooks, "sess-compact", output);
 			expect(output.prompt).toBeDefined();
 			expect(output.prompt).toContain("## Brief");
 			expect(output.prompt).toContain("## Task Continuity");
@@ -196,61 +186,33 @@ describe("LiveCompactionPlugin", () => {
 
 		it("includes files manifest when files were tracked", async () => {
 			const hooks = await getHooks();
-			await hooks["tool.execute.after"]!(
-				{
-					tool: "read",
-					sessionID: "sess-files",
-					callID: "c1",
-					args: { filePath: "readme.md" },
-				},
-				{ title: "", output: "", metadata: {} },
-			);
+			await afterTool(hooks, "read", "sess-files", "c1", { filePath: "readme.md" });
 
 			const output = { context: [], prompt: undefined };
-			await hooks["experimental.session.compacting"]!(
-				{ sessionID: "sess-files" },
-				output,
-			);
+			await compact(hooks, "sess-files", output);
 			expect(output.prompt).toContain("## Files Touched");
 			expect(output.prompt).toContain("readme.md");
 		});
 
 		it("clears tracker after compaction", async () => {
 			const hooks = await getHooks();
-			await hooks["tool.execute.after"]!(
-				{
-					tool: "read",
-					sessionID: "sess-clear",
-					callID: "c1",
-					args: { filePath: "x.ts" },
-				},
-				{ title: "", output: "", metadata: {} },
-			);
+			await afterTool(hooks, "read", "sess-clear", "c1", { filePath: "x.ts" });
 
 			// First compaction should include the file
 			const output1 = { context: [], prompt: undefined };
-			await hooks["experimental.session.compacting"]!(
-				{ sessionID: "sess-clear" },
-				output1,
-			);
+			await compact(hooks, "sess-clear", output1);
 			expect(output1.prompt).toContain("x.ts");
 
 			// Second compaction should NOT include the file (tracker was cleared)
 			const output2 = { context: [], prompt: undefined };
-			await hooks["experimental.session.compacting"]!(
-				{ sessionID: "sess-clear" },
-				output2,
-			);
+			await compact(hooks, "sess-clear", output2);
 			expect(output2.prompt).not.toContain("x.ts");
 		});
 
 		it("works without any tracked files", async () => {
 			const hooks = await getHooks();
 			const output = { context: [], prompt: undefined };
-			await hooks["experimental.session.compacting"]!(
-				{ sessionID: "sess-empty" },
-				output,
-			);
+			await compact(hooks, "sess-empty", output);
 			expect(output.prompt).toBeDefined();
 			expect(output.prompt).not.toContain("## Files Touched Manifest");
 		});
@@ -331,7 +293,7 @@ describe("LiveCompactionPlugin", () => {
 					event: { id: "evt", type: "session.deleted", properties },
 				});
 				const output = { context: [], prompt: undefined };
-				await hooks["experimental.session.compacting"]!({ sessionID }, output);
+				await compact(hooks, sessionID, output);
 				expect(output.prompt, sessionID).not.toContain(filePath);
 			}
 		});
@@ -353,40 +315,18 @@ describe("LiveCompactionPlugin", () => {
 		it("clears all session trackers", async () => {
 			const hooks = await getHooks();
 
-			await hooks["tool.execute.after"]!(
-				{
-					tool: "read",
-					sessionID: "sess-a",
-					callID: "c1",
-					args: { filePath: "a.ts" },
-				},
-				{ title: "", output: "", metadata: {} },
-			);
-			await hooks["tool.execute.after"]!(
-				{
-					tool: "write",
-					sessionID: "sess-b",
-					callID: "c2",
-					args: { filePath: "b.ts" },
-				},
-				{ title: "", output: "", metadata: {} },
-			);
+			await afterTool(hooks, "read", "sess-a", "c1", { filePath: "a.ts" });
+			await afterTool(hooks, "write", "sess-b", "c2", { filePath: "b.ts" });
 
 			await hooks.dispose!();
 
 			// Both sessions should be cleared
 			const outputA = { context: [], prompt: undefined };
-			await hooks["experimental.session.compacting"]!(
-				{ sessionID: "sess-a" },
-				outputA,
-			);
+			await compact(hooks, "sess-a", outputA);
 			expect(outputA.prompt).not.toContain("a.ts");
 
 			const outputB = { context: [], prompt: undefined };
-			await hooks["experimental.session.compacting"]!(
-				{ sessionID: "sess-b" },
-				outputB,
-			);
+			await compact(hooks, "sess-b", outputB);
 			expect(outputB.prompt).not.toContain("b.ts");
 		});
 	});
@@ -410,9 +350,7 @@ describe("LiveCompactionPlugin", () => {
 				},
 				...userTurns(5),
 			];
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages,
-			});
+			await transform(hooks, messages);
 			expect((messages[0].parts[0] as any).state.output.length).toBeLessThan(
 				1000,
 			);
@@ -434,9 +372,7 @@ describe("LiveCompactionPlugin", () => {
 					],
 				},
 			];
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages,
-			});
+			await transform(hooks, messages);
 			expect(messages[0].parts[0].state.output).toBe(shortOutput);
 		});
 
@@ -453,9 +389,7 @@ describe("LiveCompactionPlugin", () => {
 				},
 				...userTurns(5),
 			];
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages,
-			});
+			await transform(hooks, messages);
 			expect((messages[0].parts[0] as any).state.output.length).toBeLessThan(
 				400,
 			);
@@ -474,16 +408,12 @@ describe("LiveCompactionPlugin", () => {
 				...userTurns(5),
 			];
 
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages,
-			});
+			await transform(hooks, messages);
 			const firstPass = (messages[0].parts[0] as any).state.output;
 			expect(firstPass).toContain("[trimmed");
 
 			// Second pass must be a no-op on the already trimmed output.
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages,
-			});
+			await transform(hooks, messages);
 			expect((messages[0].parts[0] as any).state.output).toBe(firstPass);
 		});
 
@@ -525,9 +455,7 @@ describe("LiveCompactionPlugin", () => {
 					],
 				},
 			];
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages,
-			});
+			await transform(hooks, messages);
 			// First should be deduped
 			expect(messages[0].parts[0].state.output).toContain("deduped");
 			// Second should be preserved
@@ -554,9 +482,7 @@ describe("LiveCompactionPlugin", () => {
 				},
 				...userTurns(5),
 			];
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages,
-			});
+			await transform(hooks, messages);
 			expect((messages[0].parts[0].state.input as any).purged).toContain(
 				"removed",
 			);
@@ -585,9 +511,7 @@ describe("LiveCompactionPlugin", () => {
 				},
 				...userTurns(5),
 			];
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages,
-			});
+			await transform(hooks, messages);
 			expect((messages[0].parts[0].state.input as any).purged).toContain(
 				"removed",
 			);
@@ -632,9 +556,7 @@ describe("LiveCompactionPlugin", () => {
 				},
 				...userTurns(5),
 			];
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages,
-			});
+			await transform(hooks, messages);
 			// callA is errored and purged; callB depends on it and is cascaded.
 			expect((messages[0].parts[0].state.input as any).purged).toContain(
 				"removed",
@@ -663,9 +585,7 @@ describe("LiveCompactionPlugin", () => {
 					],
 				},
 			];
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages,
-			});
+			await transform(hooks, messages);
 			expect(messages[0].parts[0].state.input).toBe(bigInput);
 		});
 	});
@@ -772,9 +692,7 @@ describe("LiveCompactionPlugin", () => {
 					],
 				},
 			];
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages,
-			});
+			await transform(hooks, messages);
 			// Should NOT be trimmed because AGENTS.md is protected
 			expect(messages[0].parts[0].state.output).toBe(longContent);
 		});
@@ -807,9 +725,7 @@ describe("LiveCompactionPlugin", () => {
 				},
 				...userTurns(5),
 			];
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages,
-			});
+			await transform(hooks, messages);
 			// SHOULD be trimmed (not in protected patterns + outside turn window)
 			expect((messages[0].parts[0] as any).state.output.length).toBeLessThan(
 				500,
@@ -842,9 +758,7 @@ describe("LiveCompactionPlugin", () => {
 					],
 				},
 			];
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages,
-			});
+			await transform(hooks, messages);
 			expect(messages[0].parts[0].state.output).toBe(longContent);
 		});
 
@@ -878,9 +792,7 @@ describe("LiveCompactionPlugin", () => {
 				},
 				...userTurns(5),
 			];
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages,
-			});
+			await transform(hooks, messages);
 			expect(messages[0].parts[0].state.output).toBe(longContent);
 		});
 	});
@@ -925,9 +837,7 @@ describe("LiveCompactionPlugin", () => {
 					],
 				},
 			];
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages,
-			});
+			await transform(hooks, messages);
 
 			// Both tool outputs should be protected (within last 4 turns)
 			expect((messages[1].parts[0] as any).state.output).toBe(longContent);
@@ -996,9 +906,7 @@ describe("LiveCompactionPlugin", () => {
 					],
 				},
 			];
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages,
-			});
+			await transform(hooks, messages);
 
 			// Old tool output (index 1) should be trimmed
 			expect((messages[1].parts[0] as any).state.output.length).toBeLessThan(
@@ -1030,20 +938,12 @@ describe("LiveCompactionPlugin", () => {
 			const hooks = await getHooks();
 
 			// Simulate a compress tool call
-			await hooks["tool.execute.after"]!(
-				{
-					tool: "compress",
-					sessionID: "sess-compress",
-					callID: "c-comp",
-					args: {
+			await afterTool(hooks, "compress", "sess-compress", "c-comp", {
 						topic: "Auth Bug Fix",
 						start: 0,
 						end: 3,
 						summary: "Fixed the auth bug by updating login.ts",
-					},
-				},
-				{ title: "", output: "", metadata: {} },
-			);
+					});
 
 			// Verify by checking that messages transform applies the compression
 			const messages = [
@@ -1071,9 +971,7 @@ describe("LiveCompactionPlugin", () => {
 				},
 			];
 
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages,
-			});
+			await transform(hooks, messages);
 
 			// Messages 0-3 should have been compressed into one
 			expect(messages).toHaveLength(2); // 5 - 4 + 1 = 2
@@ -1086,15 +984,7 @@ describe("LiveCompactionPlugin", () => {
 			const hooks = await getHooks();
 			expect((hooks as any).tool.squash).toBeDefined();
 
-			await hooks["tool.execute.after"]!(
-				{
-					tool: "squash",
-					sessionID: "sess-squash",
-					callID: "c-sq",
-					args: { from: "b0", to: "b1", topic: "Merged", summary: "combined" },
-				},
-				{ title: "", output: "", metadata: {} },
-			);
+			await afterTool(hooks, "squash", "sess-squash", "c-sq", { from: "b0", to: "b1", topic: "Merged", summary: "combined" });
 
 			const block = (id: string, label: string, body: string) => ({
 				info: { role: "assistant" },
@@ -1109,9 +999,7 @@ describe("LiveCompactionPlugin", () => {
 				block("a", "b0", "[b0]\n\nfirst"),
 				block("b", "b1", "[b1]\n\nsecond"),
 			];
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages,
-			});
+			await transform(hooks, messages);
 			expect(messages).toHaveLength(1);
 			expect(messages[0].parts[0].text).toContain("combined");
 		});
@@ -1119,24 +1007,14 @@ describe("LiveCompactionPlugin", () => {
 		it("does not apply a compression to a different session's messages", async () => {
 			const hooks = await getHooks();
 
-			await hooks["tool.execute.after"]!(
-				{
-					tool: "compress",
-					sessionID: "sess-A",
-					callID: "c-A",
-					args: { topic: "A", start: 0, end: 1, summary: "sumA" },
-				},
-				{ title: "", output: "", metadata: {} },
-			);
+			await afterTool(hooks, "compress", "sess-A", "c-A", { topic: "A", start: 0, end: 1, summary: "sumA" });
 
 			// Transform a conversation that does NOT contain c-A: untouched.
 			const other = [
 				{ info: { role: "user" }, parts: [{ type: "text", text: "x" }] },
 				{ info: { role: "assistant" }, parts: [{ type: "text", text: "y" }] },
 			];
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages: other,
-			});
+			await transform(hooks, other);
 			expect(other).toHaveLength(2);
 			expect((other[0].parts[0] as any).text).toBe("x");
 
@@ -1156,9 +1034,7 @@ describe("LiveCompactionPlugin", () => {
 					],
 				},
 			];
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages: own,
-			});
+			await transform(hooks, own);
 			expect(own).toHaveLength(2); // 3 - 2 + 1 = 2
 			expect((own[0].parts[0] as any).text).toContain("sumA");
 		});
@@ -1183,32 +1059,9 @@ describe("LiveCompactionPlugin", () => {
 				{ preemptiveCompaction: { enabled: true } } as any,
 			);
 
-			await hooks.event!({
-				event: {
-					id: "e",
-					type: "message.updated",
-					properties: {
-						info: {
-							sessionID: "sess-low",
-							role: "assistant",
-							providerID: "prov",
-							modelID: "model-x",
-							finish: "stop",
-							tokens: { input: 100 },
-						},
-					},
-				},
-			});
+			await emit(hooks, "message.updated", { info: { sessionID: "sess-low", role: "assistant", providerID: "prov", modelID: "model-x", finish: "stop", tokens: { input: 100 }, }, });
 
-			await hooks["tool.execute.after"]!(
-				{
-					tool: "compress",
-					sessionID: "sess-low",
-					callID: "c-low",
-					args: { topic: "T", start: 0, end: 1, summary: "S" },
-				},
-				{ title: "", output: "", metadata: {} },
-			);
+			await afterTool(hooks, "compress", "sess-low", "c-low", { topic: "T", start: 0, end: 1, summary: "S" });
 
 			const msgs = [
 				{ info: { role: "user" }, parts: [{ type: "text", text: "x" }] },
@@ -1225,9 +1078,7 @@ describe("LiveCompactionPlugin", () => {
 					],
 				},
 			];
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages: msgs,
-			});
+			await transform(hooks, msgs);
 			// Not eligible: the compression is not applied.
 			expect(msgs).toHaveLength(3);
 		});
@@ -1252,32 +1103,9 @@ describe("LiveCompactionPlugin", () => {
 				{ preemptiveCompaction: { enabled: true } } as any,
 			);
 
-			await hooks.event!({
-				event: {
-					id: "e",
-					type: "message.updated",
-					properties: {
-						info: {
-							sessionID: "sess-high",
-							role: "assistant",
-							providerID: "prov",
-							modelID: "model-x",
-							finish: "stop",
-							tokens: { input: 900 },
-						},
-					},
-				},
-			});
+			await emit(hooks, "message.updated", { info: { sessionID: "sess-high", role: "assistant", providerID: "prov", modelID: "model-x", finish: "stop", tokens: { input: 900 }, }, });
 
-			await hooks["tool.execute.after"]!(
-				{
-					tool: "compress",
-					sessionID: "sess-high",
-					callID: "c-high",
-					args: { topic: "T", start: 0, end: 1, summary: "S" },
-				},
-				{ title: "", output: "", metadata: {} },
-			);
+			await afterTool(hooks, "compress", "sess-high", "c-high", { topic: "T", start: 0, end: 1, summary: "S" });
 
 			const msgs = [
 				{ info: { role: "user" }, parts: [{ type: "text", text: "x" }] },
@@ -1294,9 +1122,7 @@ describe("LiveCompactionPlugin", () => {
 					],
 				},
 			];
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages: msgs,
-			});
+			await transform(hooks, msgs);
 			expect(msgs).toHaveLength(2);
 			expect((msgs[0].parts[0] as any).text).toContain("S");
 		});
@@ -1304,15 +1130,7 @@ describe("LiveCompactionPlugin", () => {
 		it("restores original messages via expand", async () => {
 			const hooks = await getHooks();
 
-			await hooks["tool.execute.after"]!(
-				{
-					tool: "compress",
-					sessionID: "sess-expand",
-					callID: "",
-					args: { topic: "T", start: 0, end: 1, summary: "S" },
-				},
-				{ title: "", output: "", metadata: {} },
-			);
+			await afterTool(hooks, "compress", "sess-expand", "", { topic: "T", start: 0, end: 1, summary: "S" });
 
 			const messages = [
 				{
@@ -1322,24 +1140,12 @@ describe("LiveCompactionPlugin", () => {
 				{ info: { role: "assistant" }, parts: [{ type: "text", text: "orig2" }] },
 				{ info: { role: "user" }, parts: [{ type: "text", text: "keep" }] },
 			];
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages,
-			});
+			await transform(hooks, messages);
 			expect(messages).toHaveLength(2);
 			expect(messages[0].parts[0].text).toContain("[b0]");
 
-			await hooks["tool.execute.after"]!(
-				{
-					tool: "expand",
-					sessionID: "sess-expand",
-					callID: "c-expand",
-					args: { block: "b0" },
-				},
-				{ title: "", output: "", metadata: {} },
-			);
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages,
-			});
+			await afterTool(hooks, "expand", "sess-expand", "c-expand", { block: "b0" });
+			await transform(hooks, messages);
 			expect(messages).toHaveLength(3);
 			expect(messages[0].parts[0].text).toBe("orig1");
 			expect(messages[1].parts[0].text).toBe("orig2");
@@ -1347,15 +1153,7 @@ describe("LiveCompactionPlugin", () => {
 
 		it("drops stale deferred compressions", async () => {
 			const hooks = await getHooks();
-			await hooks["tool.execute.after"]!(
-				{
-					tool: "compress",
-					sessionID: "sess-stale",
-					callID: "c-stale",
-					args: { topic: "Old", start: 0, end: 1, summary: "old" },
-				},
-				{ title: "", output: "", metadata: {} },
-			);
+			await afterTool(hooks, "compress", "sess-stale", "c-stale", { topic: "Old", start: 0, end: 1, summary: "old" });
 
 			// Jump past the 30-minute TTL for deferred requests.
 			const realNow = Date.now;
@@ -1383,9 +1181,7 @@ describe("LiveCompactionPlugin", () => {
 						],
 					},
 				];
-				await hooks["experimental.chat.messages.transform"]!({} as any, {
-					messages: own,
-				});
+				await transform(hooks, own);
 				expect(own).toHaveLength(2);
 				expect((own[0].parts[0] as any).text).toBe("x");
 			} finally {
@@ -1407,10 +1203,7 @@ describe("LiveCompactionPlugin", () => {
 			} as any);
 
 			const output = { context: [], prompt: undefined };
-			await hooks["experimental.session.compacting"]!(
-				{ sessionID: "sess-todo" },
-				output,
-			);
+			await compact(hooks, "sess-todo", output);
 			expect(todo).toHaveBeenCalledWith({ path: { id: "sess-todo" } });
 			expect(output.prompt).toBeDefined();
 
@@ -1443,10 +1236,7 @@ describe("LiveCompactionPlugin", () => {
 			} as any);
 
 			const output = { context: [], prompt: undefined };
-			await hooks["experimental.session.compacting"]!(
-				{ sessionID: "sess-task" },
-				output,
-			);
+			await compact(hooks, "sess-task", output);
 			expect(output.prompt).toContain("<task-state>");
 			expect(output.prompt).toContain("- [~] write tests");
 			expect(output.prompt).toContain("status=in_progress");
@@ -1455,10 +1245,7 @@ describe("LiveCompactionPlugin", () => {
 		it("does not throw when the todo API is unavailable", async () => {
 			const hooks = await getHooks();
 			const output = { context: [], prompt: undefined };
-			await hooks["experimental.session.compacting"]!(
-				{ sessionID: "sess-no-todo" },
-				output,
-			);
+			await compact(hooks, "sess-no-todo", output);
 			expect(output.prompt).toBeDefined();
 		});
 	});
@@ -1486,33 +1273,9 @@ describe("LiveCompactionPlugin", () => {
 				{ preemptiveCompaction: { enabled: true } } as any,
 			);
 
-			await hooks.event!({
-				event: {
-					id: "e",
-					type: "message.updated",
-					properties: {
-						info: {
-							id: "m1",
-							sessionID: "sess-preempt",
-							role: "assistant",
-							providerID: "prov",
-							modelID: "model-x",
-							finish: "stop",
-							tokens: { input: 900, cache: { read: 0, write: 0 } },
-						},
-					},
-				},
-			});
+			await emit(hooks, "message.updated", { info: { id: "m1", sessionID: "sess-preempt", role: "assistant", providerID: "prov", modelID: "model-x", finish: "stop", tokens: { input: 900, cache: { read: 0, write: 0 } }, }, });
 
-			await hooks["tool.execute.after"]!(
-				{
-					tool: "read",
-					sessionID: "sess-preempt",
-					callID: "c1",
-					args: { filePath: "a.ts" },
-				},
-				{ title: "", output: "", metadata: {} },
-			);
+			await afterTool(hooks, "read", "sess-preempt", "c1", { filePath: "a.ts" });
 
 			expect(summarize).toHaveBeenCalledWith({
 				path: { id: "sess-preempt" },
@@ -1543,22 +1306,7 @@ describe("LiveCompactionPlugin", () => {
 				{ preemptiveCompaction: { enabled: true } } as any,
 			);
 
-			await hooks.event!({
-				event: {
-					id: "e",
-					type: "message.updated",
-					properties: {
-						info: {
-							sessionID: "sess-turn",
-							role: "assistant",
-							providerID: "prov",
-							modelID: "model-x",
-							finish: "stop",
-							tokens: { input: 900 },
-						},
-					},
-				},
-			});
+			await emit(hooks, "message.updated", { info: { sessionID: "sess-turn", role: "assistant", providerID: "prov", modelID: "model-x", finish: "stop", tokens: { input: 900 }, }, });
 
 			expect(summarize).toHaveBeenCalledWith({
 				path: { id: "sess-turn" },
@@ -1594,34 +1342,11 @@ describe("LiveCompactionPlugin", () => {
 				} as any,
 			);
 
-			await hooks.event!({
-				event: {
-					id: "e",
-					type: "message.updated",
-					properties: {
-						info: {
-							sessionID: "sess-tail",
-							role: "assistant",
-							providerID: "prov",
-							modelID: "model-x",
-							finish: "stop",
-							tokens: { input: 900 },
-						},
-					},
-				},
-			});
+			await emit(hooks, "message.updated", { info: { sessionID: "sess-tail", role: "assistant", providerID: "prov", modelID: "model-x", finish: "stop", tokens: { input: 900 }, }, });
 			expect(summarize).not.toHaveBeenCalled();
 
 			for (let i = 0; i < 3; i++) {
-				await hooks["tool.execute.after"]!(
-					{
-						tool: "read",
-						sessionID: "sess-tail",
-						callID: `c${i}`,
-						args: { filePath: "a.ts" },
-					},
-					{ title: "", output: "", metadata: {} },
-				);
+				await afterTool(hooks, "read", "sess-tail", `c${i}`, { filePath: "a.ts" });
 			}
 
 			expect(summarize).toHaveBeenCalledTimes(1);
@@ -1639,31 +1364,8 @@ describe("LiveCompactionPlugin", () => {
 				directory: TMP_DIR,
 			} as any);
 
-			await hooks.event!({
-				event: {
-					id: "e",
-					type: "message.updated",
-					properties: {
-						info: {
-							sessionID: "sess-off",
-							role: "assistant",
-							providerID: "prov",
-							modelID: "model-x",
-							finish: "stop",
-							tokens: { input: 999_999 },
-						},
-					},
-				},
-			});
-			await hooks["tool.execute.after"]!(
-				{
-					tool: "read",
-					sessionID: "sess-off",
-					callID: "c",
-					args: { filePath: "a.ts" },
-				},
-				{ title: "", output: "", metadata: {} },
-			);
+			await emit(hooks, "message.updated", { info: { sessionID: "sess-off", role: "assistant", providerID: "prov", modelID: "model-x", finish: "stop", tokens: { input: 999_999 }, }, });
+			await afterTool(hooks, "read", "sess-off", "c", { filePath: "a.ts" });
 			expect(summarize).not.toHaveBeenCalled();
 		});
 	});
@@ -1677,10 +1379,7 @@ describe("LiveCompactionPlugin", () => {
 				context: [] as string[],
 				prompt: undefined as string | undefined,
 			};
-			await hooks["experimental.session.compacting"]!(
-				{ sessionID: "sess-aug" },
-				output,
-			);
+			await compact(hooks, "sess-aug", output);
 			expect(output.prompt).toBeUndefined();
 			expect(output.context.join("\n")).toContain("<template>");
 		});
@@ -1708,26 +1407,8 @@ describe("LiveCompactionPlugin", () => {
 				} as any,
 			);
 
-			await hooks.event!({
-				event: {
-					id: "e1",
-					type: "session.compacted",
-					properties: { sessionID: "sess-deg" },
-				},
-			});
-			await hooks.event!({
-				event: {
-					id: "e2",
-					type: "message.updated",
-					properties: {
-						info: {
-							sessionID: "sess-deg",
-							role: "assistant",
-							finish: "stop",
-						},
-					},
-				},
-			});
+			await emit(hooks, "session.compacted", { sessionID: "sess-deg" });
+			await emit(hooks, "message.updated", { info: { sessionID: "sess-deg", role: "assistant", finish: "stop", }, });
 
 			const logged = log.mock.calls
 				.map((call) => JSON.stringify(call[0]))
@@ -1756,10 +1437,7 @@ describe("LiveCompactionPlugin", () => {
 			} as any);
 
 			const output = { context: [] as string[], prompt: undefined as string | undefined };
-			await hooks["experimental.session.compacting"]!(
-				{ sessionID: "sess-prev" },
-				output,
-			);
+			await compact(hooks, "sess-prev", output);
 			expect(output.prompt).toContain("<previous-summary>");
 			expect(output.prompt).toContain("PRIOR SUMMARY");
 		});
@@ -1783,18 +1461,12 @@ describe("LiveCompactionPlugin", () => {
 			} as any);
 
 			const out1 = { context: [] as string[], prompt: undefined as string | undefined };
-			await hooks["experimental.session.compacting"]!(
-				{ sessionID: "sess-slide" },
-				out1,
-			);
+			await compact(hooks, "sess-slide", out1);
 			expect(out1.prompt).toContain("FIRST SUMMARY");
 
 			// Same summary still present: continuity is preserved.
 			const out2 = { context: [] as string[], prompt: undefined as string | undefined };
-			await hooks["experimental.session.compacting"]!(
-				{ sessionID: "sess-slide" },
-				out2,
-			);
+			await compact(hooks, "sess-slide", out2);
 			expect(out2.prompt).toContain("FIRST SUMMARY");
 
 			// A newer summary supersedes the carried one.
@@ -1811,10 +1483,7 @@ describe("LiveCompactionPlugin", () => {
 				],
 			});
 			const out3 = { context: [] as string[], prompt: undefined as string | undefined };
-			await hooks["experimental.session.compacting"]!(
-				{ sessionID: "sess-slide" },
-				out3,
-			);
+			await compact(hooks, "sess-slide", out3);
 			expect(out3.prompt).toContain("SECOND SUMMARY");
 		});
 
@@ -1838,10 +1507,7 @@ describe("LiveCompactionPlugin", () => {
 			} as any);
 
 			const output = { context: [] as string[], prompt: undefined as string | undefined };
-			await hooks["experimental.session.compacting"]!(
-				{ sessionID: "sess-ask" },
-				output,
-			);
+			await compact(hooks, "sess-ask", output);
 			expect(output.prompt).toContain("<latest-user-ask>");
 			expect(output.prompt).toContain("please fix the login bug");
 		});
@@ -1860,10 +1526,7 @@ describe("LiveCompactionPlugin", () => {
 				{ promptMode: "augment" } as any,
 			);
 			const output = { context: [] as string[], prompt: undefined as string | undefined };
-			await hooks["experimental.session.compacting"]!(
-				{ sessionID: "sess-aug2" },
-				output,
-			);
+			await compact(hooks, "sess-aug2", output);
 			expect(messages).not.toHaveBeenCalled();
 		});
 	});
@@ -1890,10 +1553,7 @@ describe("LiveCompactionPlugin", () => {
 				{ pinning: { patterns: ["never force push"] } } as any,
 			);
 			const output = { context: [] as string[], prompt: undefined as string | undefined };
-			await hooks["experimental.session.compacting"]!(
-				{ sessionID: "sess-pin" },
-				output,
-			);
+			await compact(hooks, "sess-pin", output);
 			expect(output.prompt).toContain("<pinned-constraints>");
 			expect(output.prompt).toContain("NEVER force push to main");
 		});
@@ -1913,9 +1573,7 @@ describe("LiveCompactionPlugin", () => {
 				},
 				...userTurns(5),
 			];
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages,
-			});
+			await transform(hooks, messages);
 			expect((messages[0].parts[1] as any).state.output).toBe(longOutput);
 		});
 	});
