@@ -57,15 +57,62 @@ import {
 	extractPreviousSummary,
 	type SlidingState,
 } from "./previous-summary.js";
-import { makeLogger } from "./logger.js";
 import { buildTrimMap } from "./trim.js";
-import { AutocontinueGuard } from "./autocontinue.js";
 import { PreemptionController } from "./preemption.js";
 import { applyTransform } from "./transform.js";
-import type { Hooks, Plugin } from "./types.js";
+import type { Hooks, Logger, Plugin, PluginInput } from "./types.js";
 
 /** Model-driven tools registered by this plugin (used for permission wiring). */
 const PLUGIN_TOOL_NAMES = ["compress", "squash", "expand", "recall"] as const;
+
+function makeLogger(
+	client: PluginInput["client"],
+	enabled: boolean,
+): Logger {
+	return {
+		info: (message: string, data?: unknown) => {
+			if (!enabled) return;
+			client.app.log({
+				body: {
+					service: "live-compaction",
+					level: "info",
+					message,
+					extra: data as Record<string, unknown> | undefined,
+				},
+			});
+		},
+	};
+}
+
+/**
+ * Auto-continue hardening: suppress duplicate auto-continue for the same
+ * session within a short window (timestamp-based; no timers to clean up).
+ */
+class AutocontinueGuard {
+	private marks = new Map<string, number>();
+
+	has(sessionID: string): boolean {
+		const at = this.marks.get(sessionID);
+		if (at === undefined) return false;
+		if (Date.now() - at >= 10_000) {
+			this.marks.delete(sessionID);
+			return false;
+		}
+		return true;
+	}
+
+	mark(sessionID: string): void {
+		this.marks.set(sessionID, Date.now());
+	}
+
+	clear(sessionID: string): void {
+		this.marks.delete(sessionID);
+	}
+
+	clearAll(): void {
+		this.marks.clear();
+	}
+}
 
 export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 	// Load config (defaults < global file < plugin options < project file).

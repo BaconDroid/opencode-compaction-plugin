@@ -7,6 +7,11 @@
  * not require it beyond the `tool` helper.
  */
 
+/** Minimal debug logger writing to OpenCode's app log. */
+export interface Logger {
+	info: (message: string, data?: unknown) => void;
+}
+
 export interface MessagePart {
 	type: string;
 	text?: string;

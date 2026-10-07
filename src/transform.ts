@@ -5,7 +5,7 @@
  */
 
 import type { ResolvedConfig } from "./config.js";
-import type { Logger } from "./logger.js";
+import type { Logger } from "./types.js";
 import type {
 	CompressionStore,
 	SquashStore,
