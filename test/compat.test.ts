@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test";
 import { LiveCompactionPlugin } from "../src/index.ts";
 import { mkdirSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -43,7 +43,7 @@ function cleanupTmp() {
 }
 
 const mockCtx = {
-	client: { app: { log: vi.fn().mockResolvedValue(undefined) } },
+	client: { app: { log: mock().mockResolvedValue(undefined) } },
 	project: { id: "test-project", name: "test" },
 	directory: TMP_DIR,
 	worktree: TMP_DIR,

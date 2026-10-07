@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "bun:test";
 import {
 	totalInputTokens,
 	effectiveInputTokens,
@@ -6,54 +6,32 @@ import {
 	shouldTriggerPreemptiveCompaction,
 } from "../src/preemptive-compaction.ts";
 
-describe("totalInputTokens()", () => {
-	it("sums input and cache reads", () => {
+describe("token helpers", () => {
+	it("totalInputTokens sums input and cache reads", () => {
 		expect(
 			totalInputTokens({ input: 100, cache: { read: 50, write: 20 } }),
 		).toBe(150);
-	});
-
-	it("handles missing fields", () => {
 		expect(totalInputTokens({})).toBe(0);
 	});
-});
 
-describe("effectiveInputTokens()", () => {
-	it("excludes cache tokens by default", () => {
-		expect(
-			effectiveInputTokens(
-				{ input: 100, output: 10, reasoning: 5, cache: { read: 50, write: 20 } },
-				false,
-			),
-		).toBe(115);
-	});
-
-	it("includes cache read and write when enabled", () => {
-		expect(
-			effectiveInputTokens(
-				{ input: 100, output: 10, reasoning: 5, cache: { read: 50, write: 20 } },
-				true,
-			),
-		).toBe(185);
-	});
-
-	it("handles missing fields", () => {
+	it("effectiveInputTokens excludes cache unless enabled", () => {
+		const tokens = {
+			input: 100,
+			output: 10,
+			reasoning: 5,
+			cache: { read: 50, write: 20 },
+		};
+		expect(effectiveInputTokens(tokens, false)).toBe(115);
+		expect(effectiveInputTokens(tokens, true)).toBe(185);
 		expect(effectiveInputTokens({}, false)).toBe(0);
-		expect(effectiveInputTokens({}, true)).toBe(0);
-	});
-
-	it("does not count a cache-only payload unless enabled", () => {
 		expect(effectiveInputTokens({ cache: { read: 900 } }, false)).toBe(0);
 		expect(effectiveInputTokens({ cache: { read: 900 } }, true)).toBe(900);
 	});
 });
 
 describe("resolveTriggerThreshold()", () => {
-	it("uses the ratio when no absolute ceiling is set", () => {
+	it("uses the ratio, or the smaller of ratio and absolute ceiling", () => {
 		expect(resolveTriggerThreshold(1000, { threshold: 0.78 })).toBe(780);
-	});
-
-	it("takes the smaller of the ratio and the absolute ceiling", () => {
 		expect(
 			resolveTriggerThreshold(1_000_000, {
 				threshold: 0.78,
@@ -66,9 +44,6 @@ describe("resolveTriggerThreshold()", () => {
 				absoluteTokenThreshold: 900,
 			}),
 		).toBe(780);
-	});
-
-	it("ignores a non-positive absolute ceiling", () => {
 		expect(
 			resolveTriggerThreshold(1000, {
 				threshold: 0.5,
@@ -87,43 +62,13 @@ describe("shouldTriggerPreemptiveCompaction()", () => {
 		inProgress: false,
 	};
 
-	it("triggers at or above the threshold", () => {
+	it("triggers at or above the threshold, or the absolute override", () => {
 		expect(
 			shouldTriggerPreemptiveCompaction({ ...base, totalInputTokens: 780 }),
 		).toBe(true);
 		expect(
 			shouldTriggerPreemptiveCompaction({ ...base, totalInputTokens: 779 }),
 		).toBe(false);
-	});
-
-	it("does not trigger while in progress", () => {
-		expect(
-			shouldTriggerPreemptiveCompaction({
-				...base,
-				totalInputTokens: 900,
-				inProgress: true,
-			}),
-		).toBe(false);
-	});
-
-	it("respects the cooldown", () => {
-		expect(
-			shouldTriggerPreemptiveCompaction({
-				...base,
-				totalInputTokens: 900,
-				lastCompactionAt: base.now - 1000,
-			}),
-		).toBe(false);
-		expect(
-			shouldTriggerPreemptiveCompaction({
-				...base,
-				totalInputTokens: 900,
-				lastCompactionAt: base.now - 61_000,
-			}),
-		).toBe(true);
-	});
-
-	it("honors an absolute thresholdTokens override", () => {
 		expect(
 			shouldTriggerPreemptiveCompaction({
 				...base,
@@ -140,7 +85,39 @@ describe("shouldTriggerPreemptiveCompaction()", () => {
 		).toBe(false);
 	});
 
-	it("blocks when fewer new tokens than minTokensSinceLast", () => {
+	it("does not trigger for an invalid limit, in progress, or within cooldown", () => {
+		expect(
+			shouldTriggerPreemptiveCompaction({
+				...base,
+				contextLimit: 0,
+				totalInputTokens: 900,
+			}),
+		).toBe(false);
+		expect(
+			shouldTriggerPreemptiveCompaction({
+				...base,
+				totalInputTokens: 900,
+				inProgress: true,
+			}),
+		).toBe(false);
+		expect(
+			shouldTriggerPreemptiveCompaction({
+				...base,
+				totalInputTokens: 900,
+				lastCompactionAt: base.now - 1000,
+			}),
+		).toBe(false);
+		expect(
+			shouldTriggerPreemptiveCompaction({
+				...base,
+				totalInputTokens: 900,
+				lastCompactionAt: base.now - 61_000,
+			}),
+		).toBe(true);
+	});
+
+	it("applies the deterministic gates", () => {
+		// token gate (unknown measurement is allowed)
 		expect(
 			shouldTriggerPreemptiveCompaction({
 				...base,
@@ -157,9 +134,6 @@ describe("shouldTriggerPreemptiveCompaction()", () => {
 				tokensSinceLast: 25_000,
 			}),
 		).toBe(true);
-	});
-
-	it("allows an unknown tokensSinceLast through the token gate", () => {
 		expect(
 			shouldTriggerPreemptiveCompaction({
 				...base,
@@ -167,9 +141,7 @@ describe("shouldTriggerPreemptiveCompaction()", () => {
 				minTokensSinceLast: 20_000,
 			}),
 		).toBe(true);
-	});
-
-	it("blocks when fewer new messages than minMessagesSinceLast", () => {
+		// message gate
 		expect(
 			shouldTriggerPreemptiveCompaction({
 				...base,
@@ -186,9 +158,7 @@ describe("shouldTriggerPreemptiveCompaction()", () => {
 				messagesSinceLast: 6,
 			}),
 		).toBe(true);
-	});
-
-	it("blocks under the tail guard until enough new tool calls", () => {
+		// tail guard
 		expect(
 			shouldTriggerPreemptiveCompaction({
 				...base,
@@ -205,9 +175,6 @@ describe("shouldTriggerPreemptiveCompaction()", () => {
 				newToolCallsSinceLast: 3,
 			}),
 		).toBe(true);
-	});
-
-	it("ignores the tail guard when disabled", () => {
 		expect(
 			shouldTriggerPreemptiveCompaction({
 				...base,
@@ -216,15 +183,5 @@ describe("shouldTriggerPreemptiveCompaction()", () => {
 				newToolCallsSinceLast: 0,
 			}),
 		).toBe(true);
-	});
-
-	it("does not trigger for an invalid limit", () => {
-		expect(
-			shouldTriggerPreemptiveCompaction({
-				...base,
-				contextLimit: 0,
-				totalInputTokens: 900,
-			}),
-		).toBe(false);
 	});
 });
