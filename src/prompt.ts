@@ -8,7 +8,7 @@
  * `experimental.session.compacting` hook.
  */
 
-import { partsText } from "./text.js";
+import { partsText } from "./trim.js";
 
 /**
  * Extract the most recent user message text (the "ask") to anchor the summary,

@@ -8,6 +8,7 @@
  * block, minus the protected tail.
  */
 
+import { nthUserTurnFromEnd } from "./trim.js";
 import type { Message } from "./types.js";
 
 export type Scale = "granular" | "deep";
@@ -120,17 +121,9 @@ export function blockId(message: BlockMessage): string {
 	return "m:0";
 }
 
-/** Collect the `id="..."` attribute of every `<compressed-block>` in the list. */
+/** Ids of every `<compressed-block>` in the list. */
 export function collectExistingBlockIds(messages: BlockMessage[]): Set<string> {
-	const ids = new Set<string>();
-	for (const message of messages) {
-		for (const part of message.parts ?? []) {
-			if (part?.type !== "text" || typeof part.text !== "string") continue;
-			const match = /<compressed-block\b[^>]*\bid="([^"]+)"/.exec(part.text);
-			if (match) ids.add(match[1]);
-		}
-	}
-	return ids;
+	return new Set(parseCompressBlocks(messages).map((block) => block.id));
 }
 
 /**
@@ -143,14 +136,7 @@ function protectedTailStart(
 	protectedTurns: number,
 ): number {
 	if (protectedTurns <= 0) return messages.length;
-	let seen = 0;
-	for (let i = messages.length - 1; i >= 0; i--) {
-		if (messages[i].info?.role === "user") {
-			seen++;
-			if (seen >= protectedTurns) return i;
-		}
-	}
-	return 0;
+	return nthUserTurnFromEnd(messages, protectedTurns) ?? 0;
 }
 
 /**

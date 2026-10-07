@@ -8,7 +8,7 @@
  */
 
 import type { LiveCompactionConfig } from "./config.js";
-import { partInput } from "./text.js";
+import { partInput } from "./trim.js";
 import type { Message, MessagePart } from "./types.js";
 
 export interface StrategyContext {
