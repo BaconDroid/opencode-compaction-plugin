@@ -526,3 +526,6 @@ function stripTrailingCommas(json: string): string {
 
 	return result;
 }
+
+/** The fully-resolved config returned by {@link loadConfig}/{@link mergeConfig}. */
+export type ResolvedConfig = ReturnType<typeof mergeConfig>;
