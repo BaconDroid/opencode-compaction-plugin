@@ -12,7 +12,7 @@
  * - Turn protection (protect recent tool outputs from trimming)
  * - Deduplication of repeated tool calls
  * - Error input purging
- * - Slash commands: /compact, /compact:focus <directive>
+ * - Slash commands: built-in /compact, plus /compact focus <directive>
  * - JSON config file support
  *
  * Usage:
@@ -340,7 +340,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			// Clear tracker after compaction since old operations are now in the summary
 			tracker.clear();
 
-			// Check for pending focus directive (from /compact:focus).
+			// Check for a pending focus directive (from /compact focus).
 			// Prefer a session-scoped directive; otherwise consume the single
 			// pending fallback so it is applied at most once.
 			let focus = focusDirectives.get(sessionID);
@@ -477,7 +477,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		},
 
 		// -----------------------------------------------------------------------
-		// Slash commands: /compact and /compact:focus <directive>
+		// Slash commands: built-in /compact, plus a focus argument
 		// -----------------------------------------------------------------------
 		"command.execute.before": async (input, _output) => {
 			if (!config.commands?.enabled) return;
