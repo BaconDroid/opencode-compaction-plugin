@@ -77,6 +77,16 @@ describe("applyDedup()", () => {
 		expect(applyDedup(msgs as never, cfg)).toBe(0);
 	});
 
+	it("skips protected message indices (pinned)", () => {
+		const cfg = mergeConfig({});
+		const msgs = [
+			msg("read", { filePath: "a.ts" }, "v1"),
+			msg("read", { filePath: "a.ts" }, "v2"),
+		];
+		expect(applyDedup(msgs as never, cfg, new Set([0]))).toBe(0);
+		expect(msgs[0].parts[0].state.output).toBe("v1");
+	});
+
 	it("ignores parts without output, non-tool parts and errored calls", () => {
 		const cfg = mergeConfig({});
 		const msgs = [

@@ -64,6 +64,15 @@ export interface CompressConfig {
 	searchMaxResults?: number;
 }
 
+export interface PinningConfig {
+	/** Enable constraint pinning (default: true; inert until patterns are set) */
+	enabled?: boolean;
+	/** Case-insensitive substrings that mark a message/line as a pinned constraint */
+	patterns?: string[];
+	/** Maximum pinned clauses re-injected into the prompt (default: 20) */
+	maxClauses?: number;
+}
+
 export interface EvictionSettings {
 	/** Enable graduated LLM-free eviction (default: false) */
 	enabled?: boolean;
@@ -132,6 +141,8 @@ export interface LiveCompactionConfig {
 	compress?: CompressConfig;
 	/** Graduated, LLM-free eviction */
 	eviction?: EvictionSettings;
+	/** Constraint pinning (E6): keep matched constraints through compaction */
+	pinning?: PinningConfig;
 	/** Turn-based protection: protect recent tool outputs from trimming */
 	turnProtection?: TurnProtectionConfig;
 	/** Proactive compaction before the context overflows */
@@ -170,6 +181,7 @@ export const DEFAULT_CONFIG: Required<
 		| "purgeErrors"
 		| "compress"
 		| "eviction"
+		| "pinning"
 		| "turnProtection"
 		| "preemptiveCompaction"
 		| "degradationMonitor"
@@ -180,6 +192,7 @@ export const DEFAULT_CONFIG: Required<
 	purgeErrors: Required<PurgeErrorsConfig>;
 	compress: Required<CompressConfig>;
 	eviction: Required<EvictionSettings>;
+	pinning: Required<PinningConfig>;
 	turnProtection: Required<TurnProtectionConfig>;
 	preemptiveCompaction: Required<
 		Omit<PreemptiveCompactionConfig, "contextLimit" | "absoluteTokenThreshold">
@@ -214,6 +227,11 @@ export const DEFAULT_CONFIG: Required<
 		thresholdTokens: 80000,
 		levels: ["reasoning", "bulk_output", "intermediate", "episode"],
 		protectPrologue: true,
+	},
+	pinning: {
+		enabled: true,
+		patterns: [],
+		maxClauses: 20,
 	},
 	turnProtection: {
 		enabled: true,

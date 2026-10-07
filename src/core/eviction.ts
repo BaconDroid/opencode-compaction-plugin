@@ -22,6 +22,8 @@ export interface EvictionConfig {
 	levels?: EvictionLevel[];
 	/** Protect the first message (prologue) from eviction (default: true). */
 	protectPrologue?: boolean;
+	/** Message indices never evicted (e.g. pinned constraints). */
+	protectedIndices?: Set<number>;
 	/** User turns are never evicted. */
 	neverEvictUser?: true;
 }
@@ -149,7 +151,9 @@ export function applyEviction(
 	const budgetReached = (): boolean =>
 		estimateTokens(messages) <= cfg.thresholdTokens;
 	const isProtected = (index: number): boolean =>
-		index < prologueEnd || messages[index]?.info?.role === "user";
+		index < prologueEnd ||
+		messages[index]?.info?.role === "user" ||
+		cfg.protectedIndices?.has(index) === true;
 
 	let lastAssistantIndex = -1;
 	for (let i = messages.length - 1; i >= 0; i--) {

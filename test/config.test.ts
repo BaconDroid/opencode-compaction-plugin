@@ -57,6 +57,11 @@ describe("mergeConfig()", () => {
 			"intermediate",
 			"episode",
 		]);
+		expect(cfg.pinning).toEqual({
+			enabled: true,
+			patterns: [],
+			maxClauses: 20,
+		});
 		expect(cfg.preemptiveCompaction).toMatchObject({
 			enabled: false,
 			threshold: 0.78,

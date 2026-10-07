@@ -59,7 +59,13 @@ import {
 import { buildTrimMap } from "./core/trim.js";
 import { PreemptionController } from "./core/preemption.js";
 import { applyTransform } from "./core/transform.js";
-import type { Hooks, Logger, Plugin, PluginInput } from "./types.js";
+import {
+	collectPinnedClauses,
+	missingClauses,
+	renderPinned,
+} from "./core/pin.js";
+import { partsText } from "./core/messages.js";
+import type { Hooks, Logger, Message, Plugin, PluginInput } from "./types.js";
 
 /** Model-driven tools registered by this plugin (used for permission wiring). */
 const PLUGIN_TOOL_NAMES = [
@@ -165,6 +171,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 	const expandStore = new ExpandStore();
 	const todoPreserver = new TodoPreserver();
 	const slidingState = new Map<string, SlidingState>();
+	const pinnedBySession = new Map<string, string[]>();
 	const degradation = new DegradationMonitor();
 	const autocontinue = new AutocontinueGuard();
 	const preemption = new PreemptionController(
@@ -217,6 +224,38 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			logger.info("todos restored", { sessionID, count: snapshot.length });
 		} catch (error) {
 			logger.info("todo restore failed", { error: String(error) });
+		}
+	};
+
+	// Deterministic integrity check: after compaction, verify the pinned clauses
+	// survived into the summary. Logs a warning for any missing clause.
+	const verifyPinnedIntegrity = async (sessionID: string): Promise<void> => {
+		const clauses = pinnedBySession.get(sessionID);
+		pinnedBySession.delete(sessionID);
+		if (!clauses || clauses.length === 0) return;
+		const fetchMessages = ctx.client.session?.messages;
+		if (!fetchMessages) return;
+		try {
+			const response = await fetchMessages({ path: { id: sessionID } });
+			const list = Array.isArray(response)
+				? response
+				: (((response as { data?: unknown })?.data as unknown[] | undefined) ??
+					[]);
+			const summary = (list as Message[]).find(
+				(message) => message.info?.summary === true,
+			);
+			const missing = missingClauses(
+				summary ? partsText(summary.parts) : "",
+				clauses,
+			);
+			if (missing.length > 0) {
+				logger.info("pinned constraints missing from summary", {
+					sessionID,
+					missing,
+				});
+			}
+		} catch (error) {
+			logger.info("pinned integrity check failed", { error: String(error) });
 		}
 	};
 
@@ -324,30 +363,44 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			}
 
 			// In replace mode the default prompt (which carries the previous
-			// summary) is discarded, so fetch and re-inject it ourselves.
+			// summary) is discarded, so fetch and re-inject it ourselves. Pinned
+			// constraints also need the messages, in either mode.
+			const pinnedPatterns =
+				config.pinning?.enabled === false ? [] : (config.pinning?.patterns ?? []);
+			const wantSummary = config.promptMode !== "augment";
+			const wantPinned = pinnedPatterns.length > 0;
+
 			let previousSummary: string | undefined;
 			let latestAsk: string | undefined;
-			if (config.promptMode !== "augment") {
-				const fetchMessages = ctx.client.session?.messages;
-				if (fetchMessages) {
-					try {
-						const response = await fetchMessages({ path: { id: sessionID } });
-						const list = Array.isArray(response)
-							? response
-							: (((response as { data?: unknown })?.data as
-									| unknown[]
-									| undefined) ?? []);
+			let pinnedClauses: string[] = [];
+			const fetchMessages = ctx.client.session?.messages;
+			if (fetchMessages && (wantSummary || wantPinned)) {
+				try {
+					const response = await fetchMessages({ path: { id: sessionID } });
+					const list = Array.isArray(response)
+						? response
+						: (((response as { data?: unknown })?.data as
+								| unknown[]
+								| undefined) ?? []);
+					if (wantSummary) {
 						const state = slidingState.get(sessionID) ?? {};
 						previousSummary = extractPreviousSummary(list, state);
 						latestAsk = extractLatestUserAsk(list);
 						slidingState.set(sessionID, state);
-					} catch (error) {
-						logger.info("previous summary fetch failed", {
-							error: String(error),
-						});
 					}
+					if (wantPinned) {
+						pinnedClauses = collectPinnedClauses(
+							list as Message[],
+							pinnedPatterns,
+							config.pinning?.maxClauses ?? 20,
+						);
+					}
+				} catch (error) {
+					logger.info("message fetch failed", { error: String(error) });
 				}
 			}
+			if (pinnedClauses.length > 0) pinnedBySession.set(sessionID, pinnedClauses);
+			else pinnedBySession.delete(sessionID);
 
 			// Render the captured task state (IDs/statuses preserved).
 			const todoSnapshot = todoPreserver.peek(sessionID);
@@ -367,6 +420,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 				previousSummary,
 				taskState,
 				focus: latestAsk,
+				pinned: renderPinned(pinnedClauses),
 			});
 
 			if (config.promptMode === "augment") {
@@ -464,6 +518,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 					expandStore.clear(sessionID);
 					todoPreserver.clear(sessionID);
 					slidingState.delete(sessionID);
+					pinnedBySession.delete(sessionID);
 					preemption.clear(sessionID);
 					degradation.clear(sessionID);
 					autocontinue.clear(sessionID);
@@ -474,6 +529,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			if (event.type === "session.compacted") {
 				if (sessionID) {
 					degradation.markCompacted(sessionID, Date.now());
+					await verifyPinnedIntegrity(sessionID);
 					await restoreTodos(sessionID);
 				}
 				return;
@@ -554,6 +610,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			expandStore.clearAll();
 			todoPreserver.clearAll();
 			slidingState.clear();
+			pinnedBySession.clear();
 			preemption.clearAll();
 			degradation.clearAll();
 			autocontinue.clearAll();

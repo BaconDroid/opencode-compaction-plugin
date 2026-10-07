@@ -5,6 +5,7 @@
  */
 
 import { getRecentTurnIndices } from "./messages.js";
+import { isPinnedMessage } from "./pin.js";
 import { hasProtectedFilePath, trimToolOutput } from "./trim.js";
 import {
 	applyCascadePurge,
@@ -29,14 +30,25 @@ export function applyTransform(messages: Message[], deps: TransformDeps): void {
 
 	const { config, logger } = deps;
 
-	// 1. Compute turn-protected indices (messages within last N user turns).
+	// 1. Compute turn-protected and pinned indices.
 	const recentIndices = deps.turnProtectionEnabled
 		? getRecentTurnIndices(messages, deps.protectedTurns)
 		: new Set<number>();
 
+	const pinningPatterns =
+		config.pinning?.enabled === false
+			? []
+			: (config.pinning?.patterns ?? []);
+	const pinnedIndices = new Set<number>();
+	if (pinningPatterns.length > 0) {
+		for (let i = 0; i < messages.length; i++) {
+			if (isPinnedMessage(messages[i], pinningPatterns)) pinnedIndices.add(i);
+		}
+	}
+
 	// 2. Trim tool outputs with protection checks.
 	for (let mi = 0; mi < messages.length; mi++) {
-		if (recentIndices.has(mi)) continue;
+		if (recentIndices.has(mi) || pinnedIndices.has(mi)) continue;
 		for (const part of messages[mi].parts) {
 			if (
 				part.type !== "tool" ||
@@ -58,7 +70,7 @@ export function applyTransform(messages: Message[], deps: TransformDeps): void {
 
 	// 3. Dedup repeated tool calls.
 	if (config.dedup?.enabled) {
-		const deduped = applyDedup(messages, config);
+		const deduped = applyDedup(messages, config, pinnedIndices);
 		if (deduped > 0) logger.info("dedup applied", { count: deduped });
 	}
 
@@ -68,6 +80,7 @@ export function applyTransform(messages: Message[], deps: TransformDeps): void {
 			messages,
 			config.purgeErrors.turns ?? 4,
 		);
+		for (const index of pinnedIndices) purgeProtected.add(index);
 		const purgedCallIds = new Set<string>();
 		const purged = applyPurgeErrors(
 			messages,
@@ -97,6 +110,7 @@ export function applyTransform(messages: Message[], deps: TransformDeps): void {
 			thresholdTokens: config.eviction.thresholdTokens ?? 80000,
 			levels: config.eviction.levels,
 			protectPrologue: config.eviction.protectPrologue ?? true,
+			protectedIndices: pinnedIndices,
 		});
 		if (removed > 0) {
 			logger.info("eviction applied", { removed, ids: evictedIds.length });

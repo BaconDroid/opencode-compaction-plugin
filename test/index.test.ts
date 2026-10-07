@@ -1924,4 +1924,64 @@ describe("LiveCompactionPlugin", () => {
 			expect(messages).not.toHaveBeenCalled();
 		});
 	});
+
+	describe("constraint pinning (E6)", () => {
+		it("injects pinned constraints into the prompt", async () => {
+			const messages = mock().mockResolvedValue({
+				data: [
+					{
+						info: { role: "user" },
+						parts: [{ type: "text", text: "NEVER force push to main" }],
+					},
+				],
+			});
+			const hooks = await LiveCompactionPlugin(
+				{
+					...mockCtx,
+					client: {
+						app: { log: mock().mockResolvedValue(undefined) },
+						session: { messages },
+					},
+					directory: TMP_DIR,
+				} as any,
+				{ pinning: { patterns: ["never force push"] } } as any,
+			);
+			const output = { context: [] as string[], prompt: undefined as string | undefined };
+			await hooks["experimental.session.compacting"]!(
+				{ sessionID: "sess-pin" },
+				output,
+			);
+			expect(output.prompt).toContain("<pinned-constraints>");
+			expect(output.prompt).toContain("NEVER force push to main");
+		});
+
+		it("does not trim pinned messages", async () => {
+			const hooks = await LiveCompactionPlugin(mockCtx as any, {
+				pinning: { patterns: ["never force push"] },
+			} as any);
+			const longOutput = "x".repeat(5000);
+			const messages = [
+				{
+					info: { role: "assistant" },
+					parts: [
+						{ type: "text", text: "NEVER force push" },
+						{ type: "tool", tool: "bash", state: { output: longOutput } },
+					],
+				},
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r1" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r2" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r3" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r4" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r5" }] },
+			];
+			await hooks["experimental.chat.messages.transform"]!({} as any, {
+				messages,
+			});
+			expect((messages[0].parts[1] as any).state.output).toBe(longOutput);
+		});
+	});
 });
