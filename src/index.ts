@@ -68,7 +68,7 @@ interface MessagePart {
 	state?: {
 		status?: string;
 		output?: string;
-		input?: string;
+		input?: unknown;
 		[key: string]: unknown;
 	};
 	[key: string]: unknown;

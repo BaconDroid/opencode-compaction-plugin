@@ -219,5 +219,25 @@ the built-in command. Focus is set from `/compact focus <directive>`
 → Partially addressed: the `command.execute.before` and transform signatures now
 match the SDK, and the tool uses the SDK helper. Full type import deferred.
 
+---
+
+## Re-validation 4 (SDK `Part` cross-check)
+
+### F5 — Error input purge never ran
+`src/strategies.ts`. Real tool parts carry `state.input` as an **object**
+(`{ [key: string]: unknown }`, per the SDK `ToolState`), but `applyPurgeErrors`
+required `typeof input === "string"`, so it never matched and the purge was dead.
+→ Resolved: `applyPurgeErrors` now measures string or object inputs and replaces
+a large input with a small `{ purged: "..." }` marker (object inputs stay
+objects). Types updated from `string` to `unknown`.
+
+### Notes (not changed)
+- `ToolState` status union is `pending | running | completed | error`; the
+  `"failed"` check in `findErroredParts` is dead but harmless.
+- `applyDedup` may set `output` on an error state (which carries `error`, not
+  `output`). Left as-is: the behavior is covered by tests and the effect is a
+  harmless extra field.
+
+
 
 

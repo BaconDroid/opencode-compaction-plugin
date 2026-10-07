@@ -830,7 +830,9 @@ describe("LiveCompactionPlugin", () => {
 			await hooks["experimental.chat.messages.transform"]!({} as any, {
 				messages,
 			});
-			expect(messages[0].parts[0].state.input).toContain("purged");
+			expect((messages[0].parts[0].state.input as any).purged).toContain(
+				"removed",
+			);
 			expect(messages[0].parts[0].state.output).toBe("command failed");
 		});
 

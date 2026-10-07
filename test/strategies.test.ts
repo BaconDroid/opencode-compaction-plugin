@@ -384,8 +384,30 @@ describe("applyPurgeErrors()", () => {
 		];
 		const count = applyPurgeErrors(msgs as any, cfg);
 		expect(count).toBe(1);
-		expect(msgs[0].parts[0].state.input).toContain("purged");
-		expect(msgs[0].parts[0].state.input).toContain("500 chars");
+		expect((msgs[0].parts[0].state.input as any).purged).toContain("removed");
+		expect((msgs[0].parts[0].state.input as any).purged).toContain("500 chars");
+	});
+
+	it("purges large object inputs (real tool parts)", () => {
+		const cfg = mergeConfig({});
+		const msgs = [
+			{
+				info: { role: "assistant" },
+				parts: [
+					{
+						type: "tool",
+						tool: "bash",
+						state: {
+							status: "error",
+							input: { command: "x".repeat(500) },
+						},
+					},
+				],
+			},
+		];
+		const count = applyPurgeErrors(msgs as any, cfg);
+		expect(count).toBe(1);
+		expect((msgs[0].parts[0].state.input as any).purged).toContain("removed");
 	});
 
 	it("preserves small inputs (< 100 chars)", () => {
