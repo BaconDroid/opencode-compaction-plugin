@@ -492,12 +492,13 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 				}
 			}
 
-			// Proactive compaction check (opt-in).
-			await maybePreempt(sessionID);
+			// Proactive compaction check (opt-in). Fire-and-forget so a slow
+			// summarize never blocks the tool result.
+			void maybePreempt(sessionID);
 		},
 
 		// -----------------------------------------------------------------------
-		// Enhanced compaction: replace the default prompt with our structured one
+		// Enhanced compaction: replace or augment the default compaction prompt
 		// -----------------------------------------------------------------------
 		"experimental.session.compacting": async (input, output) => {
 			const { sessionID } = input;
@@ -777,6 +778,8 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 						modelID: info.modelID ?? "",
 						tokens: info.tokens,
 					});
+					// Check on turn end too, so text-only sessions still trigger.
+					void maybePreempt(info.sessionID);
 				}
 
 				// Post-compaction degradation diagnostic (opt-in).

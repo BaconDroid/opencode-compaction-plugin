@@ -1504,6 +1504,48 @@ describe("LiveCompactionPlugin", () => {
 			});
 		});
 
+		it("triggers on turn end without a tool call", async () => {
+			const summarize = vi.fn().mockResolvedValue(undefined);
+			const list = vi.fn().mockResolvedValue({
+				all: [{ id: "prov", models: { "model-x": { limit: { context: 1000 } } } }],
+			});
+			const hooks = await LiveCompactionPlugin(
+				{
+					...mockCtx,
+					client: {
+						app: { log: vi.fn().mockResolvedValue(undefined) },
+						session: { summarize },
+						provider: { list },
+					},
+					directory: TMP_DIR,
+				} as any,
+				{ preemptiveCompaction: { enabled: true } } as any,
+			);
+
+			await hooks.event!({
+				event: {
+					id: "e",
+					type: "message.updated",
+					properties: {
+						info: {
+							sessionID: "sess-turn",
+							role: "assistant",
+							providerID: "prov",
+							modelID: "model-x",
+							finish: "stop",
+							tokens: { input: 900 },
+						},
+					},
+				},
+			});
+
+			expect(summarize).toHaveBeenCalledWith({
+				path: { id: "sess-turn" },
+				body: { providerID: "prov", modelID: "model-x", auto: true },
+				query: { directory: TMP_DIR },
+			});
+		});
+
 		it("does not trigger when disabled", async () => {
 			const summarize = vi.fn().mockResolvedValue(undefined);
 			const hooks = await LiveCompactionPlugin({
