@@ -10,6 +10,7 @@ import {
 	type BlockMessage,
 } from "./blocks.js";
 import { partsText } from "./messages.js";
+import { KeyedQueue } from "./store.js";
 
 export interface ExpansionRecord {
 	id: string;
@@ -127,36 +128,18 @@ export class ExpansionSidecar {
 }
 
 /** Per-plugin-instance store of pending expand requests, keyed by session. */
-export class ExpandStore {
-	private queues = new Map<string, ExpandRequest[]>();
-
-	queue(sessionID: string, request: ExpandRequest): void {
-		let queue = this.queues.get(sessionID);
-		if (!queue) {
-			queue = [];
-			this.queues.set(sessionID, queue);
-		}
-		queue.push(request);
-	}
-
+export class ExpandStore extends KeyedQueue<ExpandRequest> {
 	/**
 	 * Return the active requests for a session. Sticky requests are retained for
 	 * the next transform; one-shot requests are returned only once.
 	 */
-	drain(sessionID: string): ExpandRequest[] {
-		const queue = this.queues.get(sessionID) ?? [];
-		const sticky = queue.filter((req) => req.mode === "sticky");
-		if (sticky.length > 0) this.queues.set(sessionID, sticky);
-		else this.queues.delete(sessionID);
+	override drain(sessionID: string): ExpandRequest[] {
+		const queue = this.take(sessionID);
+		this.retain(
+			sessionID,
+			queue.filter((req) => req.mode === "sticky"),
+		);
 		return queue;
-	}
-
-	clear(sessionID: string): void {
-		this.queues.delete(sessionID);
-	}
-
-	clearAll(): void {
-		this.queues.clear();
 	}
 }
 
