@@ -489,7 +489,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			const { command, sessionID, arguments: args } = input;
 			if (command !== "compact") return;
 
-			const focusMatch = args?.match(/^focus\s+(\S.+)$/i);
+			const focusMatch = args?.match(/^focus\s+(\S.*)$/i);
 			if (!focusMatch) return;
 
 			const directive = focusMatch[1].trim();
@@ -541,7 +541,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		},
 
 		// -----------------------------------------------------------------------
-		// Config: register compress tool + slash commands with OpenCode
+		// Config: ensure the compress tool is permitted
 		// -----------------------------------------------------------------------
 		config: async (opencodeConfig: Record<string, unknown>) => {
 			// Ensure the compress tool is permitted, without clobbering a global
