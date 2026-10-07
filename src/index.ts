@@ -347,6 +347,11 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		(timer as { unref?: () => void }).unref?.();
 		autocontinueGuard.set(sessionID, timer);
 	};
+	const clearAutocontinueGuard = (sessionID: string) => {
+		const timer = autocontinueGuard.get(sessionID);
+		if (timer) clearTimeout(timer);
+		autocontinueGuard.delete(sessionID);
+	};
 
 	// Restore a captured todo snapshot after compaction. The writer is an
 	// OpenCode internal module, so this is best-effort.
@@ -760,6 +765,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 					preemptInProgress.delete(sessionID);
 					preemptLast.delete(sessionID);
 					degradation.clear(sessionID);
+					clearAutocontinueGuard(sessionID);
 				}
 				return;
 			}
@@ -848,6 +854,8 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			preemptLast.clear();
 			contextLimitCache.clear();
 			degradation.clearAll();
+			for (const timer of autocontinueGuard.values()) clearTimeout(timer);
+			autocontinueGuard.clear();
 		},
 
 		// -----------------------------------------------------------------------
