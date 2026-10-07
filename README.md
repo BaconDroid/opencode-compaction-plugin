@@ -124,7 +124,7 @@ Enables the synthetic "continue" turn after compaction, except for the compactio
 
 ## Compression Tools
 
-The plugin exposes four model-driven tools for proactive context management. The model decides when to compress and writes the summaries itself (it has full context).
+The plugin exposes six model-driven tools for proactive context management: `compress` and `squash` (fold), `expand` and `recall` (restore), `inspect` and `search` (browse/retrieve). The model decides when to compress and writes the summaries itself (it has full context).
 
 ### `compress`
 
@@ -179,6 +179,121 @@ Tool outputs from recent conversation turns are protected from trimming. The las
     }
 }
 ```
+
+## Feature reference
+
+Each feature below lists **what** it does, its **config** keys and how it
+**interacts** with the rest. Values live in
+[Default Configuration](#default-configuration); ordering guarantees in
+[Strategy order & interactions](#strategy-order--interactions).
+
+### Structured compaction prompt
+- **What** — replaces (or augments) OpenCode's default prompt with the 11-section
+  template and carries the continuity blocks `<previous-summary>`,
+  `<task-state>`, `<latest-user-ask>` and `<pinned-constraints>`.
+- **Config** — `promptMode` (`"replace"` default, or `"augment"`).
+- **Interactions** — in `replace` mode the session messages are fetched to populate
+  the blocks; `augment` keeps OpenCode's prompt and only fetches when
+  `pinning.patterns` is set.
+
+### Previous-summary continuity
+- **What** — re-injects the last compaction summary as `<previous-summary>`; a
+  sliding state avoids re-emitting the same summary on repeated compactions.
+- **Config** — none (tied to `promptMode: "replace"`).
+
+### Task state (todos)
+- **What** — captures the todo list before compaction, restores it after
+  (best-effort) and renders `<task-state>` with ids/statuses/priorities.
+- **Config** — none.
+
+### Latest user ask
+- **What** — anchors the summary with `<latest-user-ask>` (the current user request).
+- **Config** — none (replace mode).
+
+### Files-touched manifest
+- **What** — records read/write/edit/delete and emits an operation-badge manifest
+  (`R`/`W`/`E`/`D`).
+- **Config** — none.
+
+### Tool-output trimming
+- **What** — truncates long tool outputs to per-tool limits, keeping the tail.
+- **Config** — `trim.*` (per-tool limits + `default`).
+- **Interactions** — skipped for protected files, recent turns and pinned messages;
+  idempotent (an already-trimmed output is not re-trimmed).
+
+### Turn protection
+- **What** — never trims tool outputs from the last N user turns.
+- **Config** — `turnProtection.{enabled,turns}`.
+- **Interactions** — overrides trimming; the same window also protects purge.
+
+### Protected file patterns
+- **What** — never trims outputs from files matching glob patterns.
+- **Config** — `protectedFilePatterns` (globs).
+- **Interactions** — trimming only.
+
+### Deduplication
+- **What** — keeps only the latest of repeated `(tool + args)` calls.
+- **Config** — `dedup.{enabled,protectedTools}`.
+- **Interactions** — skipped for pinned messages; runs before error purge.
+
+### Error purge
+- **What** — strips errored tool inputs after N turns; opt-in `wholeAttempt`
+  (input + output + compact error extract) and `cascade` (dependent calls).
+- **Config** — `purgeErrors.{enabled,turns,wholeAttempt,cascade}`.
+- **Interactions** — recent turns and pinned messages are never purged; `cascade`
+  only fires for calls actually purged.
+
+### Graduated eviction
+- **What** — LLM-free eviction (`reasoning → bulk_output → intermediate → episode`)
+  once the estimated budget is exceeded.
+- **Config** — `eviction.{enabled,thresholdTokens,levels,protectPrologue}`.
+- **Interactions** — runs last; never evicts user turns, the prologue or pinned messages.
+
+### Constraint pinning
+- **What** — clauses matching `pinning.patterns` survive compaction and are
+  re-injected verbatim as `<pinned-constraints>`; a deterministic integrity check
+  warns when a clause is missing from the produced summary.
+- **Config** — `pinning.{enabled,patterns,maxClauses}`.
+- **Interactions** — overrides trimming, dedup, purge and eviction for matched messages.
+
+### Preemptive compaction
+- **What** — calls `session.summarize` before the context is full.
+- **Config** — `preemptiveCompaction.{enabled,threshold,absoluteTokenThreshold,countCacheTokens,minTokensSinceLast,minMessagesSinceLast,tailGuard,cooldownMs,contextLimit}`.
+- **Interactions** — threshold is `min(contextLimit × threshold, absoluteTokenThreshold)`;
+  the gates compose (AND) with the cooldown; the same usage signal gates the
+  `compress` tool (below 50% of the threshold defers it).
+
+### Degradation monitor
+- **What** — post-compaction diagnostic: warns when assistant messages stop producing text.
+- **Config** — `degradationMonitor.{enabled,threshold,windowMs}`.
+
+### Auto-continue
+- **What** — enables the synthetic continue turn after compaction, except for the
+  compaction agent and duplicate triggers (short per-session guard).
+- **Config** — none.
+
+### Compression tools
+- **What** — `compress`/`squash` (fold), `expand`/`recall` (restore), `inspect`/`search`
+  (browse/retrieve). See [Compression Tools](#compression-tools).
+- **Config** — `compress.{protectedTurns,reversible,maxBlocksPerSquash,searchMaxResults}`.
+- **Interactions** — applied in the transform before trimming.
+
+## Strategy order & interactions
+
+The `messages.transform` pipeline runs in a fixed order (see
+[How it works](#2-experimentalchatmessagestransform--context-optimization)):
+
+```
+compress → squash → expand → trim → dedup → purge (+cascade) → eviction
+```
+
+Override rules:
+
+- **Pinned messages** (`pinning.patterns`) are skipped by **all** of trim, dedup,
+  purge and eviction.
+- **Protected files** (`protectedFilePatterns`) affect **trimming** only; **recent
+  turns** (`turnProtection`) affect trimming and purge.
+- The protect mechanisms are independent and compose — a message is skipped if any applies.
 
 ## Configuration
 
@@ -321,7 +436,7 @@ bun run test:coverage
 # (OpenCode loads .ts files directly via Bun)
 ```
 
-Current coverage: **95.6% functions, 98.7% lines** (211 tests).
+Current coverage: **96.3% functions, 99.1% lines** (207 tests).
 
 ## File Structure
 
@@ -371,6 +486,7 @@ test/
   preemption.test.ts — Trigger, gates and preemptive tests
   degradation-monitor.test.ts — Degradation monitor tests
   previous-summary.test.ts — Previous summary and sliding-state tests
+  pin.test.ts       — Constraint pinning tests
 docs/
   context-compaction-research.md — Consolidated literature catalog, categories and implementation backlog
   research-prompt.md — Reusable prompt (bootstrap + sweep) to reproduce the literature sweep
@@ -388,7 +504,7 @@ Compatible with [`oh-my-opencode-slim`](https://github.com/alvinunreal/oh-my-ope
 
 - `experimental.session.compacting` — omo-slim only marks the session (it does not touch `output.prompt`/`output.context`), so this plugin's prompt handling is unaffected.
 - `experimental.chat.messages.transform` — omo-slim rewrites user text and image parts; this plugin trims/dedups/purges tool parts and applies compressions. Load omo-slim **before** this plugin so its in-place rewrites run before this plugin's structural compression.
-- `config` — omo-slim manages agents, MCPs and commands; this plugin only ensures permissions for its own tools (`compress`, `squash`, `expand`, `recall`) and leaves a global permission string untouched.
+- `config` — omo-slim manages agents, MCPs and commands; this plugin only ensures permissions for its own tools (`compress`, `squash`, `expand`, `recall`, `inspect`, `search`) and leaves a global permission string untouched.
 - No shared tool names (omo-slim: `task*`, `waitForUser`, `acpRun`, `webfetch`, `ast_grep_*`, `marketplace_*`; this plugin: `compress`, `squash`, `expand`, `recall`, `inspect`, `search`).
 - omo-slim does not use `experimental.compaction.autocontinue` and does not mutate `permission`.
 
