@@ -49,9 +49,6 @@ hybride + gates déterministes.
 Restent hors périmètre : mémoire inter-sessions, embeddings/retrieval (E4/E6+), rubric
 « quand compacter » par modèle.
 
-> Les correctifs décrits dans le code (F1–F11) sont suivis dans `code-review.md` ; le présent
-> document reflète l'état courant des hooks.
-
 ---
 
 ## 3. Index arborescent (niveaux 0 → 4)

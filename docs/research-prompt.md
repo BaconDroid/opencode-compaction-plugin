@@ -101,8 +101,8 @@ Termine par un tableau plat : Titre | ID/URL arXiv | Niveau | Statut | Pertinenc
 
 # Anti-doublon
 Ne repropose pas ce qui est déjà traité dans `docs/context-compaction-research.md`
-(backlog) ni dans `docs/code-review.md` (corrigé/écarté). Si un item y figure
-déjà : le signaler « déjà couvert », sans le re-développer.
+(backlog). Si un item y figure déjà : le signaler « déjà couvert », sans le
+re-développer.
 
 # Contraintes
 - N'invente jamais un titre, un auteur, un ID ou une URL. Non récupérable →
