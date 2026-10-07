@@ -49,11 +49,11 @@ export interface PurgeErrorsConfig {
 	turns?: number;
 	/**
 	 * Purge the whole failed attempt (input + output) instead of only the input.
-	 * The error output is replaced by a compact extract (default: true)
+	 * The error output is replaced by a compact extract (default: false)
 	 */
 	wholeAttempt?: boolean;
 	/**
-	 * Cascade the purge to work that depends on a purged call (default: true)
+	 * Cascade the purge to work that depends on a purged call (default: false)
 	 */
 	cascade?: boolean;
 }
@@ -209,8 +209,8 @@ export const DEFAULT_CONFIG: Required<
 	purgeErrors: {
 		enabled: true,
 		turns: 4,
-		wholeAttempt: true,
-		cascade: true,
+		wholeAttempt: false,
+		cascade: false,
 	},
 	compress: {
 		protectedTurns: 3,

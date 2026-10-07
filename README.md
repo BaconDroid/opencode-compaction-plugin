@@ -18,7 +18,7 @@ OpenCode's built-in compaction produces a 7-section summary. This plugin replace
 | **Prompt** | Hardcoded | Replaced via plugin hook (customizable) |
 | **Tool output size** | Unmanaged | **Configurable per-tool trim limits** |
 | **Duplicate tool calls** | Kept as-is | **Deduplicated** (keeps only latest) |
-| **Errored tool calls** | Kept forever | **Whole failed attempt purged** after N turns (input + output, compact error extract kept); cascades to dependent calls |
+| **Errored tool calls** | Kept forever | Inputs purged after N turns; opt-in **whole-attempt** purge (input + output, compact error extract) and **cascade** to dependent calls |
 | **Manual compaction** | `/compact` (built-in) | left to OpenCode (the plugin does not override it) |
 | **Protected files** | None | **Glob patterns** (`AGENTS.md`, `**/*.config.ts`) never trimmed |
 | **Recent turn protection** | None | **Last N turns** protected from trimming (default: 4) |
@@ -97,7 +97,7 @@ Runs on every message batch sent to the LLM. Applies the following strategies in
 3. **Expand / recall** — Restores a block's original messages from the in-memory sidecar (`expand` is sticky, `recall` is one-shot).
 4. **Tool output trimming** — Truncates long tool outputs (bash, read, grep, etc.) to configurable limits. Keeps the *end* of the output (usually has the result/error).
 5. **Deduplication** — When the same tool is called with the same args multiple times, only the latest output is kept. Earlier duplicates are replaced with a short marker.
-6. **Error purge** — Strips the whole failed attempt (input + output) from errored tool calls older than N turns, keeping a compact error extract; optionally cascades to calls that depend on the purged call.
+6. **Error purge** — Strips the input from errored tool calls older than N turns. Opt-in `wholeAttempt` also replaces the output with a compact error extract; opt-in `cascade` extends the purge to calls that depend on a purged call.
 7. **Graduated eviction** — Opt-in, LLM-free eviction (`reasoning → bulk output → intermediate → episode`) once the estimated budget is exceeded; user turns are never evicted.
 
 ### 3. `experimental.session.compacting` — Enhanced prompt
@@ -228,12 +228,12 @@ Precedence, low to high: **defaults → global file → plugin options → proje
         "protectedTools": []  // Tool names to exclude from dedup
     },
 
-    // Error purge: strip the whole failed attempt (input + output) from errored calls
+    // Error purge: strip inputs from errored calls (opt-in whole-attempt + cascade)
     "purgeErrors": {
         "enabled": true,
-        "turns": 4,             // Purge errored calls older than N user turns
-        "wholeAttempt": true,   // Also replace the output with a compact error extract
-        "cascade": true         // Cascade the purge to calls that depend on a purged call
+        "turns": 4,              // Purge errored calls older than N user turns
+        "wholeAttempt": false,   // Opt-in: also replace the output with a compact error extract
+        "cascade": false         // Opt-in: cascade the purge to calls depending on a purged call
     },
 
     // Model-driven compression tools

@@ -65,12 +65,15 @@ describe("mergeConfig()", () => {
 		expect(cfg.purgeErrors.turns).toBe(8);
 	});
 
-	it("defaults wholeAttempt to true and allows disabling it", () => {
-		expect(mergeConfig({}).purgeErrors.wholeAttempt).toBe(true);
-		expect(
-			mergeConfig({ purgeErrors: { wholeAttempt: false } }).purgeErrors
-				.wholeAttempt,
-		).toBe(false);
+	it("defaults wholeAttempt and cascade to false (opt-in)", () => {
+		const cfg = mergeConfig({});
+		expect(cfg.purgeErrors.wholeAttempt).toBe(false);
+		expect(cfg.purgeErrors.cascade).toBe(false);
+		const enabled = mergeConfig({
+			purgeErrors: { wholeAttempt: true, cascade: true },
+		});
+		expect(enabled.purgeErrors.wholeAttempt).toBe(true);
+		expect(enabled.purgeErrors.cascade).toBe(true);
 	});
 
 	it("defaults the compress settings", () => {
