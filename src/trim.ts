@@ -4,6 +4,7 @@
 
 import type { LiveCompactionConfig } from "./config.js";
 import { extractFilePaths, isFileProtected } from "./glob.js";
+import { partInput } from "./text.js";
 import type { Message, MessagePart } from "./types.js";
 
 export function buildTrimMap(
@@ -74,9 +75,8 @@ export function hasProtectedFilePath(
 ): boolean {
 	if (protectedPatterns.length === 0) return false;
 
-	// Mirror the dedup lookup: args may live under `args` or `state.input`,
-	// and `state.input` may be a JSON string.
-	const raw = (part as Record<string, unknown>).args ?? part.state?.input;
+	// `args` may live under `args` or `state.input`, and the latter may be JSON.
+	const raw = partInput(part);
 	let args: Record<string, unknown> | undefined;
 	if (typeof raw === "string") {
 		try {

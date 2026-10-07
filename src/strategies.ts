@@ -8,6 +8,7 @@
  */
 
 import type { LiveCompactionConfig } from "./config.js";
+import { partInput } from "./text.js";
 import type { Message, MessagePart } from "./types.js";
 
 export interface StrategyContext {
@@ -75,8 +76,7 @@ export function applyDedup(
 			// carry `error`, not `output`.
 			if (typeof part.state?.output !== "string") continue;
 
-			const args = (part as Record<string, unknown>).args ?? part.state?.input;
-			const key = toolCallKey(part.tool, args);
+			const key = toolCallKey(part.tool, partInput(part));
 
 			if (!seen.has(key)) seen.set(key, []);
 			seen.get(key)!.push({ msgIdx: mi, partIdx: pi });
@@ -190,7 +190,7 @@ export function applyPurgeErrors(
 
 /** Serialize a tool part's input/args for dependency scanning. */
 function serializeInput(part: MessagePart): string {
-	const raw = (part as Record<string, unknown>).args ?? part.state?.input;
+	const raw = partInput(part);
 	if (raw === undefined || raw === null) return "";
 	return typeof raw === "string" ? raw : JSON.stringify(raw);
 }
