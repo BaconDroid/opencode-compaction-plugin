@@ -309,7 +309,7 @@ describe("LiveCompactionPlugin", () => {
 			expect(output.prompt).not.toContain("## Files Touched Manifest");
 		});
 
-		it("includes focus directive when set via /compact:focus", async () => {
+		it("includes focus directive when set via /compact focus", async () => {
 			const hooks = await getHooks();
 
 			// First, trigger a tool call to register the session
