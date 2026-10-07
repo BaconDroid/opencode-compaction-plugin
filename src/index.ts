@@ -31,6 +31,11 @@ import {
 	applyCompressions,
 	selectCompressions,
 } from "./compress.js";
+import {
+	TodoPreserver,
+	extractTodos,
+	type TodoSnapshot,
+} from "./todo-preserver.js";
 
 // ---------------------------------------------------------------------------
 // Types — inlined from @opencode-ai/plugin to avoid requiring it as a dep.
@@ -48,6 +53,9 @@ interface PluginInput {
 					extra?: Record<string, unknown>;
 				};
 			}) => Promise<unknown>;
+		};
+		session?: {
+			todo?: (input: { path: { id: string } }) => Promise<unknown>;
 		};
 	};
 	project: { id: string; name: string };
@@ -274,6 +282,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 	const sessionTrackers = new Map<string, FilesTouchedTracker>();
 	const focusDirectives = new Map<string, string>();
 	const compressions = new CompressionStore();
+	const todoPreserver = new TodoPreserver();
 	let pendingFocus: string | undefined;
 
 	const getTracker = (sessionID: string): FilesTouchedTracker => {
@@ -313,6 +322,30 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		);
 		(timer as { unref?: () => void }).unref?.();
 		autocontinueGuard.set(sessionID, timer);
+	};
+
+	// Restore a captured todo snapshot after compaction. The writer is an
+	// OpenCode internal module, so this is best-effort.
+	const restoreTodos = async (sessionID: string): Promise<void> => {
+		const snapshot = todoPreserver.take(sessionID);
+		if (!snapshot || snapshot.length === 0) return;
+		try {
+			const loader = "opencode/session/todo";
+			const mod = (await import(loader)) as {
+				Todo?: {
+					update?: (input: {
+						sessionID: string;
+						todos: TodoSnapshot[];
+					}) => Promise<void>;
+				};
+			};
+			const update = mod.Todo?.update;
+			if (typeof update !== "function") return;
+			await update({ sessionID, todos: snapshot });
+			logger.info("todos restored", { sessionID, count: snapshot.length });
+		} catch (error) {
+			logger.info("todo restore failed", { error: String(error) });
+		}
 	};
 
 	const hooks: Hooks = {
@@ -358,6 +391,17 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		// -----------------------------------------------------------------------
 		"experimental.session.compacting": async (input, output) => {
 			const { sessionID } = input;
+
+			// Capture the todo list so it can be restored after compaction.
+			const todoClient = ctx.client.session?.todo;
+			if (todoClient) {
+				try {
+					const response = await todoClient({ path: { id: sessionID } });
+					todoPreserver.capture(sessionID, extractTodos(response));
+				} catch (error) {
+					logger.info("todo capture failed", { error: String(error) });
+				}
+			}
 
 			// Collect files-touched manifest
 			const tracker = getTracker(sessionID);
@@ -562,18 +606,28 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		// Cleanup on session events
 		// -----------------------------------------------------------------------
 		event: async ({ event }) => {
+			// The SDK carries the session under `info.id` for some events and
+			// `sessionID` for others; accept both.
+			const props = event.properties as
+				| { sessionID?: string; info?: { id?: string } }
+				| undefined;
+			const sessionID = props?.sessionID ?? props?.info?.id;
+
 			if (event.type === "session.deleted") {
-				// The SDK event carries the session under `info.id`; older
-				// payloads used `sessionID`. Accept both.
-				const props = event.properties as
-					| { sessionID?: string; info?: { id?: string } }
-					| undefined;
-				const sessionID = props?.sessionID ?? props?.info?.id;
 				if (sessionID) {
 					sessionTrackers.delete(sessionID);
 					focusDirectives.delete(sessionID);
 					compressions.clear(sessionID);
+					todoPreserver.clear(sessionID);
 				}
+				return;
+			}
+
+			if (event.type === "session.compacted") {
+				if (sessionID) {
+					await restoreTodos(sessionID);
+				}
+				return;
 			}
 		},
 
@@ -585,6 +639,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			focusDirectives.clear();
 			pendingFocus = undefined;
 			compressions.clearAll();
+			todoPreserver.clearAll();
 		},
 
 		// -----------------------------------------------------------------------

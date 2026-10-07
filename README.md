@@ -22,6 +22,8 @@ OpenCode's built-in compaction produces a 7-section summary. This plugin replace
 | **Manual compaction** | `/compact` only | built-in `/compact`, plus `/compact focus <goal>` to set a focus |
 | **Protected files** | None | **Glob patterns** (`AGENTS.md`, `**/*.config.ts`) never trimmed |
 | **Recent turn protection** | None | **Last N turns** protected from trimming (default: 4) |
+| **Auto-continue** | Always on | Skipped for the compaction agent and duplicate triggers |
+| **Todo list** | Not managed | **Captured before compaction and restored after** (best-effort) |
 | **Compress tool** | None | Model-driven **compress** tool for proactive context management |
 
 ## Install
@@ -250,7 +252,7 @@ bun run test:coverage
 # (OpenCode loads .ts files directly via Bun)
 ```
 
-Current coverage: **97.7% statements, 96.7% functions, 98.3% lines, 87.7% branches** (190 tests).
+Current coverage: **96.5% statements, 95.8% functions, 97.6% lines, 87.7% branches** (203 tests).
 
 ## File Structure
 
@@ -263,6 +265,7 @@ src/
   strategies.ts     — Dedup and error purge strategies
   glob.ts           — Glob matcher for protected file patterns
   compress.ts       — Compress tool definition and queue management
+  todo-preserver.ts — Todo snapshot/restore around compaction
 test/
   index.test.ts     — Plugin integration tests
   prompt.test.ts    — Prompt template tests
@@ -271,9 +274,11 @@ test/
   strategies.test.ts — Strategy unit tests
   glob.test.ts      — Glob matcher tests
   compress.test.ts  — Compress tool tests
+  todo-preserver.test.ts — Todo preserver tests
 docs/
   context-compaction-research.md — Literature catalog and implementation backlog
   code-review.md    — Direct source findings
+  omo-compaction.md — oh-my-openagent compaction review and adopted ideas
 ```
 
 ## Compatibility
