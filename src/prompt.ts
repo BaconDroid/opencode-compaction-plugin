@@ -11,6 +11,7 @@
 export function buildCompactionPrompt(input: {
 	filesTouched?: string;
 	focusDirective?: string;
+	previousSummary?: string;
 }): string {
 	const filesBlock = input.filesTouched
 		? `\n\n${input.filesTouched}`
@@ -20,11 +21,16 @@ export function buildCompactionPrompt(input: {
 		? `\n\n<focus-directive>\nThe operator explicitly requested preserving this goal through compaction:\n${input.focusDirective}\n</focus-directive>`
 		: "";
 
+	const previousBlock = input.previousSummary
+		? `\n\n<previous-summary>\n${input.previousSummary}\n</previous-summary>`
+		: "";
+
 	return `You are an anchored context summarization assistant for coding sessions.
 
 Summarize ONLY the conversation history you are given. The newest turns may be kept verbatim outside your summary, so focus on the older context that still matters for continuing the work.
 
 If the prompt includes a <previous-summary> block, treat it as the current anchored summary. Update it with the new history by preserving still-true details, removing stale details, and merging in new facts.
+${previousBlock}
 
 ${focusBlock}
 
