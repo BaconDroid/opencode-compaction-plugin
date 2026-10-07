@@ -126,6 +126,12 @@ class AutocontinueGuard {
 	}
 }
 
+/** The SDK wraps list responses in `{ data }`; accept both shapes. */
+function unwrapList(response: unknown): unknown[] {
+	if (Array.isArray(response)) return response;
+	return ((response as { data?: unknown })?.data as unknown[] | undefined) ?? [];
+}
+
 export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 	// Load config (defaults < global file < plugin options < project file).
 	const configWarnings: string[] = [];
@@ -237,10 +243,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		if (!fetchMessages) return;
 		try {
 			const response = await fetchMessages({ path: { id: sessionID } });
-			const list = Array.isArray(response)
-				? response
-				: (((response as { data?: unknown })?.data as unknown[] | undefined) ??
-					[]);
+			const list = unwrapList(response);
 			const summary = (list as Message[]).find(
 				(message) => message.info?.summary === true,
 			);
@@ -377,11 +380,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			if (fetchMessages && (wantSummary || wantPinned)) {
 				try {
 					const response = await fetchMessages({ path: { id: sessionID } });
-					const list = Array.isArray(response)
-						? response
-						: (((response as { data?: unknown })?.data as
-								| unknown[]
-								| undefined) ?? []);
+					const list = unwrapList(response);
 					if (wantSummary) {
 						const state = slidingState.get(sessionID) ?? {};
 						previousSummary = extractPreviousSummary(list, state);
@@ -570,11 +569,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 							const response = await fetchMessages({
 								path: { id: info.sessionID },
 							});
-							const list = Array.isArray(response)
-								? response
-								: (((response as { data?: unknown })?.data as
-										| unknown[]
-										| undefined) ?? []);
+							const list = unwrapList(response);
 							const count = countTrailingNoTextAssistant(
 								list as Array<{
 									info?: { role?: string };
