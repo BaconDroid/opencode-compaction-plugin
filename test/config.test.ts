@@ -5,26 +5,12 @@ import {
 	DEFAULT_CONFIG,
 	DEFAULT_TRIM,
 } from "../src/config/config.ts";
-import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { makeTmpSetup } from "./helpers.ts";
 
 const TMP_DIR = join(import.meta.dirname, "__tmp_config_test");
-const ORIGINAL_XDG = process.env.XDG_CONFIG_HOME;
-
-function setupTmp() {
-	if (existsSync(TMP_DIR)) rmSync(TMP_DIR, { recursive: true });
-	mkdirSync(TMP_DIR, { recursive: true });
-	mkdirSync(join(TMP_DIR, ".opencode"), { recursive: true });
-	mkdirSync(join(TMP_DIR, "xdg"), { recursive: true });
-	// Isolate the global config dir so the machine's real config is not read.
-	process.env.XDG_CONFIG_HOME = join(TMP_DIR, "xdg");
-}
-
-function cleanupTmp() {
-	if (ORIGINAL_XDG === undefined) delete process.env.XDG_CONFIG_HOME;
-	else process.env.XDG_CONFIG_HOME = ORIGINAL_XDG;
-	if (existsSync(TMP_DIR)) rmSync(TMP_DIR, { recursive: true });
-}
+const { setup: setupTmp, cleanup: cleanupTmp } = makeTmpSetup(TMP_DIR);
 
 describe("mergeConfig()", () => {
 	it("returns the documented defaults", () => {
