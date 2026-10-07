@@ -37,10 +37,16 @@ En cas de doute : "à examiner", ne pas descendre.
 3. Applique le gate : pertinent → descends (fetch, répète) ; hors-sujet → écarte.
 4. Déduplique les URLs déjà vues.
 
-# Conditions d'arrêt
-- Profondeur max : 3 niveaux sous la racine.
-- Budget : ~40–50 pages max.
-- Stoppe dès qu'un niveau n'ajoute plus aucun lien pertinent.
+# Conditions d'arrêt et reprise
+- Profondeur par défaut : 3 niveaux sous la racine.
+- Budget par défaut : ~40–50 pages.
+- Quand une limite est atteinte (profondeur OU budget), NE t'arrête pas
+  définitivement : fais un POINT DE CONTRÔLE — où tu en es, la profondeur
+  atteinte, ce qui reste pertinent et non exploré, et les liens candidats du
+  niveau suivant — puis DEMANDE-MOI si je veux continuer plus loin (et jusqu'où :
+  +N niveaux / +N pages).
+- Stoppe seulement quand plus aucun lien pertinent n'est trouvé, ou sur ma
+  demande explicite.
 
 # Sortie : INDEX (Markdown)
 Arborescent. Pour chaque nœud :
