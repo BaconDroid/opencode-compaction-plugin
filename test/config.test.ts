@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { loadConfig } from "../src/config/config-loader.ts";
 import {
-	loadConfig,
 	mergeConfig,
 	DEFAULT_CONFIG,
 	DEFAULT_TRIM,
-} from "../src/config.ts";
+} from "../src/config/config.ts";
 import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 

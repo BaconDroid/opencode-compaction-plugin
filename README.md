@@ -287,7 +287,7 @@ Precedence, low to high: **defaults → global file → plugin options → proje
 
 ### Customizing the prompt
 
-To customize the compaction prompt, modify the `buildCompactionPrompt()` function in `src/prompt.ts`. The template is a plain string that you can edit to add or remove sections.
+To customize the compaction prompt, modify the `buildCompactionPrompt()` function in `src/core/prompt.ts`. The template is a plain string that you can edit to add or remove sections.
 
 ## Development
 
@@ -312,36 +312,50 @@ Current coverage: **95.6% functions, 98.7% lines** (211 tests).
 
 ## File Structure
 
+Split by layer: the entry wiring, the domain `core/` (no OpenCode SDK), the
+`config/` loader and the `opencode/` SDK boundary.
+
 ```
 src/
-  index.ts          — Plugin entry point, hooks, integration
-  prompt.ts         — Compaction prompt template (11 sections)
-  files-touched.ts  — File operation tracker with manifest renderer
-  config.ts         — Config loading and defaults
-  strategies.ts     — Dedup, error purge and cascade purge strategies
-  glob.ts           — Glob matcher for protected file patterns
-  compress.ts       — Compress/squash tools, queue management, block rendering
-  blocks.ts         — Durable block ids and deterministic span selection
-  expand.ts         — Reversible sidecar + expand/recall tools
-  eviction.ts       — Graduated, LLM-free eviction
-  todo-preserver.ts — Todo snapshot/restore and <task-state> rendering
-  preemptive-compaction.ts — Trigger threshold, gates and preemptive decision logic
-  degradation-monitor.ts — Post-compaction degradation diagnostic
-  previous-summary.ts — Previous summary extraction + sliding state
+  index.ts              — Plugin entry point (hooks wiring)
+  types.ts              — Shared types (messages, hooks, logger)
+  core/                 — Domain logic (no OpenCode SDK)
+    transform.ts        — messages.transform pipeline
+    requests.ts         — queued compress/squash/expand application
+    compress.ts         — compress/squash domain + block rendering
+    blocks.ts           — durable block ids + deterministic span selection
+    expand.ts           — reversible sidecar (expand/recall domain)
+    strategies.ts       — dedup, error purge, cascade purge
+    eviction.ts         — graduated, LLM-free eviction
+    trim.ts             — tool-output trimming + protected files
+    messages.ts         — message-part helpers
+    prompt.ts           — compaction prompt template (11 sections)
+    previous-summary.ts — previous summary extraction + sliding state
+    todo-preserver.ts   — todo snapshot/restore + <task-state>
+    files-touched.ts    — file operation tracker + manifest
+    degradation-monitor.ts — post-compaction degradation diagnostic
+    preemption.ts       — trigger logic + preemption controller
+    glob.ts             — glob matcher for protected files
+  config/
+    config.ts           — config types, defaults and merge
+    config-loader.ts    — JSON/JSONC file loading
+  opencode/
+    tools.ts            — model-driven tool definitions (SDK boundary)
 test/
   index.test.ts     — Plugin integration tests
+  compat.test.ts    — omo-slim compatibility contract
   prompt.test.ts    — Prompt template tests
   files-touched.test.ts — File tracker tests
   config.test.ts    — Config loading tests
   strategies.test.ts — Strategy unit tests
   glob.test.ts      — Glob matcher tests
-  compress.test.ts  — Compress/squash tool tests
+  compress.test.ts  — Compress/squash tests
   blocks.test.ts    — Block id and span selection tests
   expand.test.ts    — Reversible expand/recall tests
   eviction.test.ts  — Graduated eviction tests
   todo-preserver.test.ts — Todo preserver and task-state tests
-  preemptive-compaction.test.ts — Trigger, gates and preemptive tests
-  degradation-monitor.test.ts — Degradation monitor and halting tests
+  preemption.test.ts — Trigger, gates and preemptive tests
+  degradation-monitor.test.ts — Degradation monitor tests
   previous-summary.test.ts — Previous summary and sliding-state tests
 docs/
   context-compaction-research.md — Consolidated literature catalog, categories and implementation backlog

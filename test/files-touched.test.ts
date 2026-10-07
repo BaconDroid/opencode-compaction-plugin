@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { FilesTouchedTracker } from "../src/files-touched.ts";
+import { FilesTouchedTracker } from "../src/core/files-touched.ts";
 
 describe("FilesTouchedTracker", () => {
 	it("starts empty", () => {

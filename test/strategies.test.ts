@@ -5,8 +5,8 @@ import {
 	findErroredParts,
 	applyPurgeErrors,
 	applyCascadePurge,
-} from "../src/strategies.ts";
-import { mergeConfig } from "../src/config.ts";
+} from "../src/core/strategies.ts";
+import { mergeConfig } from "../src/config/config.ts";
 
 describe("toolCallKey()", () => {
 	it("is deterministic and distinguishes tools and args", () => {

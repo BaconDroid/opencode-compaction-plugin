@@ -5,9 +5,9 @@
  * the model-driven `compress` tool on the same usage signal.
  */
 
-import type { ResolvedConfig } from "./config.js";
-import type { Logger } from "./types.js";
-import type { PluginInput } from "./types.js";
+import type { ResolvedConfig } from "../config/config.js";
+import type { Logger } from "../types.js";
+import type { PluginInput } from "../types.js";
 
 // ---------------------------------------------------------------------------
 // Pure trigger logic (testable without a client)

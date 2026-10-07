@@ -3,7 +3,7 @@ import {
 	messageHasText,
 	countTrailingNoTextAssistant,
 	DegradationMonitor,
-} from "../src/degradation-monitor.ts";
+} from "../src/core/degradation-monitor.ts";
 
 describe("messageHasText()", () => {
 	it("detects non-empty text parts only", () => {

@@ -2,7 +2,7 @@ import { describe, it, expect } from "bun:test";
 import {
 	extractPreviousSummary,
 	type SlidingState,
-} from "../src/previous-summary.ts";
+} from "../src/core/previous-summary.ts";
 
 describe("extractPreviousSummary()", () => {
 	it("returns the last assistant summary text", () => {
