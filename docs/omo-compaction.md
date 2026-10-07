@@ -35,20 +35,15 @@ plugin adopted or deferred.
 | Constraints quoted verbatim; cite the source | compaction prompt |
 | Preserve subagent `task_id`s ("resume, don't restart") | compaction prompt |
 | Todo list captured before and restored after compaction | `src/todo-preserver.ts` |
+| Preemptive (proactive) compaction near the context limit | `preemptiveCompaction` config + `session.summarize` |
 
 ## Deferred
 
-### D1 — Preemptive (proactive) compaction
-Trigger compaction before the context overflows, based on token usage
-(threshold ~78%, cooldown), via `client.session.summarize`. Highest value, but it
-uses an internal API and needs careful token accounting and cooldown handling.
-Aligns with the research backlog in `context-compaction-research.md`.
-
-### D2 — `output.context` (augment) vs `output.prompt` (replace)
+### D1 — `output.context` (augment) vs `output.prompt` (replace)
 omo augments OpenCode's default compaction prompt; this plugin replaces it to
 enforce its 11-section format. A configurable mode (`promptMode: replace |
 augment`) would let users keep OpenCode's default prompt and add sections.
 
-### D3 — Post-compaction degradation monitor
+### D2 — Post-compaction degradation monitor
 omo watches for consecutive assistant messages with no text after compaction and
 re-injects agent config. Specific to its multi-agent setup; not adopted.

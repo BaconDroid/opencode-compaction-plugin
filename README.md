@@ -23,6 +23,7 @@ OpenCode's built-in compaction produces a 7-section summary. This plugin replace
 | **Protected files** | None | **Glob patterns** (`AGENTS.md`, `**/*.config.ts`) never trimmed |
 | **Recent turn protection** | None | **Last N turns** protected from trimming (default: 4) |
 | **Auto-continue** | Always on | Skipped for the compaction agent and duplicate triggers |
+| **Proactive compaction** | Only at the context limit | Optional **preemptive** compaction near the limit (opt-in) |
 | **Todo list** | Not managed | **Captured before compaction and restored after** (best-effort) |
 | **Compress tool** | None | Model-driven **compress** tool for proactive context management |
 
@@ -227,6 +228,14 @@ Precedence, low to high: **defaults → global file → plugin options → proje
         "turns": 4   // Number of recent user turns to protect
     },
 
+    // Proactive compaction before the context overflows (opt-in)
+    "preemptiveCompaction": {
+        "enabled": false,        // enable to compact before the context is full
+        "threshold": 0.78,       // fraction of the context limit that triggers it
+        "cooldownMs": 60000,     // minimum delay between proactive compactions
+        "contextLimit": 200000   // optional override; else resolved from the provider
+    },
+
     // Glob patterns for files whose outputs should never be trimmed
     "protectedFilePatterns": []
 }
@@ -252,7 +261,7 @@ bun run test:coverage
 # (OpenCode loads .ts files directly via Bun)
 ```
 
-Current coverage: **96.5% statements, 95.8% functions, 97.6% lines, 87.7% branches** (203 tests).
+Current coverage: **95.2% statements, 96.1% functions, 97.3% lines, 86.5% branches** (213 tests).
 
 ## File Structure
 
@@ -266,6 +275,7 @@ src/
   glob.ts           — Glob matcher for protected file patterns
   compress.ts       — Compress tool definition and queue management
   todo-preserver.ts — Todo snapshot/restore around compaction
+  preemptive-compaction.ts — Proactive compaction decision logic
 test/
   index.test.ts     — Plugin integration tests
   prompt.test.ts    — Prompt template tests
@@ -275,6 +285,7 @@ test/
   glob.test.ts      — Glob matcher tests
   compress.test.ts  — Compress tool tests
   todo-preserver.test.ts — Todo preserver tests
+  preemptive-compaction.test.ts — Preemptive compaction tests
 docs/
   context-compaction-research.md — Literature catalog and implementation backlog
   code-review.md    — Direct source findings

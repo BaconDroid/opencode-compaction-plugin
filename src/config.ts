@@ -60,6 +60,17 @@ export interface TurnProtectionConfig {
 	turns?: number;
 }
 
+export interface PreemptiveCompactionConfig {
+	/** Compact proactively before the context overflows (default: false) */
+	enabled?: boolean;
+	/** Fraction of the context limit that triggers compaction (default: 0.78) */
+	threshold?: number;
+	/** Minimum delay between proactive compactions, in ms (default: 60000) */
+	cooldownMs?: number;
+	/** Override the model context limit (otherwise resolved from the provider) */
+	contextLimit?: number;
+}
+
 export interface LiveCompactionConfig {
 	/** Enable/disable the entire plugin (default: true) */
 	enabled?: boolean;
@@ -73,6 +84,8 @@ export interface LiveCompactionConfig {
 	commands?: SlashCommandsConfig;
 	/** Turn-based protection: protect recent tool outputs from trimming */
 	turnProtection?: TurnProtectionConfig;
+	/** Proactive compaction before the context overflows */
+	preemptiveCompaction?: PreemptiveCompactionConfig;
 	/** Glob patterns for files whose tool outputs should never be trimmed (default: []) */
 	protectedFilePatterns?: string[];
 	/** Enable debug logging (default: false) */
@@ -98,7 +111,12 @@ export const DEFAULT_TRIM: Required<TrimLimits> = {
 export const DEFAULT_CONFIG: Required<
 	Omit<
 		LiveCompactionConfig,
-		"trim" | "dedup" | "purgeErrors" | "commands" | "turnProtection"
+		| "trim"
+		| "dedup"
+		| "purgeErrors"
+		| "commands"
+		| "turnProtection"
+		| "preemptiveCompaction"
 	>
 > & {
 	trim: Required<TrimLimits>;
@@ -106,6 +124,11 @@ export const DEFAULT_CONFIG: Required<
 	purgeErrors: Required<PurgeErrorsConfig>;
 	commands: Required<SlashCommandsConfig>;
 	turnProtection: Required<TurnProtectionConfig>;
+	preemptiveCompaction: Required<
+		Omit<PreemptiveCompactionConfig, "contextLimit">
+	> & {
+		contextLimit?: number;
+	};
 } = {
 	enabled: true,
 	debug: false,
@@ -124,6 +147,11 @@ export const DEFAULT_CONFIG: Required<
 	turnProtection: {
 		enabled: true,
 		turns: 4,
+	},
+	preemptiveCompaction: {
+		enabled: false,
+		threshold: 0.78,
+		cooldownMs: 60000,
 	},
 	protectedFilePatterns: [],
 };
@@ -233,6 +261,18 @@ export function mergeConfig(user: LiveCompactionConfig) {
 			enabled:
 				user.turnProtection?.enabled ?? DEFAULT_CONFIG.turnProtection.enabled,
 			turns: user.turnProtection?.turns ?? DEFAULT_CONFIG.turnProtection.turns,
+		},
+		preemptiveCompaction: {
+			enabled:
+				user.preemptiveCompaction?.enabled ??
+				DEFAULT_CONFIG.preemptiveCompaction.enabled,
+			threshold:
+				user.preemptiveCompaction?.threshold ??
+				DEFAULT_CONFIG.preemptiveCompaction.threshold,
+			cooldownMs:
+				user.preemptiveCompaction?.cooldownMs ??
+				DEFAULT_CONFIG.preemptiveCompaction.cooldownMs,
+			contextLimit: user.preemptiveCompaction?.contextLimit,
 		},
 		protectedFilePatterns:
 			user.protectedFilePatterns ?? DEFAULT_CONFIG.protectedFilePatterns,

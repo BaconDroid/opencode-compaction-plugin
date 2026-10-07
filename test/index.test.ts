@@ -1449,4 +1449,99 @@ describe("LiveCompactionPlugin", () => {
 			expect(output.prompt).toBeDefined();
 		});
 	});
+
+	describe("preemptive compaction", () => {
+		it("triggers summarize near the context limit", async () => {
+			const summarize = vi.fn().mockResolvedValue(undefined);
+			const list = vi.fn().mockResolvedValue({
+				all: [{ id: "prov", models: { "model-x": { limit: { context: 1000 } } } }],
+			});
+			const hooks = await LiveCompactionPlugin(
+				{
+					...mockCtx,
+					client: {
+						app: { log: vi.fn().mockResolvedValue(undefined) },
+						session: { summarize },
+						provider: { list },
+					},
+					directory: TMP_DIR,
+				} as any,
+				{ preemptiveCompaction: { enabled: true } } as any,
+			);
+
+			await hooks.event!({
+				event: {
+					id: "e",
+					type: "message.updated",
+					properties: {
+						info: {
+							id: "m1",
+							sessionID: "sess-preempt",
+							role: "assistant",
+							providerID: "prov",
+							modelID: "model-x",
+							finish: "stop",
+							tokens: { input: 900, cache: { read: 0, write: 0 } },
+						},
+					},
+				},
+			});
+
+			await hooks["tool.execute.after"]!(
+				{
+					tool: "read",
+					sessionID: "sess-preempt",
+					callID: "c1",
+					args: { filePath: "a.ts" },
+				},
+				{ title: "", output: "", metadata: {} },
+			);
+
+			expect(summarize).toHaveBeenCalledWith({
+				path: { id: "sess-preempt" },
+				body: { providerID: "prov", modelID: "model-x", auto: true },
+				query: { directory: TMP_DIR },
+			});
+		});
+
+		it("does not trigger when disabled", async () => {
+			const summarize = vi.fn().mockResolvedValue(undefined);
+			const hooks = await LiveCompactionPlugin({
+				...mockCtx,
+				client: {
+					app: { log: vi.fn().mockResolvedValue(undefined) },
+					session: { summarize },
+					provider: { list: vi.fn() },
+				},
+				directory: TMP_DIR,
+			} as any);
+
+			await hooks.event!({
+				event: {
+					id: "e",
+					type: "message.updated",
+					properties: {
+						info: {
+							sessionID: "sess-off",
+							role: "assistant",
+							providerID: "prov",
+							modelID: "model-x",
+							finish: "stop",
+							tokens: { input: 999_999 },
+						},
+					},
+				},
+			});
+			await hooks["tool.execute.after"]!(
+				{
+					tool: "read",
+					sessionID: "sess-off",
+					callID: "c",
+					args: { filePath: "a.ts" },
+				},
+				{ title: "", output: "", metadata: {} },
+			);
+			expect(summarize).not.toHaveBeenCalled();
+		});
+	});
 });
