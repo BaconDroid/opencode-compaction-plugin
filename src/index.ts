@@ -2,18 +2,21 @@
  * opencode-live-compaction — Enhanced context compaction plugin for OpenCode.
  *
  * Features:
- * - 11-section structured summary (vs 7 built-in)
+ * - 11-section structured summary (vs 7 built-in), replace or augment the default
+ * - Previous compaction summary carried forward (<previous-summary>)
  * - Files-touched manifest with operation badges
- * - Focus directive support via session metadata
- * - Customizable prompt with context injection
- * - Auto-continue control after compaction
+ * - Todo list captured before compaction and restored after
  * - Tool output trimming (configurable per-tool limits)
  * - Protected file patterns (never trim matching files)
  * - Turn protection (protect recent tool outputs from trimming)
  * - Deduplication of repeated tool calls
  * - Error input purging
- * - Focus: none (OpenCode's built-in /compact does not route through the plugin)
- * - JSON config file support
+ * - Auto-continue control (skips the compaction agent and duplicates)
+ * - Hook error isolation
+ * - Opt-in preemptive compaction near the context limit
+ * - Opt-in post-compaction degradation diagnostic
+ * - Model-driven compress tool
+ * - Global + project + plugin-option config
  *
  * Usage:
  *   1. Local: copy to `.opencode/plugins/live-compaction.ts`
