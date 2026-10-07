@@ -254,3 +254,12 @@ OpenCode would iterate `description`/`args`/`execute` as if they were tool names
 The compress tool was registered incorrectly.
 → Resolved: `tool: { compress: buildCompressToolDef() }`; the test now reads
 `tool.compress`.
+
+### F8 — Provider catalog read from the wrong path
+`src/index.ts` (`resolveContextLimit`). SDK client methods resolve to
+`{ data, ... }` (e.g. omo reads `result.data.connected`), but the limit resolver
+read `response.all` directly, so the model context limit was never resolved in
+production and preemptive compaction never triggered without a `contextLimit`
+override. The integration test masked it with an unrealistic mock.
+→ Resolved: read `response.data.all` (with an `all` fallback); tests use the
+`{ data: ... }` response shape.
