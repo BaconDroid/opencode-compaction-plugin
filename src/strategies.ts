@@ -20,7 +20,7 @@ interface MessagePart {
 	state?: {
 		status?: string;
 		output?: string;
-		input?: string;
+		input?: unknown;
 		[key: string]: unknown;
 	};
 	[key: string]: unknown;
@@ -170,12 +170,18 @@ export function applyPurgeErrors(
 	for (const { msgIdx, partIdx } of erroredParts) {
 		if (protectedIndices?.has(msgIdx)) continue;
 		const part = messages[msgIdx].parts[partIdx];
-		if (part.state?.input && typeof part.state.input === "string") {
-			const inputLen = part.state.input.length;
-			if (inputLen > 100) {
-				part.state.input = `[purged: ${inputLen} chars of errored input removed]`;
-				purged++;
-			}
+		const state = part.state;
+		if (!state) continue;
+		const input = state.input;
+		if (input === undefined || input === null) continue;
+
+		// Real tool parts carry `state.input` as an object; a string is kept for
+		// compatibility with older payloads.
+		const inputLen =
+			typeof input === "string" ? input.length : JSON.stringify(input).length;
+		if (inputLen > 100) {
+			state.input = { purged: `${inputLen} chars of errored input removed` };
+			purged++;
 		}
 	}
 
