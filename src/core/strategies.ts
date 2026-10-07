@@ -58,6 +58,7 @@ function sortKeys(obj: Record<string, unknown>): Record<string, unknown> {
 export function applyDedup(
 	messages: Message[],
 	config: LiveCompactionConfig,
+	protectedIndices?: Set<number>,
 ): number {
 	if (!config.dedup?.enabled) return 0;
 
@@ -67,6 +68,7 @@ export function applyDedup(
 	const seen = new Map<string, { msgIdx: number; partIdx: number }[]>();
 
 	for (let mi = 0; mi < messages.length; mi++) {
+		if (protectedIndices?.has(mi)) continue;
 		const msg = messages[mi];
 		for (let pi = 0; pi < msg.parts.length; pi++) {
 			const part = msg.parts[pi];

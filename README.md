@@ -34,6 +34,7 @@ OpenCode's built-in compaction produces a 7-section summary. This plugin replace
 | **Deterministic gates** | None | Optional minimum new tokens/messages since the last compaction + tail guard |
 | **Graduated eviction** | None | LLM-free `reasoning → bulk output → intermediate → episode` (never evicts `user` turns) |
 | **Task state** | "Goal" prose | `<task-state>` block with todo ids/statuses/priorities |
+| **Constraint pinning** | None | Opt-in patterns whose clauses survive trim/dedup/purge/eviction and are re-injected verbatim (`<pinned-constraints>`) |
 | **Focus** | None | `<latest-user-ask>` block anchored to the current user request |
 
 ## Install
@@ -98,6 +99,8 @@ Runs on every message batch sent to the LLM. Applies the following strategies in
 5. **Deduplication** — When the same tool is called with the same args multiple times, only the latest output is kept. Earlier duplicates are replaced with a short marker.
 6. **Error purge** — Strips the input from errored tool calls older than N turns. Opt-in `wholeAttempt` also replaces the output with a compact error extract; opt-in `cascade` extends the purge to calls that depend on a purged call.
 7. **Graduated eviction** — Opt-in, LLM-free eviction (`reasoning → bulk output → intermediate → episode`) once the estimated budget is exceeded; user turns are never evicted.
+
+Messages matching `pinning.patterns` are **pinned**: they are skipped by trimming, dedup, purge and eviction, and their clauses are re-injected into the compaction prompt as `<pinned-constraints>`.
 
 ### 3. `experimental.session.compacting` — Enhanced prompt
 
@@ -253,6 +256,13 @@ Precedence, low to high: **defaults → global file → plugin options → proje
         "protectPrologue": true     // Never evict the first message
     },
 
+    // Constraint pinning (E6): matched clauses survive compaction and are re-injected
+    "pinning": {
+        "enabled": true,
+        "patterns": [],             // Case-insensitive substrings, e.g. ["NEVER", "AGENTS.md"]
+        "maxClauses": 20            // Max pinned clauses re-injected into the prompt
+    },
+
     // Turn protection: protect recent tool outputs from trimming
     "turnProtection": {
         "enabled": true,
@@ -330,6 +340,7 @@ src/
     expand.ts           — reversible sidecar + inspection/search
     strategies.ts       — dedup, error purge, cascade purge
     eviction.ts         — graduated, LLM-free eviction
+    pin.ts              — constraint pinning (E6)
     trim.ts             — tool-output trimming + protected files
     messages.ts         — message-part helpers
     prompt.ts           — compaction prompt template (11 sections)

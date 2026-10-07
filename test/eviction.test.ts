@@ -129,6 +129,19 @@ describe("applyEviction()", () => {
 		expect(messages[2].parts[0].text).toBe("b".repeat(4000));
 	});
 
+	it("never evicts protected message indices", () => {
+		const messages = [
+			userMsg("p"),
+			assistantWithTool("t".repeat(4000)),
+		] as any;
+		const result = applyEviction(
+			messages,
+			cfg({ thresholdTokens: 1, protectedIndices: new Set([1]) }),
+		);
+		expect(result.removed).toBe(0);
+		expect((messages[1].parts[0] as any).state.output).toBe("t".repeat(4000));
+	});
+
 	it("evicts whole episodes and records ids", () => {
 		const messages = [
 			userMsg("p"),
