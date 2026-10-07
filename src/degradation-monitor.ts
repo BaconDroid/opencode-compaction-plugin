@@ -8,17 +8,11 @@
  * Diagnostic only: it never modifies messages.
  */
 
+import { hasText } from "./text.js";
+
 /** True when a message's parts include a non-empty text part. */
 export function messageHasText(parts: unknown): boolean {
-	if (!Array.isArray(parts)) return false;
-	return parts.some((part) => {
-		const p = part as { type?: string; text?: string } | null;
-		return (
-			p?.type === "text" &&
-			typeof p.text === "string" &&
-			p.text.trim().length > 0
-		);
-	});
+	return hasText(parts);
 }
 
 /** Count trailing assistant messages that carry no text. */

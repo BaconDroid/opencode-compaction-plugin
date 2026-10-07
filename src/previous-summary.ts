@@ -11,6 +11,8 @@
  * right after a compaction replaced the history).
  */
 
+import { partsText } from "./text.js";
+
 interface SummaryMessageLike {
 	info?: { role?: string; summary?: boolean; id?: string };
 	parts?: Array<{ type?: string; text?: string }>;
@@ -26,12 +28,7 @@ export interface SlidingState {
 }
 
 function summaryText(msg: SummaryMessageLike): string | undefined {
-	const text = (msg.parts ?? [])
-		.filter((p) => p?.type === "text" && typeof p.text === "string")
-		.map((p) => p.text as string)
-		.join("\n")
-		.trim();
-	return text || undefined;
+	return partsText(msg.parts) || undefined;
 }
 
 /** Return the text of the most recent compaction summary, if any. */
