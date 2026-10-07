@@ -19,7 +19,7 @@ OpenCode's built-in compaction produces a 7-section summary. This plugin replace
 | **Tool output size** | Unmanaged | **Configurable per-tool trim limits** |
 | **Duplicate tool calls** | Kept as-is | **Deduplicated** (keeps only latest) |
 | **Errored tool inputs** | Kept forever | **Purged** after N turns (error output preserved) |
-| **Manual compaction** | `/compact` only | `/compact` + `/compact:focus <goal>` |
+| **Manual compaction** | `/compact` only | built-in `/compact`, plus `/compact focus <goal>` to set a focus |
 | **Protected files** | None | **Glob patterns** (`AGENTS.md`, `**/*.config.ts`) never trimmed |
 | **Recent turn protection** | None | **Last N turns** protected from trimming (default: 4) |
 | **Compress tool** | None | Model-driven **compress** tool for proactive context management |
@@ -105,18 +105,13 @@ Ensures the session continues automatically after compaction so work isn't inter
 
 ## Slash Commands
 
-| Command | Description |
-|---|---|
-| `/compact` | Trigger manual compaction (passed through to OpenCode) |
-| `/compact:focus <directive>` | Set a focus directive that gets injected into the next compaction prompt |
-
-The focus directive tells the summarizer to prioritize a specific goal through compaction:
+`/compact` is OpenCode's built-in compaction command (alias `/summarize`); the plugin does not override it. To set a focus directive, pass an extra argument:
 
 ```
-/compact:focus Fix the authentication bug in login.ts
+/compact focus Fix the authentication bug in login.ts
 ```
 
-This adds a `<focus-directive>` block to the compaction prompt, ensuring the summary preserves context relevant to that goal.
+The plugin's `command.execute.before` hook reads the extra argument and injects a `<focus-directive>` block into the next compaction prompt, so the summary preserves context relevant to that goal. This is best-effort: it depends on the built-in command forwarding its arguments to the hook.
 
 ## Compress Tool
 

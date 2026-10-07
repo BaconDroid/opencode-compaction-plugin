@@ -323,14 +323,15 @@ describe("LiveCompactionPlugin", () => {
 				{ title: "", output: "", metadata: {} },
 			);
 
-			// Set focus via /compact:focus command
-			const cmdOutput = { handled: false, message: undefined };
+			// Set focus via the built-in /compact with a focus argument.
 			await hooks["command.execute.before"]!(
-				{ command: "compact", args: "focus Fix the auth bug" },
-				cmdOutput,
+				{
+					command: "compact",
+					sessionID: "sess-focus",
+					arguments: "focus Fix the auth bug",
+				},
+				{ parts: [] },
 			);
-			expect(cmdOutput.handled).toBe(true);
-			expect(cmdOutput.message).toContain("Fix the auth bug");
 
 			// Compaction should include the focus directive
 			const output = { context: [], prompt: undefined };
@@ -346,8 +347,12 @@ describe("LiveCompactionPlugin", () => {
 			const hooks = await getHooks();
 
 			await hooks["command.execute.before"]!(
-				{ command: "compact", args: "focus Only once" },
-				{ handled: false, message: undefined },
+				{
+					command: "compact",
+					sessionID: "sess-f1",
+					arguments: "focus Only once",
+				},
+				{ parts: [] },
 			);
 
 			const first = { context: [], prompt: undefined };
@@ -386,75 +391,74 @@ describe("LiveCompactionPlugin", () => {
 	describe("command.execute.before", () => {
 		it("ignores non-compact commands", async () => {
 			const hooks = await getHooks();
-			const output = { handled: false, message: undefined };
 			await hooks["command.execute.before"]!(
-				{ command: "other", args: "" },
+				{ command: "other", sessionID: "sess-cmd", arguments: "focus X" },
+				{ parts: [] },
+			);
+			const output = { context: [], prompt: undefined };
+			await hooks["experimental.session.compacting"]!(
+				{ sessionID: "sess-cmd" },
 				output,
 			);
-			expect(output.handled).toBe(false);
+			expect(output.prompt).not.toContain("<focus-directive>");
 		});
 
-		it("lets plain /compact pass through to OpenCode", async () => {
+		it("does not set a focus for plain /compact", async () => {
 			const hooks = await getHooks();
-			const output = { handled: false, message: undefined };
 			await hooks["command.execute.before"]!(
-				{ command: "compact", args: "" },
+				{ command: "compact", sessionID: "sess-cmd2", arguments: "" },
+				{ parts: [] },
+			);
+			const output = { context: [], prompt: undefined };
+			await hooks["experimental.session.compacting"]!(
+				{ sessionID: "sess-cmd2" },
 				output,
 			);
-			expect(output.handled).toBe(false);
+			expect(output.prompt).not.toContain("<focus-directive>");
 		});
 
-		it("handles /compact:focus and stores directive", async () => {
+		it("stores the focus directive from /compact focus <directive>", async () => {
 			const hooks = await getHooks();
-
-			// Register a session first
-			await hooks["tool.execute.after"]!(
+			await hooks["command.execute.before"]!(
 				{
-					tool: "read",
-					sessionID: "sess-cmd",
-					callID: "c1",
-					args: { filePath: "a.ts" },
+					command: "compact",
+					sessionID: "sess-cmd3",
+					arguments: "focus Fix login bug",
 				},
-				{ title: "", output: "", metadata: {} },
+				{ parts: [] },
 			);
-
-			const output = { handled: false, message: undefined };
-			await hooks["command.execute.before"]!(
-				{ command: "compact", args: "focus Fix login bug" },
+			const output = { context: [], prompt: undefined };
+			await hooks["experimental.session.compacting"]!(
+				{ sessionID: "sess-cmd3" },
 				output,
 			);
-			expect(output.handled).toBe(true);
-			expect(output.message).toContain("Fix login bug");
+			expect(output.prompt).toContain("Fix login bug");
 		});
 
-		it("ignores /compact:focus with empty directive", async () => {
+		it("ignores /compact focus with an empty directive", async () => {
 			const hooks = await getHooks();
-			// Register a session first
-			await hooks["tool.execute.after"]!(
-				{
-					tool: "read",
-					sessionID: "sess-empty-focus",
-					callID: "c1",
-					args: { filePath: "a.ts" },
-				},
-				{ title: "", output: "", metadata: {} },
-			);
-
-			const output = { handled: false, message: undefined };
 			await hooks["command.execute.before"]!(
-				{ command: "compact", args: "focus   " },
+				{ command: "compact", sessionID: "sess-cmd4", arguments: "focus   " },
+				{ parts: [] },
+			);
+			const output = { context: [], prompt: undefined };
+			await hooks["experimental.session.compacting"]!(
+				{ sessionID: "sess-cmd4" },
 				output,
 			);
-			// Empty focus after trim — treated as plain /compact
-			expect(output.handled).toBe(false);
+			expect(output.prompt).not.toContain("<focus-directive>");
 		});
 
 		it("scopes the focus directive to the command's session", async () => {
 			const hooks = await getHooks();
 
 			await hooks["command.execute.before"]!(
-				{ command: "compact", args: "focus Scoped goal", sessionID: "sess-scoped" } as any,
-				{ handled: false, message: undefined },
+				{
+					command: "compact",
+					sessionID: "sess-scoped",
+					arguments: "focus Scoped goal",
+				},
+				{ parts: [] },
 			);
 
 			// A different session must not receive the directive.
@@ -861,11 +865,11 @@ describe("LiveCompactionPlugin", () => {
 	// ---------------------------------------------------------------------------
 
 	describe("config", () => {
-		it("registers /compact command when commands enabled", async () => {
+		it("does not override the built-in /compact command", async () => {
 			const hooks = await getHooks();
 			const opencodeConfig: Record<string, unknown> = {};
 			await (hooks as any).config(opencodeConfig);
-			expect(opencodeConfig.command).toHaveProperty("compact");
+			expect(opencodeConfig.command).toBeUndefined();
 		});
 
 		it("honors plugin options", async () => {
@@ -1196,7 +1200,7 @@ describe("LiveCompactionPlugin", () => {
 	// ---------------------------------------------------------------------------
 
 	describe("compress tool", () => {
-		it("exposes compress tool definition", async () => {
+		it("exposes a valid compress tool definition", async () => {
 			const hooks = await getHooks();
 			expect((hooks as any).tool).toBeDefined();
 			expect((hooks as any).tool.description).toContain("Compress");
@@ -1204,6 +1208,7 @@ describe("LiveCompactionPlugin", () => {
 			expect((hooks as any).tool.args).toHaveProperty("start");
 			expect((hooks as any).tool.args).toHaveProperty("end");
 			expect((hooks as any).tool.args).toHaveProperty("summary");
+			expect(typeof (hooks as any).tool.execute).toBe("function");
 		});
 
 		it("queues compression on compress tool call", async () => {
@@ -1307,53 +1312,6 @@ describe("LiveCompactionPlugin", () => {
 			});
 			expect(own).toHaveLength(2); // 3 - 2 + 1 = 2
 			expect((own[0].parts[0] as any).text).toContain("sumA");
-		});
-
-		it("scopes compression processing to the transform sessionID", async () => {
-			const hooks = await getHooks();
-
-			await hooks["tool.execute.after"]!(
-				{
-					tool: "compress",
-					sessionID: "sess-A",
-					callID: "c-A",
-					args: { topic: "A", start: 0, end: 1, summary: "sumA" },
-				},
-				{ title: "", output: "", metadata: {} },
-			);
-
-			const build = () => [
-				{ info: { role: "user" }, parts: [{ type: "text", text: "x" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "y" }] },
-				{
-					info: { role: "assistant" },
-					parts: [
-						{
-							type: "tool",
-							tool: "compress",
-							callID: "c-A",
-							state: { output: "ok" },
-						},
-					],
-				},
-			];
-
-			// A different sessionID must not process session A's queue.
-			const wrong = build();
-			await hooks["experimental.chat.messages.transform"]!(
-				{ sessionID: "sess-B" } as any,
-				{ messages: wrong },
-			);
-			expect(wrong).toHaveLength(3);
-
-			// The owning sessionID applies it.
-			const right = build();
-			await hooks["experimental.chat.messages.transform"]!(
-				{ sessionID: "sess-A" } as any,
-				{ messages: right },
-			);
-			expect(right).toHaveLength(2);
-			expect((right[0].parts[0] as any).text).toContain("sumA");
 		});
 
 		it("drops stale deferred compressions", async () => {

@@ -187,4 +187,37 @@ A non-positive protected-turn count still protected trailing messages.
 The compressed-block topic escaped quotes and angle brackets but not `&`.
 → Resolved: `&` is escaped first.
 
+---
+
+## Re-validation 3 (SDK cross-check)
+
+Checked the plugin against the real `@opencode-ai/plugin` types and the OpenCode
+docs. The inlined types had hidden several API mismatches.
+
+### F1 — The `compress` tool was not a valid `ToolDefinition`
+`src/compress.ts`. `ToolDefinition` requires a Zod `args` shape and an
+`execute` function; the plugin passed plain `{ type, description }` objects and
+no `execute`, so OpenCode could not run the tool.
+→ Resolved: built with the SDK `tool()` helper (`tool.schema` args + `execute`).
+
+### F2 — `command.execute.before` used the wrong API and overrode the built-in
+`src/index.ts`. The hook signature is `{ command, sessionID, arguments }` →
+`{ parts }`, but the plugin read `input.args` and wrote `output.handled` /
+`output.message` (none exist). It also registered `command.compact` with an
+empty template, which overrides the built-in `/compact` (alias `/summarize`).
+→ Resolved: the handler reads `arguments`/`sessionID` and no longer overrides
+the built-in command. Focus is set from `/compact focus <directive>`
+(best-effort).
+
+### F3 — Dead sessionID branch in the transform hook
+`src/index.ts`. `experimental.chat.messages.transform` receives `input: {}`, so
+`input.sessionID` was always undefined.
+→ Resolved: the branch was removed; `callID` scoping remains.
+
+### F4 — Inlined types diverged from the SDK
+`src/index.ts`. The inlined `Hooks`/`PluginInput` masked F1/F2.
+→ Partially addressed: the `command.execute.before` and transform signatures now
+match the SDK, and the tool uses the SDK helper. Full type import deferred.
+
+
 

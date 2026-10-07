@@ -13,6 +13,8 @@
  *      summary message
  */
 
+import { tool } from "@opencode-ai/plugin";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -181,11 +183,11 @@ function escapeAttr(s: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Build the compress tool description and handler.
- * Returns the tool config to be spread into the plugin's `tool` object.
+ * Build the compress tool definition via the plugin SDK helper, so OpenCode
+ * receives a valid `ToolDefinition` (Zod args + execute).
  */
 export function buildCompressToolDef() {
-	return {
+	return tool({
 		description: `Compress a range of conversation messages into a summary.
 
 Use this tool when you have completed a task phase and want to reduce context size.
@@ -194,24 +196,23 @@ You write the summary — you have the full context. Be thorough but concise.
 The compressed range will be replaced with your summary in the conversation.
 Message indices are 0-based. Use the message order visible in the conversation.`,
 		args: {
-			topic: {
-				type: "string",
-				description:
-					"Short label (3-5 words) for display, e.g., 'Auth Bug Fix'",
-			},
-			start: {
-				type: "number",
-				description: "Start message index (inclusive, 0-based)",
-			},
-			end: {
-				type: "number",
-				description: "End message index (inclusive, 0-based)",
-			},
-			summary: {
-				type: "string",
-				description:
+			topic: tool.schema
+				.string()
+				.describe("Short label (3-5 words) for display, e.g., 'Auth Bug Fix'"),
+			start: tool.schema
+				.number()
+				.describe("Start message index (inclusive, 0-based)"),
+			end: tool.schema
+				.number()
+				.describe("End message index (inclusive, 0-based)"),
+			summary: tool.schema
+				.string()
+				.describe(
 					"Complete technical summary replacing all messages in the range. Include file paths, decisions, error strings, and code snippets that are still relevant.",
-			},
+				),
 		},
-	};
+		async execute(args) {
+			return `Compression queued for messages ${args.start}-${args.end} (${args.topic}). It will be applied on the next message transform.`;
+		},
+	});
 }

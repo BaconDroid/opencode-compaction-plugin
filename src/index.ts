@@ -97,12 +97,12 @@ interface Hooks {
 		output: { enabled: boolean },
 	) => Promise<void>;
 	"experimental.chat.messages.transform"?: (
-		input: Record<string, unknown>,
+		input: Record<string, never>,
 		output: { messages: Message[] },
 	) => Promise<void>;
 	"command.execute.before"?: (
-		input: { command: string; args: string },
-		output: { handled: boolean; message?: string },
+		input: { command: string; sessionID: string; arguments: string },
+		output: { parts: unknown[] },
 	) => Promise<void>;
 	config?: (config: Record<string, unknown>) => Promise<void>;
 	tool?: Record<string, unknown>;
@@ -371,21 +371,15 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		// Compress + trim + dedup + purge + protected patterns + turn protection
 		// Runs BEFORE OpenCode's own 2000-char truncation.
 		// -----------------------------------------------------------------------
-		"experimental.chat.messages.transform": async (input, output) => {
+		"experimental.chat.messages.transform": async (_input, output) => {
 			const messages = output.messages;
 
 			// 0. Apply pending compressions (from compress tool calls).
-			// Prefer the sessionID when the hook provides it; otherwise scope each
-			// request by the callID of its compress tool call, so a compression
-			// queued for one session is never applied to another. Non-matching
-			// requests stay queued until they expire.
-			const inputSession =
-				typeof input.sessionID === "string" ? input.sessionID : undefined;
-			const sessions = inputSession
-				? [inputSession]
-				: [...sessionTrackers.keys()];
-
-			for (const sid of sessions) {
+			// The transform hook receives no session id, so each request is scoped
+			// by the callID of its compress tool call: a compression queued for one
+			// session is never applied to another. Non-matching requests stay queued
+			// until they expire.
+			for (const sid of sessionTrackers.keys()) {
 				const requests = compressions.drain(sid);
 				if (requests.length === 0) continue;
 
@@ -485,28 +479,29 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		// -----------------------------------------------------------------------
 		// Slash commands: /compact and /compact:focus <directive>
 		// -----------------------------------------------------------------------
-		"command.execute.before": async (input, output) => {
+		"command.execute.before": async (input, _output) => {
 			if (!config.commands?.enabled) return;
 
-			const { command, args } = input;
+			// The built-in `/compact` (alias `/summarize`) fires this hook. An extra
+			// argument (`/compact focus <directive>`) sets a focus for the next
+			// compaction. Best-effort: it depends on the built-in command forwarding
+			// its arguments to the hook.
+			const { command, sessionID, arguments: args } = input;
+			if (command !== "compact") return;
 
-			if (command === "compact") {
-				const focusMatch = args?.match(/^focus\s+(\S.+)$/i);
-				if (focusMatch) {
-					const directive = focusMatch[1].trim();
-					const sid = (input as { sessionID?: string }).sessionID;
-					if (sid) {
-						focusDirectives.set(sid, directive);
-					} else {
-						pendingFocus = directive;
-					}
-					output.handled = true;
-					output.message = `Focus directive set: "${directive}"\nWill be applied on next compaction.`;
-					logger.info("focus directive set", { directive, sessionScoped: !!sid });
-				} else {
-					output.handled = false;
-				}
+			const focusMatch = args?.match(/^focus\s+(\S.+)$/i);
+			if (!focusMatch) return;
+
+			const directive = focusMatch[1].trim();
+			if (sessionID) {
+				focusDirectives.set(sessionID, directive);
+			} else {
+				pendingFocus = directive;
 			}
+			logger.info("focus directive set", {
+				directive,
+				sessionScoped: !!sessionID,
+			});
 		},
 
 		// -----------------------------------------------------------------------
@@ -558,21 +553,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 					opencodeConfig.permission = { ...map, compress: "allow" };
 				}
 			}
-
-			// Register slash commands (do not clobber a user-defined `compact`)
-			if (config.commands?.enabled) {
-				const existing = opencodeConfig.command as
-					| Record<string, unknown>
-					| undefined;
-				opencodeConfig.command = {
-					...(existing ?? {}),
-					compact: (existing?.compact as Record<string, unknown>) ?? {
-						template: "",
-						description:
-							"Trigger compaction. Use /compact:focus <directive> to set a focus goal.",
-					},
-				};
-			}
+			// The built-in `/compact` command is intentionally left untouched.
 		},
 
 		// -----------------------------------------------------------------------
