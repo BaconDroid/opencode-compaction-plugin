@@ -150,6 +150,8 @@ Restore a compressed block's original messages from the in-memory sidecar, refer
 
 `inspect` lists the compressed blocks currently held in memory (labels, topics, sizes). `search` runs a **deterministic** case-insensitive keyword search over the stored originals (no embeddings) and returns matching `[bN]` labels with a snippet; use `expand`/`recall` to restore a match. Both return their result directly and are bounded by `compress.searchMaxResults`.
 
+When the optional [semantic retrieval adapter](#optional-adapters-) is configured, `search` runs embedding-based retrieval first and falls back to the keyword search on any error or when it finds nothing.
+
 ## Protected File Patterns
 
 Files matching glob patterns are never trimmed, even if their outputs exceed the configured limits. Useful for critical context files:
@@ -205,6 +207,7 @@ Each feature below lists **what** it does, its **config** keys and how it
 | Degradation monitor | `degradationMonitor.{enabled,threshold,windowMs}` | `false`, `4`, `120000` |
 | Auto-continue | — | — |
 | Compression tools | `compress.{protectedTurns,reversible,maxBlocksPerSquash,searchMaxResults}` | `3`, `false`, `8`, `5` |
+| Semantic retrieval (optional) | `adapters.embeddings.*` | disabled |
 
 ### Structured compaction prompt
 - **What** — replaces (or augments) OpenCode's default prompt with the 11-section
@@ -296,6 +299,14 @@ Each feature below lists **what** it does, its **config** keys and how it
   (browse/retrieve). See [Compression Tools](#compression-tools).
 - **Config** — `compress.{protectedTurns,reversible,maxBlocksPerSquash,searchMaxResults}`.
 - **Interactions** — applied in the transform before trimming.
+
+### Semantic retrieval (optional adapter)
+- **What** — when `adapters.embeddings` is configured, `search` ranks stored
+  blocks by embedding similarity (cosine) instead of keyword substring.
+- **Config** — `adapters.embeddings.*` (opt-in; off when absent).
+- **Interactions** — semantic hits are tried first; any error (timeout, bad
+  response) or an empty result falls back to the deterministic keyword search.
+  Never changes the transform/compaction path.
 
 ## Strategy order & interactions
 
@@ -432,6 +443,51 @@ Precedence, low to high: **defaults → global file → plugin options → proje
 }
 ```
 
+### Optional adapters 🔌
+
+The plugin is fully functional with **no adapter configured** — every ensemble
+has a deterministic internal version. Adapters are strictly **opt-in** and
+**fail-open**: they are disabled unless configured, and any error or timeout is
+logged and falls back to the internal behaviour, so a broken adapter can never
+break compaction. No dependency is added: adapters talk to an endpoint/command
+you already run.
+
+Only one adapter exists today: the **semantic retrieval adapter** for `search`
+(E4). It is enabled by adding an `adapters.embeddings` block (there is no
+default value, so it is off unless present).
+
+```jsonc
+{
+    "adapters": {
+        "embeddings": {
+            "enabled": true,                 // optional (default: true when present)
+            "provider": "http",              // "http" (default) | "command" | "mcp"
+            "url": "http://localhost:11434/v1/embeddings",
+            "model": "nomic-embed-text",     // optional, forwarded to the provider
+            "timeoutMs": 10000,              // optional request timeout
+            "minScore": 0.25                 // optional minimum cosine score for a hit
+        }
+    }
+}
+```
+
+**Provider `http`** — POSTs an OpenAI-style request
+(`{ "model"?, "input": ["text", …] }`) to `url` and accepts the response as a
+bare `number[][]`, `{ "embeddings": number[][] }` or OpenAI's
+`{ "data": [{ "embedding": number[] }] }`. This covers local servers such as
+Ollama, llama.cpp, LM Studio or vLLM.
+
+**Provider `command`** — spawns `command`, writes `{ "model"?, "input": [...] }`
+on stdin and reads an embeddings JSON document (same shapes as above) on stdout.
+The process is non-interactive (stdin is closed) and killed on timeout.
+
+**Provider `mcp`** — recognised but **not supported yet**; it logs a warning and
+uses the keyword search. `mcp` requires SDK surface the plugin does not have.
+
+Security: `url` and `command` are user-supplied and are never logged; put any
+token in the URL/command/env yourself. A `command` value is executed by your
+shell — treat it like any other local configuration.
+
 ### Customizing the prompt
 
 To customize the compaction prompt, modify the `buildCompactionPrompt()` function in `src/core/prompt.ts`. The template is a plain string that you can edit to add or remove sections.
@@ -455,7 +511,7 @@ bun run test:coverage
 # (OpenCode loads .ts files directly via Bun)
 ```
 
-Current coverage: **96.3% functions, 99.1% lines** (207 tests).
+Current coverage: **95.8% functions, 99.4% lines** (226 tests).
 
 ## File Structure
 
@@ -472,6 +528,7 @@ src/
     compress.ts         — compress/squash domain + block rendering
     blocks.ts           — durable block ids + deterministic span selection
     expand.ts           — reversible sidecar + inspection/search
+    adapters.ts         — optional adapter contracts + in-memory vector index
     strategies.ts       — dedup, error purge, cascade purge
     eviction.ts         — graduated, LLM-free eviction
     pin.ts              — constraint pinning (E6)
@@ -489,6 +546,7 @@ src/
     config-loader.ts    — JSON/JSONC file loading
   opencode/
     tools.ts            — model-driven tool definitions (SDK boundary)
+    adapters.ts         — optional adapter provider resolution (http/command)
 test/
   index.test.ts     — Plugin integration tests
   compat.test.ts    — omo-slim compatibility contract
@@ -506,6 +564,7 @@ test/
   degradation-monitor.test.ts — Degradation monitor tests
   previous-summary.test.ts — Previous summary and sliding-state tests
   pin.test.ts       — Constraint pinning tests
+  adapters.test.ts  — Optional adapter contracts, providers and fallback tests
 docs/
   context-compaction-research.md — Consolidated literature catalog, categories and implementation backlog
   research-prompt.md — Reusable prompt (bootstrap + sweep) to reproduce the literature sweep

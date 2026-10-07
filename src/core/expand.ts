@@ -11,6 +11,7 @@ import {
 } from "./blocks.js";
 import { partsText } from "./messages.js";
 import { KeyedQueue } from "./store.js";
+import type { VectorHit } from "./adapters.js";
 
 export interface ExpansionRecord {
 	id: string;
@@ -27,7 +28,8 @@ export interface SearchHit {
 	snippet: string;
 }
 
-function recordText(record: ExpansionRecord): string {
+/** Flatten a stored record's original messages into searchable text. */
+export function recordText(record: ExpansionRecord): string {
 	return (record.original as Array<{ parts?: unknown }>)
 		.map((message) => partsText(message?.parts))
 		.filter(Boolean)
@@ -204,20 +206,58 @@ export function renderInspector(sidecar: ExpansionSidecar): string {
 		.join("\n");
 }
 
-/** Search the stored blocks and format the hits. */
+/** Format a list of hits, keyword or semantic, as a bullet report. */
+export function renderHits(
+	hits: SearchHit[],
+	query: string,
+	mode: "keyword" | "semantic" = "keyword",
+): string {
+	if (hits.length === 0) {
+		return mode === "semantic"
+			? `No stored block matches "${query}" semantically.`
+			: `No stored block matches "${query}".`;
+	}
+	const suffix = mode === "semantic" ? " (semantic)" : "";
+	return hits
+		.map((hit) => {
+			const label = hit.label ?? hit.id;
+			const topic = hit.topic ? ` — ${hit.topic}` : "";
+			return `- [${label}]${topic}${suffix}: ${hit.snippet}`;
+		})
+		.join("\n");
+}
+
+/** Search the stored blocks by keyword and format the hits. */
 export function renderSearch(
 	sidecar: ExpansionSidecar,
 	query: string,
 	maxResults: number,
 ): string {
-	const hits = sidecar.search(query, maxResults);
-	if (hits.length === 0) return `No stored block matches "${query}".`;
-	return hits
-		.map((hit) => {
-			const label = hit.label ?? hit.id;
-			const topic = hit.topic ? ` — ${hit.topic}` : "";
-			return `- [${label}]${topic}: ${hit.snippet}`;
-		})
-		.join("\n");
+	return renderHits(sidecar.search(query, maxResults), query, "keyword");
+}
+
+/**
+ * Enrich ranked vector hits with the sidecar's metadata (label/topic) and a
+ * leading snippet of the stored text. Unknown ids are dropped.
+ */
+export function semanticHits(
+	sidecar: ExpansionSidecar,
+	hits: VectorHit[],
+	snippetLength = 160,
+): SearchHit[] {
+	const out: SearchHit[] = [];
+	for (const hit of hits) {
+		const record = sidecar.get(hit.id);
+		if (!record) continue;
+		const text = recordText(record);
+		const snippet = text.slice(0, snippetLength).replace(/\s+/g, " ");
+		out.push({
+			id: record.id,
+			label: record.label,
+			topic: record.topic,
+			snippet: text.length > snippetLength ? `${snippet}…` : snippet,
+		});
+	}
+	return out;
 }
 

@@ -32,7 +32,13 @@ import { FilesTouchedTracker } from "./core/files-touched.js";
 import { loadConfig } from "./config/config-loader.js";
 import type { LiveCompactionConfig } from "./config/config.js";
 import { CompressionStore, SquashStore } from "./core/compress.js";
-import { ExpansionSidecar, ExpandStore } from "./core/expand.js";
+import {
+	ExpansionSidecar,
+	ExpandStore,
+	recordText,
+} from "./core/expand.js";
+import { EmbeddingVectorIndex } from "./core/adapters.js";
+import { resolveEmbedder } from "./opencode/adapters.js";
 import {
 	buildCompressToolDef,
 	buildSquashToolDef,
@@ -186,6 +192,27 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		config,
 		logger,
 	);
+
+	// Optional semantic retrieval adapter (opt-in). When absent or unusable the
+	// `search` tool keeps its deterministic keyword search.
+	const embeddingCfg = config.adapters?.embeddings;
+	const embedder = resolveEmbedder(embeddingCfg, { logger });
+	const semanticIndex = embedder
+		? new EmbeddingVectorIndex(
+				embedder,
+				() =>
+					expansions.list().map((record) => ({
+						id: record.id,
+						text: recordText(record),
+					})),
+				embeddingCfg?.minScore ?? 0,
+			)
+		: undefined;
+	if (semanticIndex) {
+		logger.info("semantic search adapter enabled", {
+			provider: embeddingCfg?.provider ?? "http",
+		});
+	}
 
 	const getTracker = (sessionID: string): FilesTouchedTracker => {
 		let tracker = sessionTrackers.get(sessionID);
@@ -603,6 +630,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			squashes.clearAll();
 			expansions.clearAll();
 			expandStore.clearAll();
+			semanticIndex?.clear();
 			todoPreserver.clearAll();
 			slidingState.clear();
 			pinnedBySession.clear();
@@ -643,6 +671,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			search: buildSearchToolDef(
 				expansions,
 				config.compress?.searchMaxResults ?? 5,
+				semanticIndex ? { index: semanticIndex, logger } : undefined,
 			),
 		},
 	};
