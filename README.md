@@ -359,9 +359,7 @@ test/
   previous-summary.test.ts — Previous summary and sliding-state tests
 docs/
   context-compaction-research.md — Consolidated literature catalog, categories and implementation backlog
-  omo-compaction.md — oh-my-openagent compaction review and adopted ideas
-  research-prompt.md — Reusable prompt to reproduce the literature sweep
-  research-kickoff.md — Bootstrap prompt that runs the sweep in a fresh session
+  research-prompt.md — Reusable prompt (bootstrap + sweep) to reproduce the literature sweep
   ensembles/        — Per-ensemble research, plans and results (E1–E5)
 ```
 
