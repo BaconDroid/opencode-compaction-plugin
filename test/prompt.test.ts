@@ -55,19 +55,6 @@ describe("buildCompactionPrompt()", () => {
 		expect(prompt).toContain("- `src/app.ts` `R` `E`");
 	});
 
-	it("does NOT include focus directive when not provided", () => {
-		const prompt = buildCompactionPrompt({});
-		expect(prompt).not.toContain("<focus-directive>");
-	});
-
-	it("includes focus directive when provided", () => {
-		const prompt = buildCompactionPrompt({
-			focusDirective: "Fix the auth bug in login.ts",
-		});
-		expect(prompt).toContain("<focus-directive>");
-		expect(prompt).toContain("Fix the auth bug in login.ts");
-	});
-
 	it("includes previous-summary instructions", () => {
 		const prompt = buildCompactionPrompt({});
 		expect(prompt).toContain("<previous-summary>");
@@ -90,13 +77,13 @@ describe("buildCompactionPrompt()", () => {
 		expect(prompt).toContain("task_id");
 	});
 
-	it("combines files and focus together", () => {
+	it("combines files and previous summary together", () => {
 		const prompt = buildCompactionPrompt({
 			filesTouched: "## Files Touched Manifest\n\n- `config.json` `W`",
-			focusDirective: "Update config for production",
+			previousSummary: "prior",
 		});
 		expect(prompt).toContain("## Files Touched Manifest");
-		expect(prompt).toContain("<focus-directive>");
-		expect(prompt).toContain("Update config for production");
+		expect(prompt).toContain("<previous-summary>");
+		expect(prompt).toContain("prior");
 	});
 });

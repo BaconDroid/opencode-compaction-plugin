@@ -36,7 +36,6 @@ describe("mergeConfig()", () => {
 		expect(cfg.dedup.protectedTools).toEqual([]);
 		expect(cfg.purgeErrors.enabled).toBe(true);
 		expect(cfg.purgeErrors.turns).toBe(4);
-		expect(cfg.commands.enabled).toBe(true);
 	});
 
 	it("overrides enabled", () => {
@@ -94,11 +93,6 @@ describe("mergeConfig()", () => {
 		expect(cfg.promptMode).toBe("augment");
 		expect(cfg.degradationMonitor.enabled).toBe(true);
 		expect(cfg.degradationMonitor.threshold).toBe(2);
-	});
-
-	it("overrides commands settings", () => {
-		const cfg = mergeConfig({ commands: { enabled: false } });
-		expect(cfg.commands.enabled).toBe(false);
 	});
 
 	it("overrides debug", () => {
@@ -273,7 +267,6 @@ describe("DEFAULT_CONFIG", () => {
 		expect(DEFAULT_CONFIG).toHaveProperty("trim");
 		expect(DEFAULT_CONFIG).toHaveProperty("dedup");
 		expect(DEFAULT_CONFIG).toHaveProperty("purgeErrors");
-		expect(DEFAULT_CONFIG).toHaveProperty("commands");
 	});
 
 	it("has all trim tools", () => {

@@ -1,6 +1,6 @@
 # opencode-live-compaction
 
-Enhanced context compaction plugin for [OpenCode](https://opencode.ai) — structured summaries with files-touched manifests, task-state continuity, tool output trimming, deduplication, error purging, protected file patterns, turn protection, compress tool, and slash commands.
+Enhanced context compaction plugin for [OpenCode](https://opencode.ai) — structured summaries with files-touched manifests, task-state continuity, tool output trimming, deduplication, error purging, protected file patterns, turn protection, and a compress tool.
 
 ## What it does
 
@@ -19,7 +19,7 @@ OpenCode's built-in compaction produces a 7-section summary. This plugin replace
 | **Tool output size** | Unmanaged | **Configurable per-tool trim limits** |
 | **Duplicate tool calls** | Kept as-is | **Deduplicated** (keeps only latest) |
 | **Errored tool inputs** | Kept forever | **Purged** after N turns (error output preserved) |
-| **Manual compaction** | `/compact` only | built-in `/compact`, plus `/compact focus <goal>` to set a focus |
+| **Manual compaction** | `/compact` (built-in) | left to OpenCode (the plugin does not override it) |
 | **Protected files** | None | **Glob patterns** (`AGENTS.md`, `**/*.config.ts`) never trimmed |
 | **Recent turn protection** | None | **Last N turns** protected from trimming (default: 4) |
 | **Auto-continue** | Always on | Skipped for the compaction agent and duplicate triggers |
@@ -107,16 +107,6 @@ When compaction triggers (automatic or manual `/compact`), applies the enhanced 
 ### 4. `experimental.compaction.autocontinue` — Auto-resume
 
 Enables the synthetic "continue" turn after compaction, except for the compaction agent itself and duplicate triggers (a short per-session guard prevents auto-continue loops).
-
-## Slash Commands
-
-`/compact` is OpenCode's built-in compaction command (alias `/summarize`); the plugin does not override it. To set a focus directive, pass an extra argument:
-
-```
-/compact focus Fix the authentication bug in login.ts
-```
-
-The plugin's `command.execute.before` hook reads the extra argument and injects a `<focus-directive>` block into the next compaction prompt, so the summary preserves context relevant to that goal. This is best-effort: it depends on the built-in command forwarding its arguments to the hook.
 
 ## Compress Tool
 
@@ -219,11 +209,6 @@ Precedence, low to high: **defaults → global file → plugin options → proje
         "turns": 4  // Purge errored tool inputs older than N user turns
     },
 
-    // Slash commands
-    "commands": {
-        "enabled": true
-    },
-
     // Turn protection: protect recent tool outputs from trimming
     "turnProtection": {
         "enabled": true,
@@ -274,7 +259,7 @@ bun run test:coverage
 # (OpenCode loads .ts files directly via Bun)
 ```
 
-Current coverage: **95.4% statements, 96.6% functions, 97.2% lines, 87.0% branches** (233 tests).
+Current coverage: **95.8% statements, 96.5% functions, 97.7% lines, 87.2% branches** (223 tests).
 
 ## File Structure
 
