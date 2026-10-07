@@ -12,7 +12,7 @@
  * - Turn protection (protect recent tool outputs from trimming)
  * - Deduplication of repeated tool calls
  * - Error input purging
- * - Slash commands: built-in /compact, plus /compact focus <directive>
+ * - Focus: none (OpenCode's built-in /compact does not route through the plugin)
  * - JSON config file support
  *
  * Usage:
@@ -127,10 +127,6 @@ interface Hooks {
 	"experimental.chat.messages.transform"?: (
 		input: Record<string, never>,
 		output: { messages: Message[] },
-	) => Promise<void>;
-	"command.execute.before"?: (
-		input: { command: string; sessionID: string; arguments: string },
-		output: { parts: unknown[] },
 	) => Promise<void>;
 	config?: (config: Record<string, unknown>) => Promise<void>;
 	tool?: Record<string, unknown>;
@@ -293,14 +289,12 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 	logger.info("initialized", {
 		dedup: config.dedup?.enabled,
 		purgeErrors: config.purgeErrors?.enabled,
-		commands: config.commands?.enabled,
 		protectedPatterns: protectedPatterns.length,
 		turnProtection: turnProtectionEnabled ? protectedTurns : "off",
 	});
 
 	// Per-instance state
 	const sessionTrackers = new Map<string, FilesTouchedTracker>();
-	const focusDirectives = new Map<string, string>();
 	const compressions = new CompressionStore();
 	const todoPreserver = new TodoPreserver();
 	const preemptUsage = new Map<string, CachedUsage>();
@@ -308,7 +302,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 	const preemptLast = new Map<string, number>();
 	const contextLimitCache = new Map<string, number>();
 	const degradation = new DegradationMonitor();
-	let pendingFocus: string | undefined;
 
 	const getTracker = (sessionID: string): FilesTouchedTracker => {
 		let tracker = sessionTrackers.get(sessionID);
@@ -560,21 +553,9 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			// Clear tracker after compaction since old operations are now in the summary
 			tracker.clear();
 
-			// Check for a pending focus directive (from /compact focus).
-			// Prefer a session-scoped directive; otherwise consume the single
-			// pending fallback so it is applied at most once.
-			let focus = focusDirectives.get(sessionID);
-			if (focus) {
-				focusDirectives.delete(sessionID);
-			} else if (pendingFocus) {
-				focus = pendingFocus;
-				pendingFocus = undefined;
-			}
-
 			// Build the enhanced prompt
 			const enhancedPrompt = buildCompactionPrompt({
 				filesTouched: filesManifest,
-				focusDirective: focus,
 				previousSummary,
 			});
 
@@ -589,7 +570,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			logger.info("compaction triggered", {
 				sessionID,
 				hasFiles: !!filesManifest,
-				hasFocus: !!focus,
 				mode: config.promptMode,
 			});
 		},
@@ -704,34 +684,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		},
 
 		// -----------------------------------------------------------------------
-		// Slash commands: built-in /compact, plus a focus argument
-		// -----------------------------------------------------------------------
-		"command.execute.before": async (input, _output) => {
-			if (!config.commands?.enabled) return;
-
-			// The built-in `/compact` (alias `/summarize`) fires this hook. An extra
-			// argument (`/compact focus <directive>`) sets a focus for the next
-			// compaction. Best-effort: it depends on the built-in command forwarding
-			// its arguments to the hook.
-			const { command, sessionID, arguments: args } = input;
-			if (command !== "compact") return;
-
-			const focusMatch = args?.match(/^focus\s+(\S.*)$/i);
-			if (!focusMatch) return;
-
-			const directive = focusMatch[1].trim();
-			if (sessionID) {
-				focusDirectives.set(sessionID, directive);
-			} else {
-				pendingFocus = directive;
-			}
-			logger.info("focus directive set", {
-				directive,
-				sessionScoped: !!sessionID,
-			});
-		},
-
-		// -----------------------------------------------------------------------
 		// Auto-continue: enabled after compaction, except for the compaction agent
 		// and duplicate triggers.
 		// -----------------------------------------------------------------------
@@ -784,7 +736,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			if (event.type === "session.deleted") {
 				if (sessionID) {
 					sessionTrackers.delete(sessionID);
-					focusDirectives.delete(sessionID);
 					compressions.clear(sessionID);
 					todoPreserver.clear(sessionID);
 					preemptUsage.delete(sessionID);
@@ -871,8 +822,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		// -----------------------------------------------------------------------
 		dispose: async () => {
 			sessionTrackers.clear();
-			focusDirectives.clear();
-			pendingFocus = undefined;
 			compressions.clearAll();
 			todoPreserver.clearAll();
 			preemptUsage.clear();

@@ -10,15 +10,10 @@
 
 export function buildCompactionPrompt(input: {
 	filesTouched?: string;
-	focusDirective?: string;
 	previousSummary?: string;
 }): string {
 	const filesBlock = input.filesTouched
 		? `\n\n${input.filesTouched}`
-		: "";
-
-	const focusBlock = input.focusDirective
-		? `\n\n<focus-directive>\nThe operator explicitly requested preserving this goal through compaction:\n${input.focusDirective}\n</focus-directive>`
 		: "";
 
 	const previousBlock = input.previousSummary
@@ -31,8 +26,6 @@ Summarize ONLY the conversation history you are given. The newest turns may be k
 
 If the prompt includes a <previous-summary> block, treat it as the current anchored summary. Update it with the new history by preserving still-true details, removing stale details, and merging in new facts.
 ${previousBlock}
-
-${focusBlock}
 
 Output exactly the Markdown structure shown inside <template> and keep the section order unchanged. Do not include the <template> tags in your response.
 

@@ -283,3 +283,12 @@ prompt referenced `<previous-summary>` but never populated it.
 → Resolved: in replace mode the plugin fetches the session messages, extracts
 the previous summary (`previous-summary.ts`) and injects it as
 `<previous-summary>`. Augment mode keeps OpenCode's own handling.
+
+### F11 — The focus feature was unreachable
+`src/index.ts` (`command.execute.before`). The built-in `/compact` is handled in
+the TUI (`packages/tui/src/routes/session/index.tsx`) by calling
+`sdk.client.session.summarize` directly, so `command.execute.before` never fires
+for it and `/compact focus <directive>` could not set a focus.
+→ Resolved: the focus feature was removed (`command.execute.before`, the
+`commands` config, the focus state and the prompt's focus block). OpenCode's
+built-in `/compact` is left untouched.

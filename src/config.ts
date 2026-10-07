@@ -48,11 +48,6 @@ export interface PurgeErrorsConfig {
 	turns?: number;
 }
 
-export interface SlashCommandsConfig {
-	/** Enable slash commands (default: true) */
-	enabled?: boolean;
-}
-
 export interface TurnProtectionConfig {
 	/** Enable turn-based protection (default: true) */
 	enabled?: boolean;
@@ -89,8 +84,6 @@ export interface LiveCompactionConfig {
 	dedup?: DedupConfig;
 	/** Error input purging strategy */
 	purgeErrors?: PurgeErrorsConfig;
-	/** Slash commands */
-	commands?: SlashCommandsConfig;
 	/** Turn-based protection: protect recent tool outputs from trimming */
 	turnProtection?: TurnProtectionConfig;
 	/** Proactive compaction before the context overflows */
@@ -127,7 +120,6 @@ export const DEFAULT_CONFIG: Required<
 		| "trim"
 		| "dedup"
 		| "purgeErrors"
-		| "commands"
 		| "turnProtection"
 		| "preemptiveCompaction"
 		| "degradationMonitor"
@@ -136,7 +128,6 @@ export const DEFAULT_CONFIG: Required<
 	trim: Required<TrimLimits>;
 	dedup: Required<DedupConfig>;
 	purgeErrors: Required<PurgeErrorsConfig>;
-	commands: Required<SlashCommandsConfig>;
 	turnProtection: Required<TurnProtectionConfig>;
 	preemptiveCompaction: Required<
 		Omit<PreemptiveCompactionConfig, "contextLimit">
@@ -156,9 +147,6 @@ export const DEFAULT_CONFIG: Required<
 	purgeErrors: {
 		enabled: true,
 		turns: 4,
-	},
-	commands: {
-		enabled: true,
 	},
 	turnProtection: {
 		enabled: true,
@@ -274,9 +262,6 @@ export function mergeConfig(user: LiveCompactionConfig) {
 		purgeErrors: {
 			enabled: user.purgeErrors?.enabled ?? DEFAULT_CONFIG.purgeErrors.enabled,
 			turns: user.purgeErrors?.turns ?? DEFAULT_CONFIG.purgeErrors.turns,
-		},
-		commands: {
-			enabled: user.commands?.enabled ?? DEFAULT_CONFIG.commands.enabled,
 		},
 		turnProtection: {
 			enabled:
