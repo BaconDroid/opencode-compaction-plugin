@@ -263,3 +263,14 @@ production and preemptive compaction never triggered without a `contextLimit`
 override. The integration test masked it with an unrealistic mock.
 → Resolved: read `response.data.all` (with an `all` fallback); tests use the
 `{ data: ... }` response shape.
+
+### Verified — `tool.execute.after` fires for custom tools
+Checked OpenCode source (`packages/opencode/src/session/tools.ts`): every
+registry tool (built-in and plugin-registered) is wrapped so
+`tool.execute.before`/`tool.execute.after` fire with `{ tool, sessionID, callID,
+args }`. The compress capture via `tool.execute.after` is therefore correct.
+
+### F9 — Autocontinue guard timers not cleared
+`src/index.ts`. The per-session autocontinue guard timers were left to expire on
+their own; they were not cleared on `session.deleted` or `dispose`.
+→ Resolved: timers are cleared per session on delete and all on dispose.
