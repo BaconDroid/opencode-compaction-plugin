@@ -14,6 +14,7 @@
  */
 
 import type { Message } from "../types.js";
+import { KeyedQueue } from "./store.js";
 import {
 	blockId,
 	collectExistingBlockIds,
@@ -53,36 +54,14 @@ export interface CompressRequest {
  * Per-plugin-instance store of pending compression requests. Kept as a class so
  * state is not shared between plugin instances in the same process.
  */
-export class CompressionStore {
-	private queues = new Map<string, CompressRequest[]>();
-
-	/** Queue a compression request for a session. */
-	queue(sessionID: string, request: CompressRequest): void {
-		let queue = this.queues.get(sessionID);
-		if (!queue) {
-			queue = [];
-			this.queues.set(sessionID, queue);
-		}
-		queue.push(request);
-	}
-
+export class CompressionStore extends KeyedQueue<CompressRequest> {
 	/** Get and clear pending compressions for a session (newest range first). */
-	drain(sessionID: string): CompressRequest[] {
-		const queue = this.queues.get(sessionID) ?? [];
-		this.queues.delete(sessionID);
+	override drain(sessionID: string): CompressRequest[] {
 		// Explicit-index requests are processed from end to start; auto-selected
 		// requests (no index) go last since they recompute their span.
-		return queue.sort((a, b) => (b.start ?? -1) - (a.start ?? -1));
-	}
-
-	/** Clear all pending compressions for a session. */
-	clear(sessionID: string): void {
-		this.queues.delete(sessionID);
-	}
-
-	/** Clear every pending compression (for dispose). */
-	clearAll(): void {
-		this.queues.clear();
+		return this.take(sessionID).sort(
+			(a, b) => (b.start ?? -1) - (a.start ?? -1),
+		);
 	}
 }
 
@@ -240,32 +219,7 @@ export interface SquashRequest {
 }
 
 /** Per-plugin-instance store of pending squash requests, keyed by session. */
-export class SquashStore {
-	private queues = new Map<string, SquashRequest[]>();
-
-	queue(sessionID: string, request: SquashRequest): void {
-		let queue = this.queues.get(sessionID);
-		if (!queue) {
-			queue = [];
-			this.queues.set(sessionID, queue);
-		}
-		queue.push(request);
-	}
-
-	drain(sessionID: string): SquashRequest[] {
-		const queue = this.queues.get(sessionID) ?? [];
-		this.queues.delete(sessionID);
-		return queue;
-	}
-
-	clear(sessionID: string): void {
-		this.queues.delete(sessionID);
-	}
-
-	clearAll(): void {
-		this.queues.clear();
-	}
-}
+export class SquashStore extends KeyedQueue<SquashRequest> {}
 
 export interface ApplySquashOptions {
 	/** Maximum number of blocks merged by a single squash (default: 8). */
