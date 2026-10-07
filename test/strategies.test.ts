@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "bun:test";
 import {
 	toolCallKey,
 	applyDedup,
@@ -8,597 +8,205 @@ import {
 } from "../src/strategies.ts";
 import { mergeConfig } from "../src/config.ts";
 
-// ---------------------------------------------------------------------------
-// toolCallKey
-// ---------------------------------------------------------------------------
-
 describe("toolCallKey()", () => {
-	it("produces same key for identical tool+args", () => {
-		const a = toolCallKey("read", { filePath: "src/a.ts" });
-		const b = toolCallKey("read", { filePath: "src/a.ts" });
-		expect(a).toBe(b);
-	});
-
-	it("produces different key for different tools", () => {
-		const a = toolCallKey("read", { filePath: "src/a.ts" });
-		const b = toolCallKey("write", { filePath: "src/a.ts" });
-		expect(a).not.toBe(b);
-	});
-
-	it("produces different key for different args", () => {
-		const a = toolCallKey("read", { filePath: "src/a.ts" });
-		const b = toolCallKey("read", { filePath: "src/b.ts" });
-		expect(a).not.toBe(b);
-	});
-
-	it("sorts object keys for determinism", () => {
-		const a = toolCallKey("bash", { command: "ls", cwd: "/tmp" });
-		const b = toolCallKey("bash", { cwd: "/tmp", command: "ls" });
-		expect(a).toBe(b);
-	});
-
-	it("handles null/undefined args", () => {
-		const a = toolCallKey("tool", null);
-		const b = toolCallKey("tool", undefined);
-		expect(typeof a).toBe("string");
-		expect(typeof b).toBe("string");
-	});
-
-	it("handles primitive args", () => {
-		const a = toolCallKey("tool", 42);
-		const b = toolCallKey("tool", "hello");
-		expect(a).not.toBe(b);
+	it("is deterministic and distinguishes tools and args", () => {
+		expect(toolCallKey("read", { filePath: "a.ts" })).toBe(
+			toolCallKey("read", { filePath: "a.ts" }),
+		);
+		expect(toolCallKey("read", { filePath: "a.ts" })).not.toBe(
+			toolCallKey("write", { filePath: "a.ts" }),
+		);
+		expect(toolCallKey("read", { filePath: "a.ts" })).not.toBe(
+			toolCallKey("read", { filePath: "b.ts" }),
+		);
+		// Sorted keys for determinism.
+		expect(toolCallKey("bash", { command: "ls", cwd: "/tmp" })).toBe(
+			toolCallKey("bash", { cwd: "/tmp", command: "ls" }),
+		);
+		expect(typeof toolCallKey("tool", null)).toBe("string");
+		expect(typeof toolCallKey("tool", undefined)).toBe("string");
+		expect(toolCallKey("tool", 42)).not.toBe(toolCallKey("tool", "hello"));
 	});
 });
 
-// ---------------------------------------------------------------------------
-// applyDedup
-// ---------------------------------------------------------------------------
-
 describe("applyDedup()", () => {
-	function makeMsg(tool: string, args: unknown, output: string) {
-		return {
-			info: { role: "assistant" },
-			parts: [
-				{
-					type: "tool",
-					tool,
-					args,
-					state: { output },
-				},
-			],
-		};
-	}
+	const msg = (tool: string, args: unknown, output?: string, state: Record<string, unknown> = {}) => ({
+		info: { role: "assistant" },
+		parts: [{ type: "tool", tool, args, state: { ...state, ...(output === undefined ? {} : { output }) } }],
+	});
 
-	it("returns 0 when dedup is disabled", () => {
+	it("returns 0 when disabled", () => {
 		const cfg = mergeConfig({ dedup: { enabled: false } });
 		const msgs = [
-			makeMsg("read", { filePath: "a.ts" }, "content1"),
-			makeMsg("read", { filePath: "a.ts" }, "content2"),
+			msg("read", { filePath: "a.ts" }, "content1"),
+			msg("read", { filePath: "a.ts" }, "content2"),
 		];
-		const count = applyDedup(msgs as any, cfg);
-		expect(count).toBe(0);
+		expect(applyDedup(msgs as never, cfg)).toBe(0);
 		expect(msgs[0].parts[0].state.output).toBe("content1");
 	});
 
-	it("deduplicates identical tool calls, keeping the last", () => {
+	it("keeps only the last of identical calls", () => {
 		const cfg = mergeConfig({});
 		const msgs = [
-			makeMsg("read", { filePath: "a.ts" }, "content-v1"),
-			makeMsg("read", { filePath: "a.ts" }, "content-v2"),
+			msg("bash", { command: "ls" }, "v1"),
+			msg("bash", { command: "ls" }, "v2"),
+			msg("bash", { command: "ls" }, "v3"),
 		];
-		const count = applyDedup(msgs as any, cfg);
-		expect(count).toBe(1);
-		// First call should be deduped
-		expect(msgs[0].parts[0].state.output).toContain("deduped");
-		// Second call should be preserved
-		expect(msgs[0].parts[0].state.output).not.toBe("content-v2");
-		expect(msgs[1].parts[0].state.output).toBe("content-v2");
-	});
-
-	it("does not dedup different tools", () => {
-		const cfg = mergeConfig({});
-		const msgs = [
-			makeMsg("read", { filePath: "a.ts" }, "content1"),
-			makeMsg("write", { filePath: "a.ts" }, "content2"),
-		];
-		const count = applyDedup(msgs as any, cfg);
-		expect(count).toBe(0);
-	});
-
-	it("does not dedup different args", () => {
-		const cfg = mergeConfig({});
-		const msgs = [
-			makeMsg("read", { filePath: "a.ts" }, "content1"),
-			makeMsg("read", { filePath: "b.ts" }, "content2"),
-		];
-		const count = applyDedup(msgs as any, cfg);
-		expect(count).toBe(0);
-	});
-
-	it("handles 3+ duplicates", () => {
-		const cfg = mergeConfig({});
-		const msgs = [
-			makeMsg("bash", { command: "ls" }, "v1"),
-			makeMsg("bash", { command: "ls" }, "v2"),
-			makeMsg("bash", { command: "ls" }, "v3"),
-		];
-		const count = applyDedup(msgs as any, cfg);
-		expect(count).toBe(2); // first two deduped, last kept
+		expect(applyDedup(msgs as never, cfg)).toBe(2);
 		expect(msgs[0].parts[0].state.output).toContain("deduped");
 		expect(msgs[1].parts[0].state.output).toContain("deduped");
 		expect(msgs[2].parts[0].state.output).toBe("v3");
 	});
 
+	it("does not dedup different tools or args", () => {
+		const cfg = mergeConfig({});
+		const msgs = [
+			msg("read", { filePath: "a.ts" }, "1"),
+			msg("write", { filePath: "a.ts" }, "2"),
+			msg("read", { filePath: "b.ts" }, "3"),
+		];
+		expect(applyDedup(msgs as never, cfg)).toBe(0);
+	});
+
 	it("skips protected tools", () => {
 		const cfg = mergeConfig({ dedup: { protectedTools: ["bash"] } });
 		const msgs = [
-			makeMsg("bash", { command: "ls" }, "v1"),
-			makeMsg("bash", { command: "ls" }, "v2"),
+			msg("bash", { command: "ls" }, "v1"),
+			msg("bash", { command: "ls" }, "v2"),
 		];
-		const count = applyDedup(msgs as any, cfg);
-		expect(count).toBe(0);
+		expect(applyDedup(msgs as never, cfg)).toBe(0);
 	});
 
-	it("handles messages with non-tool parts", () => {
+	it("ignores parts without output, non-tool parts and errored calls", () => {
 		const cfg = mergeConfig({});
 		const msgs = [
-			{ info: { role: "user" }, parts: [{ type: "text", text: "hello" }] },
-			makeMsg("read", { filePath: "a.ts" }, "content1"),
+			{ info: { role: "user" }, parts: [{ type: "text", text: "hi" }] },
+			{ info: { role: "assistant" }, parts: [{ type: "tool", tool: "read", args: { filePath: "a.ts" } }] },
+			{ info: { role: "assistant" }, parts: [{ type: "tool", tool: "read", args: { filePath: "a.ts" }, state: { status: "error", error: "boom" } }] },
+			msg("read", { filePath: "a.ts" }, "ok"),
 		];
-		const count = applyDedup(msgs as any, cfg);
-		expect(count).toBe(0);
+		expect(applyDedup(msgs as never, cfg)).toBe(0);
+		expect((msgs[2].parts[0].state as { error?: string }).error).toBe("boom");
 	});
 
-	it("handles parts without state", () => {
+	it("deduplicates nested and swapped-key args", () => {
 		const cfg = mergeConfig({});
 		const msgs = [
-			{
-				info: { role: "assistant" },
-				parts: [{ type: "tool", tool: "read" }],
-			},
+			msg("bash", { command: "ls", cwd: "/tmp" }, "v1"),
+			msg("bash", { cwd: "/tmp", command: "ls" }, "v2"),
 		];
-		const count = applyDedup(msgs as any, cfg);
-		expect(count).toBe(0);
-	});
-
-	it("ignores duplicate tool calls without an output", () => {
-		const cfg = mergeConfig({});
-		const msgs = [
-			{
-				info: { role: "assistant" },
-				parts: [{ type: "tool", tool: "read", args: { filePath: "a.ts" } }],
-			},
-			{
-				info: { role: "assistant" },
-				parts: [{ type: "tool", tool: "read", args: { filePath: "a.ts" } }],
-			},
-		];
-		// Nothing to dedup: the parts have no output.
-		expect(applyDedup(msgs as any, cfg)).toBe(0);
-	});
-
-	it("does not dedup errored tool calls", () => {
-		const cfg = mergeConfig({});
-		const msgs = [
-			{
-				info: { role: "assistant" },
-				parts: [
-					{
-						type: "tool",
-						tool: "read",
-						args: { filePath: "a.ts" },
-						state: { status: "error", error: "boom" },
-					},
-				],
-			},
-			{
-				info: { role: "assistant" },
-				parts: [
-					{
-						type: "tool",
-						tool: "read",
-						args: { filePath: "a.ts" },
-						state: { output: "ok" },
-					},
-				],
-			},
-		];
-		expect(applyDedup(msgs as any, cfg)).toBe(0);
-		expect(msgs[0].parts[0].state!.error).toBe("boom");
-	});
-
-	it("deduplicates with nested args objects", () => {
-		const cfg = mergeConfig({});
-		const nestedArgs = { config: { nested: { deep: true } }, filePath: "a.ts" };
-		const msgs = [
-			{
-				info: { role: "assistant" },
-				parts: [
-					{
-						type: "tool",
-						tool: "read",
-						args: nestedArgs,
-						state: { output: "v1" },
-					},
-				],
-			},
-			{
-				info: { role: "assistant" },
-				parts: [
-					{
-						type: "tool",
-						tool: "read",
-						args: { ...nestedArgs },
-						state: { output: "v2" },
-					},
-				],
-			},
-		];
-		const count = applyDedup(msgs as any, cfg);
-		expect(count).toBe(1);
-		expect(msgs[0].parts[0].state!.output).toContain("deduped");
-	});
-
-	it("deduplicates with swapped key order in args", () => {
-		const cfg = mergeConfig({});
-		const msgs = [
-			{
-				info: { role: "assistant" },
-				parts: [
-					{
-						type: "tool",
-						tool: "bash",
-						args: { command: "ls", cwd: "/tmp" },
-						state: { output: "v1" },
-					},
-				],
-			},
-			{
-				info: { role: "assistant" },
-				parts: [
-					{
-						type: "tool",
-						tool: "bash",
-						args: { cwd: "/tmp", command: "ls" },
-						state: { output: "v2" },
-					},
-				],
-			},
-		];
-		const count = applyDedup(msgs as any, cfg);
-		expect(count).toBe(1);
+		expect(applyDedup(msgs as never, cfg)).toBe(1);
+		expect(msgs[0].parts[0].state.output).toContain("deduped");
 	});
 });
-
-// ---------------------------------------------------------------------------
-// findErroredParts
-// ---------------------------------------------------------------------------
 
 describe("findErroredParts()", () => {
-	it("finds parts with error status", () => {
+	it("finds only error-status tool parts", () => {
 		const msgs = [
 			{
 				info: { role: "assistant" },
 				parts: [
-					{
-						type: "tool",
-						tool: "bash",
-						state: { status: "error", output: "ENOENT" },
-					},
+					{ type: "tool", tool: "bash", state: { status: "error", output: "e1" } },
+					{ type: "tool", tool: "bash", state: { status: "error", output: "e2" } },
+					{ type: "tool", tool: "bash", state: { status: "success", output: "ok" } },
+					{ type: "tool", tool: "bash", state: { status: "failed", output: "killed" } },
+					{ type: "text", text: "x" },
+					{ type: "tool", tool: "bash" },
 				],
 			},
 		];
-		const found = findErroredParts(msgs as any);
-		expect(found).toHaveLength(1);
-		expect(found[0]).toEqual({ msgIdx: 0, partIdx: 0 });
-	});
-
-	it("only matches the error status", () => {
-		const msgs = [
-			{
-				info: { role: "assistant" },
-				parts: [
-					{
-						type: "tool",
-						tool: "bash",
-						state: { status: "failed", output: "killed" },
-					},
-				],
-			},
-		];
-		// "failed" is not a real ToolState status.
-		expect(findErroredParts(msgs as any)).toHaveLength(0);
-	});
-
-	it("ignores successful tool calls", () => {
-		const msgs = [
-			{
-				info: { role: "assistant" },
-				parts: [
-					{
-						type: "tool",
-						tool: "bash",
-						state: { status: "success", output: "ok" },
-					},
-				],
-			},
-		];
-		const found = findErroredParts(msgs as any);
-		expect(found).toHaveLength(0);
-	});
-
-	it("ignores non-tool parts", () => {
-		const msgs = [
-			{
-				info: { role: "user" },
-				parts: [{ type: "text", text: "hello" }],
-			},
-		];
-		const found = findErroredParts(msgs as any);
-		expect(found).toHaveLength(0);
-	});
-
-	it("ignores parts without state", () => {
-		const msgs = [
-			{
-				info: { role: "assistant" },
-				parts: [{ type: "tool", tool: "bash" }],
-			},
-		];
-		const found = findErroredParts(msgs as any);
-		expect(found).toHaveLength(0);
-	});
-
-	it("finds multiple errored parts", () => {
-		const msgs = [
-			{
-				info: { role: "assistant" },
-				parts: [
-					{
-						type: "tool",
-						tool: "bash",
-						state: { status: "error", output: "err1" },
-					},
-					{
-						type: "tool",
-						tool: "bash",
-						state: { status: "error", output: "err2" },
-					},
-				],
-			},
-		];
-		const found = findErroredParts(msgs as any);
-		expect(found).toHaveLength(2);
+		expect(findErroredParts(msgs as never)).toEqual([
+			{ msgIdx: 0, partIdx: 0 },
+			{ msgIdx: 0, partIdx: 1 },
+		]);
 	});
 });
 
-// ---------------------------------------------------------------------------
-// applyPurgeErrors
-// ---------------------------------------------------------------------------
-
 describe("applyPurgeErrors()", () => {
-	it("returns 0 when purge is disabled", () => {
+	const errored = (state: Record<string, unknown>) => [
+		{ info: { role: "assistant" }, parts: [{ type: "tool", tool: "bash", callID: "call-err", state: { status: "error", ...state } }] },
+	];
+
+	it("returns 0 when disabled", () => {
 		const cfg = mergeConfig({ purgeErrors: { enabled: false } });
-		const msgs = [
-			{
-				info: { role: "assistant" },
-				parts: [
-					{
-						type: "tool",
-						tool: "bash",
-						state: { status: "error", output: "fail", input: "x".repeat(200) },
-					},
-				],
-			},
-		];
-		const count = applyPurgeErrors(msgs as any, cfg);
-		expect(count).toBe(0);
+		const msgs = errored({ output: "fail", input: "x".repeat(200) });
+		expect(applyPurgeErrors(msgs as never, cfg)).toBe(0);
 		expect(msgs[0].parts[0].state.input).toBe("x".repeat(200));
 	});
 
-	it("purges large inputs from errored tools", () => {
+	it("purges large string and object inputs", () => {
 		const cfg = mergeConfig({});
-		const bigInput = "x".repeat(500);
-		const msgs = [
-			{
-				info: { role: "assistant" },
-				parts: [
-					{
-						type: "tool",
-						tool: "bash",
-						state: { status: "error", output: "fail", input: bigInput },
-					},
-				],
-			},
-		];
-		const count = applyPurgeErrors(msgs as any, cfg);
-		expect(count).toBe(1);
-		expect((msgs[0].parts[0].state.input as any).purged).toContain("removed");
-		expect((msgs[0].parts[0].state.input as any).purged).toContain("500 chars");
+		const str = errored({ output: "fail", input: "x".repeat(500) });
+		expect(applyPurgeErrors(str as never, cfg)).toBe(1);
+		expect((str[0].parts[0].state.input as { purged: string }).purged).toContain("500 chars");
+
+		const obj = errored({ input: { command: "x".repeat(500) } });
+		expect(applyPurgeErrors(obj as never, cfg)).toBe(1);
+		expect((obj[0].parts[0].state.input as { purged: string }).purged).toContain("removed");
 	});
 
-	it("purges large object inputs (real tool parts)", () => {
+	it("preserves small inputs and parts without input", () => {
 		const cfg = mergeConfig({});
-		const msgs = [
-			{
-				info: { role: "assistant" },
-				parts: [
-					{
-						type: "tool",
-						tool: "bash",
-						state: {
-							status: "error",
-							input: { command: "x".repeat(500) },
-						},
-					},
-				],
-			},
-		];
-		const count = applyPurgeErrors(msgs as any, cfg);
-		expect(count).toBe(1);
-		expect((msgs[0].parts[0].state.input as any).purged).toContain("removed");
+		const small = errored({ output: "fail", input: "short input" });
+		expect(applyPurgeErrors(small as never, cfg)).toBe(0);
+		expect(small[0].parts[0].state.input).toBe("short input");
+
+		const none = errored({ output: "fail" });
+		expect(applyPurgeErrors(none as never, cfg)).toBe(0);
 	});
 
-	it("preserves small inputs (< 100 chars)", () => {
-		const cfg = mergeConfig({});
-		const smallInput = "short input";
-		const msgs = [
-			{
-				info: { role: "assistant" },
-				parts: [
-					{
-						type: "tool",
-						tool: "bash",
-						state: { status: "error", output: "fail", input: smallInput },
-					},
-				],
-			},
-		];
-		const count = applyPurgeErrors(msgs as any, cfg);
-		expect(count).toBe(0);
-		expect(msgs[0].parts[0].state.input).toBe(smallInput);
+	it("preserves error output by default and purges the whole attempt when enabled", () => {
+		const input = "x".repeat(200);
+		const def = errored({ output: "ENOENT: no such file", input });
+		applyPurgeErrors(def as never, mergeConfig({}));
+		expect(def[0].parts[0].state.output).toBe("ENOENT: no such file");
+
+		const whole = errored({ output: "ENOENT: no such file", input });
+		applyPurgeErrors(whole as never, mergeConfig({ purgeErrors: { wholeAttempt: true } }));
+		expect(whole[0].parts[0].state.output).toContain("[purged failed bash:");
+		expect(whole[0].parts[0].state.output).toContain("ENOENT");
 	});
 
-	it("preserves error output by default (input-only purge)", () => {
+	it("reports purged call ids and skips protected indices", () => {
 		const cfg = mergeConfig({});
-		const msgs = [
-			{
-				info: { role: "assistant" },
-				parts: [
-					{
-						type: "tool",
-						tool: "bash",
-						state: {
-							status: "error",
-							output: "ENOENT: no such file or directory",
-							input: "x".repeat(200),
-						},
-					},
-				],
-			},
-		];
-		applyPurgeErrors(msgs as any, cfg);
-		expect((msgs[0].parts[0].state.input as any).purged).toContain("removed");
-		expect(msgs[0].parts[0].state.output).toBe(
-			"ENOENT: no such file or directory",
-		);
-	});
-
-	it("purges the whole attempt when wholeAttempt is enabled", () => {
-		const cfg = mergeConfig({ purgeErrors: { wholeAttempt: true } });
-		const msgs = [
-			{
-				info: { role: "assistant" },
-				parts: [
-					{
-						type: "tool",
-						tool: "bash",
-						state: {
-							status: "error",
-							output: "ENOENT: no such file or directory",
-							input: "x".repeat(200),
-						},
-					},
-				],
-			},
-		];
-		applyPurgeErrors(msgs as any, cfg);
-		expect((msgs[0].parts[0].state.input as any).purged).toContain("removed");
-		expect(msgs[0].parts[0].state.output).toContain("[purged failed bash:");
-		expect(msgs[0].parts[0].state.output).toContain("ENOENT");
-	});
-
-	it("handles parts without input", () => {
-		const cfg = mergeConfig({});
-		const msgs = [
-			{
-				info: { role: "assistant" },
-				parts: [
-					{
-						type: "tool",
-						tool: "bash",
-						state: { status: "error", output: "fail" },
-					},
-				],
-			},
-		];
-		const count = applyPurgeErrors(msgs as any, cfg);
-		expect(count).toBe(0);
-	});
-
-	it("reports purged call ids through the out parameter", () => {
-		const cfg = mergeConfig({});
-		const msgs = [
-			{
-				info: { role: "assistant" },
-				parts: [
-					{
-						type: "tool",
-						tool: "bash",
-						callID: "call-err",
-						state: { status: "error", output: "fail", input: "x".repeat(200) },
-					},
-				],
-			},
-		];
 		const ids = new Set<string>();
-		applyPurgeErrors(msgs as any, cfg, undefined, ids);
+		const msgs = errored({ output: "fail", input: "x".repeat(200) });
+		applyPurgeErrors(msgs as never, cfg, undefined, ids);
 		expect(ids).toEqual(new Set(["call-err"]));
+
+		const protectedMsgs = errored({ output: "fail", input: "x".repeat(200) });
+		expect(applyPurgeErrors(protectedMsgs as never, cfg, new Set([0]))).toBe(0);
+		expect(protectedMsgs[0].parts[0].state.input).toBe("x".repeat(200));
 	});
 });
 
-// ---------------------------------------------------------------------------
-// applyCascadePurge
-// ---------------------------------------------------------------------------
-
 describe("applyCascadePurge()", () => {
-	function callMsg(callID: string, input: unknown) {
-		return {
-			info: { role: "assistant" },
-			parts: [
-				{
-					type: "tool",
-					tool: "bash",
-					callID,
-					state: { status: "success", output: "ok", input },
-				},
-			],
-		};
-	}
+	const call = (callID: string, input: unknown) => ({
+		info: { role: "assistant" },
+		parts: [{ type: "tool", tool: "bash", callID, state: { status: "success", output: "ok", input } }],
+	});
 
 	it("returns 0 for an empty purged set", () => {
-		const msgs = [callMsg("a", { x: 1 })];
-		expect(applyCascadePurge(msgs as any, new Set())).toBe(0);
+		expect(applyCascadePurge([call("a", { x: 1 })] as never, new Set())).toBe(0);
 	});
 
 	it("purges descendants leaf-first and leaves unrelated calls", () => {
 		const msgs = [
-			callMsg("callA", { command: "run A" }),
-			callMsg("callB", { command: "use callA" }),
-			callMsg("callC", { command: "use callB" }),
-			callMsg("callX", { command: "independent" }),
+			call("callA", { command: "run A" }),
+			call("callB", { command: "use callA" }),
+			call("callC", { command: "use callB" }),
+			call("callX", { command: "independent" }),
 		];
-		const purged = applyCascadePurge(msgs as any, new Set(["callA"]));
-		expect(purged).toBe(2);
-		expect((msgs[1].parts[0].state.input as any).purged).toContain("cascade");
-		expect((msgs[2].parts[0].state.input as any).purged).toContain("cascade");
-		// The errored call and the unrelated call are untouched here.
-		expect((msgs[0].parts[0].state.input as any).purged).toBeUndefined();
-		expect((msgs[3].parts[0].state.input as any).purged).toBeUndefined();
+		expect(applyCascadePurge(msgs as never, new Set(["callA"]))).toBe(2);
+		expect((msgs[1].parts[0].state.input as { purged: string }).purged).toContain("cascade");
+		expect((msgs[2].parts[0].state.input as { purged: string }).purged).toContain("cascade");
+		expect((msgs[0].parts[0].state.input as { purged?: string }).purged).toBeUndefined();
+		expect((msgs[3].parts[0].state.input as { purged?: string }).purged).toBeUndefined();
 	});
 
 	it("skips protected message indices", () => {
-		const msgs = [
-			callMsg("callA", { command: "run A" }),
-			callMsg("callB", { command: "use callA" }),
-		];
-		const purged = applyCascadePurge(
-			msgs as any,
-			new Set(["callA"]),
-			new Set([1]),
-		);
-		expect(purged).toBe(0);
-		expect((msgs[1].parts[0].state.input as any).purged).toBeUndefined();
+		const msgs = [call("callA", { command: "run A" }), call("callB", { command: "use callA" })];
+		expect(applyCascadePurge(msgs as never, new Set(["callA"]), new Set([1]))).toBe(0);
+		expect((msgs[1].parts[0].state.input as { purged?: string }).purged).toBeUndefined();
 	});
 });

@@ -299,17 +299,20 @@ To customize the compaction prompt, modify the `buildCompactionPrompt()` functio
 # Install dependencies
 bun install
 
-# Run tests
-bun test
+# Run tests (Bun's built-in runner — no Vitest)
+bun run test
 
-# Run tests with coverage
+# Watch mode
+bun run test:watch
+
+# Run tests with coverage (70% thresholds, see bunfig.toml)
 bun run test:coverage
 
 # The plugin is TypeScript — no build step needed for OpenCode
 # (OpenCode loads .ts files directly via Bun)
 ```
 
-Current coverage: **95.9% statements, 96.2% functions, 97.7% lines, 85.2% branches** (332 tests).
+Current coverage: **95.6% functions, 98.7% lines** (211 tests).
 
 ## File Structure
 

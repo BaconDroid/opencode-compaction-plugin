@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test";
 import { LiveCompactionPlugin } from "../src/index.ts";
 import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -25,7 +25,7 @@ function cleanupTmp() {
 
 describe("LiveCompactionPlugin", () => {
 	const mockCtx = {
-		client: { app: { log: vi.fn().mockResolvedValue(undefined) } },
+		client: { app: { log: mock().mockResolvedValue(undefined) } },
 		project: { id: "test-project", name: "test" },
 		directory: TMP_DIR,
 		worktree: TMP_DIR,
@@ -38,7 +38,7 @@ describe("LiveCompactionPlugin", () => {
 
 	beforeEach(() => {
 		setupTmp();
-		vi.clearAllMocks();
+		mock.clearAllMocks();
 	});
 
 	afterEach(cleanupTmp);
@@ -69,7 +69,7 @@ describe("LiveCompactionPlugin", () => {
 				join(dotDir, "live-compaction.json"),
 				JSON.stringify({ debug: true }),
 			);
-			const logSpy = vi.fn().mockResolvedValue(undefined);
+			const logSpy = mock().mockResolvedValue(undefined);
 			await LiveCompactionPlugin({
 				...mockCtx,
 				client: { app: { log: logSpy } },
@@ -101,91 +101,32 @@ describe("LiveCompactionPlugin", () => {
 	// ---------------------------------------------------------------------------
 
 	describe("tool.execute.after", () => {
-		it("records read operations", async () => {
+		it("records read/write/edit operations in the compaction prompt", async () => {
 			const hooks = await getHooks();
-			await hooks["tool.execute.after"]!(
-				{
-					tool: "read",
-					sessionID: "sess-1",
-					callID: "call-1",
-					args: { filePath: "src/a.ts" },
-				},
-				{ title: "", output: "", metadata: {} },
-			);
-
-			// Verify by checking compaction prompt includes the file
-			const output = { context: [], prompt: undefined };
-			await hooks["experimental.session.compacting"]!(
-				{ sessionID: "sess-1" },
-				output,
-			);
-			expect(output.prompt).toContain("src/a.ts");
+			const cases: Array<[string, string, string, string]> = [
+				["read", "sess-1", "call-1", "src/a.ts"],
+				["write", "sess-2", "call-2", "lib/b.ts"],
+				["edit", "sess-3", "call-3", "cfg.ts"],
+			];
+			for (const [tool, sessionID, callID, filePath] of cases) {
+				await hooks["tool.execute.after"]!(
+					{ tool, sessionID, callID, args: { filePath } },
+					{ title: "", output: "", metadata: {} },
+				);
+				const output = { context: [], prompt: undefined };
+				await hooks["experimental.session.compacting"]!({ sessionID }, output);
+				expect(output.prompt, tool).toContain(filePath);
+			}
 		});
 
-		it("records write operations", async () => {
+		it("ignores calls without sessionID or args", async () => {
 			const hooks = await getHooks();
 			await hooks["tool.execute.after"]!(
-				{
-					tool: "write",
-					sessionID: "sess-2",
-					callID: "call-2",
-					args: { filePath: "lib/b.ts" },
-				},
+				{ tool: "read", sessionID: "", callID: "call-4", args: { filePath: "x.ts" } },
 				{ title: "", output: "", metadata: {} },
 			);
-
-			const output = { context: [], prompt: undefined };
-			await hooks["experimental.session.compacting"]!(
-				{ sessionID: "sess-2" },
-				output,
-			);
-			expect(output.prompt).toContain("lib/b.ts");
-		});
-
-		it("records edit operations", async () => {
-			const hooks = await getHooks();
 			await hooks["tool.execute.after"]!(
-				{
-					tool: "edit",
-					sessionID: "sess-3",
-					callID: "call-3",
-					args: { filePath: "cfg.ts" },
-				},
-				{ title: "", output: "", metadata: {} },
-			);
-
-			const output = { context: [], prompt: undefined };
-			await hooks["experimental.session.compacting"]!(
-				{ sessionID: "sess-3" },
-				output,
-			);
-			expect(output.prompt).toContain("cfg.ts");
-		});
-
-		it("ignores calls without sessionID", async () => {
-			const hooks = await getHooks();
-			// Should not throw
-			await hooks["tool.execute.after"]!(
-				{
-					tool: "read",
-					sessionID: "",
-					callID: "call-4",
-					args: { filePath: "x.ts" },
-				},
-				{ title: "", output: "", metadata: {} },
-			);
-		});
-
-		it("ignores calls without args", async () => {
-			const hooks = await getHooks();
-			// Should not throw
-			await hooks["tool.execute.after"]!(
-				{
-					tool: "read",
-					sessionID: "sess-5",
-					callID: "call-5",
-					args: null as any,
-				},
+				{ tool: "read", sessionID: "sess-5", callID: "call-5", args: null as any },
 				{ title: "", output: "", metadata: {} },
 			);
 
@@ -194,7 +135,6 @@ describe("LiveCompactionPlugin", () => {
 				{ sessionID: "sess-5" },
 				output,
 			);
-			// No files manifest should appear
 			expect(output.prompt).not.toContain("## Files Touched Manifest");
 		});
 
@@ -369,66 +309,24 @@ describe("LiveCompactionPlugin", () => {
 	// ---------------------------------------------------------------------------
 
 	describe("event", () => {
-		it("cleans up trackers on session.deleted", async () => {
+		it("cleans up trackers on session.deleted for both payload shapes", async () => {
 			const hooks = await getHooks();
-
-			// Track a file
-			await hooks["tool.execute.after"]!(
-				{
-					tool: "read",
-					sessionID: "sess-del",
-					callID: "c1",
-					args: { filePath: "y.ts" },
-				},
-				{ title: "", output: "", metadata: {} },
-			);
-
-			// Delete session
-			await hooks.event!({
-				event: {
-					id: "evt-1",
-					type: "session.deleted",
-					properties: { sessionID: "sess-del" },
-				},
-			});
-
-			// After deletion, compaction should not have the file
-			const output = { context: [], prompt: undefined };
-			await hooks["experimental.session.compacting"]!(
-				{ sessionID: "sess-del" },
-				output,
-			);
-			// New tracker was created for the session (it was deleted), so no files
-			expect(output.prompt).not.toContain("y.ts");
-		});
-
-		it("cleans up trackers on session.deleted with the SDK payload shape", async () => {
-			const hooks = await getHooks();
-
-			await hooks["tool.execute.after"]!(
-				{
-					tool: "read",
-					sessionID: "sess-del2",
-					callID: "c1",
-					args: { filePath: "z.ts" },
-				},
-				{ title: "", output: "", metadata: {} },
-			);
-
-			await hooks.event!({
-				event: {
-					id: "evt-2",
-					type: "session.deleted",
-					properties: { info: { id: "sess-del2" } },
-				},
-			});
-
-			const output = { context: [], prompt: undefined };
-			await hooks["experimental.session.compacting"]!(
-				{ sessionID: "sess-del2" },
-				output,
-			);
-			expect(output.prompt).not.toContain("z.ts");
+			const cases: Array<[string, string, Record<string, unknown>]> = [
+				["sess-del", "y.ts", { sessionID: "sess-del" }],
+				["sess-del2", "z.ts", { info: { id: "sess-del2" } }],
+			];
+			for (const [sessionID, filePath, properties] of cases) {
+				await hooks["tool.execute.after"]!(
+					{ tool: "read", sessionID, callID: "c1", args: { filePath } },
+					{ title: "", output: "", metadata: {} },
+				);
+				await hooks.event!({
+					event: { id: "evt", type: "session.deleted", properties },
+				});
+				const output = { context: [], prompt: undefined };
+				await hooks["experimental.session.compacting"]!({ sessionID }, output);
+				expect(output.prompt, sessionID).not.toContain(filePath);
+			}
 		});
 
 		it("ignores other event types", async () => {
@@ -606,47 +504,16 @@ describe("LiveCompactionPlugin", () => {
 			expect((messages[0].parts[0] as any).state.output).toBe(firstPass);
 		});
 
-		it("handles messages without tool parts", async () => {
+		it("handles malformed messages without throwing or modifying them", async () => {
 			const hooks = await getHooks();
 			const messages = [
-				{
-					info: { role: "user" },
-					parts: [{ type: "text", text: "hello" }],
-				},
+				{ info: { role: "user" }, parts: [{ type: "text", text: "hello" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "tool", tool: "bash" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "tool", state: { output: "something" } }] },
 			];
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages,
-			});
+			await hooks["experimental.chat.messages.transform"]!({} as any, { messages });
 			expect(messages[0].parts[0].text).toBe("hello");
-		});
-
-		it("handles parts without state", async () => {
-			const hooks = await getHooks();
-			const messages = [
-				{
-					info: { role: "assistant" },
-					parts: [{ type: "tool", tool: "bash" }],
-				},
-			];
-			// Should not throw
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages,
-			});
-		});
-
-		it("handles parts without tool name", async () => {
-			const hooks = await getHooks();
-			const messages = [
-				{
-					info: { role: "assistant" },
-					parts: [{ type: "tool", state: { output: "something" } }],
-				},
-			];
-			// Should not modify (no tool name)
-			await hooks["experimental.chat.messages.transform"]!({} as any, {
-				messages,
-			});
-			expect(messages[0].parts[0].state.output).toBe("something");
+			expect(messages[2].parts[0].state.output).toBe("something");
 		});
 
 		it("deduplicates identical tool calls", async () => {
@@ -1014,7 +881,7 @@ describe("LiveCompactionPlugin", () => {
 						{
 							type: "tool",
 							tool: "read",
-							args: { filePath: "src/vitest.config.ts" },
+							args: { filePath: "src/build.config.ts" },
 							state: { output: longContent },
 						},
 					],
@@ -1350,7 +1217,7 @@ describe("LiveCompactionPlugin", () => {
 		});
 
 		it("defers a compression requested far below the compaction threshold", async () => {
-			const list = vi.fn().mockResolvedValue({
+			const list = mock().mockResolvedValue({
 				data: {
 					all: [
 						{ id: "prov", models: { "model-x": { limit: { context: 1000 } } } },
@@ -1361,7 +1228,7 @@ describe("LiveCompactionPlugin", () => {
 				{
 					...mockCtx,
 					client: {
-						app: { log: vi.fn().mockResolvedValue(undefined) },
+						app: { log: mock().mockResolvedValue(undefined) },
 						provider: { list },
 					},
 					directory: TMP_DIR,
@@ -1419,7 +1286,7 @@ describe("LiveCompactionPlugin", () => {
 		});
 
 		it("allows a compression near the compaction threshold", async () => {
-			const list = vi.fn().mockResolvedValue({
+			const list = mock().mockResolvedValue({
 				data: {
 					all: [
 						{ id: "prov", models: { "model-x": { limit: { context: 1000 } } } },
@@ -1430,7 +1297,7 @@ describe("LiveCompactionPlugin", () => {
 				{
 					...mockCtx,
 					client: {
-						app: { log: vi.fn().mockResolvedValue(undefined) },
+						app: { log: mock().mockResolvedValue(undefined) },
 						provider: { list },
 					},
 					directory: TMP_DIR,
@@ -1582,10 +1449,10 @@ describe("LiveCompactionPlugin", () => {
 
 	describe("todo preservation", () => {
 		it("captures todos on compaction and handles session.compacted", async () => {
-			const logSpy = vi.fn().mockResolvedValue(undefined);
-			const todo = vi
-				.fn()
-				.mockResolvedValue({ data: [{ content: "x", status: "pending" }] });
+			const logSpy = mock().mockResolvedValue(undefined);
+			const todo = mock().mockResolvedValue({
+				data: [{ content: "x", status: "pending" }],
+			});
 			const hooks = await LiveCompactionPlugin({
 				...mockCtx,
 				client: { app: { log: logSpy }, session: { todo } },
@@ -1612,7 +1479,7 @@ describe("LiveCompactionPlugin", () => {
 		});
 
 		it("renders the captured todos as task-state in the prompt", async () => {
-			const todo = vi.fn().mockResolvedValue({
+			const todo = mock().mockResolvedValue({
 				data: [
 					{
 						id: "t1",
@@ -1624,7 +1491,7 @@ describe("LiveCompactionPlugin", () => {
 			});
 			const hooks = await LiveCompactionPlugin({
 				...mockCtx,
-				client: { app: { log: vi.fn().mockResolvedValue(undefined) }, session: { todo } },
+				client: { app: { log: mock().mockResolvedValue(undefined) }, session: { todo } },
 				directory: TMP_DIR,
 			} as any);
 
@@ -1651,8 +1518,8 @@ describe("LiveCompactionPlugin", () => {
 
 	describe("preemptive compaction", () => {
 		it("triggers summarize near the context limit", async () => {
-			const summarize = vi.fn().mockResolvedValue(undefined);
-			const list = vi.fn().mockResolvedValue({
+			const summarize = mock().mockResolvedValue(undefined);
+			const list = mock().mockResolvedValue({
 				data: {
 					all: [
 						{ id: "prov", models: { "model-x": { limit: { context: 1000 } } } },
@@ -1663,7 +1530,7 @@ describe("LiveCompactionPlugin", () => {
 				{
 					...mockCtx,
 					client: {
-						app: { log: vi.fn().mockResolvedValue(undefined) },
+						app: { log: mock().mockResolvedValue(undefined) },
 						session: { summarize },
 						provider: { list },
 					},
@@ -1708,8 +1575,8 @@ describe("LiveCompactionPlugin", () => {
 		});
 
 		it("triggers on turn end without a tool call", async () => {
-			const summarize = vi.fn().mockResolvedValue(undefined);
-			const list = vi.fn().mockResolvedValue({
+			const summarize = mock().mockResolvedValue(undefined);
+			const list = mock().mockResolvedValue({
 				data: {
 					all: [
 						{ id: "prov", models: { "model-x": { limit: { context: 1000 } } } },
@@ -1720,7 +1587,7 @@ describe("LiveCompactionPlugin", () => {
 				{
 					...mockCtx,
 					client: {
-						app: { log: vi.fn().mockResolvedValue(undefined) },
+						app: { log: mock().mockResolvedValue(undefined) },
 						session: { summarize },
 						provider: { list },
 					},
@@ -1754,8 +1621,8 @@ describe("LiveCompactionPlugin", () => {
 		});
 
 		it("honors the tail guard until enough new tool calls", async () => {
-			const summarize = vi.fn().mockResolvedValue(undefined);
-			const list = vi.fn().mockResolvedValue({
+			const summarize = mock().mockResolvedValue(undefined);
+			const list = mock().mockResolvedValue({
 				data: {
 					all: [
 						{ id: "prov", models: { "model-x": { limit: { context: 1000 } } } },
@@ -1766,7 +1633,7 @@ describe("LiveCompactionPlugin", () => {
 				{
 					...mockCtx,
 					client: {
-						app: { log: vi.fn().mockResolvedValue(undefined) },
+						app: { log: mock().mockResolvedValue(undefined) },
 						session: { summarize },
 						provider: { list },
 					},
@@ -1814,13 +1681,13 @@ describe("LiveCompactionPlugin", () => {
 		});
 
 		it("does not trigger when disabled", async () => {
-			const summarize = vi.fn().mockResolvedValue(undefined);
+			const summarize = mock().mockResolvedValue(undefined);
 			const hooks = await LiveCompactionPlugin({
 				...mockCtx,
 				client: {
-					app: { log: vi.fn().mockResolvedValue(undefined) },
+					app: { log: mock().mockResolvedValue(undefined) },
 					session: { summarize },
-					provider: { list: vi.fn() },
+					provider: { list: mock() },
 				},
 				directory: TMP_DIR,
 			} as any);
@@ -1874,8 +1741,8 @@ describe("LiveCompactionPlugin", () => {
 
 	describe("degradation monitor", () => {
 		it("warns when assistant messages lose text after compaction", async () => {
-			const log = vi.fn().mockResolvedValue(undefined);
-			const messages = vi.fn().mockResolvedValue({
+			const log = mock().mockResolvedValue(undefined);
+			const messages = mock().mockResolvedValue({
 				data: [
 					{ info: { role: "assistant" }, parts: [{ type: "tool" }] },
 					{ info: { role: "assistant" }, parts: [{ type: "tool" }] },
@@ -1924,7 +1791,7 @@ describe("LiveCompactionPlugin", () => {
 
 	describe("previous summary continuity", () => {
 		it("carries the previous summary into the replace prompt", async () => {
-			const messages = vi.fn().mockResolvedValue({
+			const messages = mock().mockResolvedValue({
 				data: [
 					{
 						info: { role: "assistant", summary: true },
@@ -1935,7 +1802,7 @@ describe("LiveCompactionPlugin", () => {
 			const hooks = await LiveCompactionPlugin({
 				...mockCtx,
 				client: {
-					app: { log: vi.fn().mockResolvedValue(undefined) },
+					app: { log: mock().mockResolvedValue(undefined) },
 					session: { messages },
 				},
 				directory: TMP_DIR,
@@ -1951,7 +1818,7 @@ describe("LiveCompactionPlugin", () => {
 		});
 
 		it("keeps continuity across repeated compactions without duplication", async () => {
-			const messages = vi.fn().mockResolvedValue({
+			const messages = mock().mockResolvedValue({
 				data: [
 					{
 						info: { role: "assistant", summary: true, id: "s1" },
@@ -1962,7 +1829,7 @@ describe("LiveCompactionPlugin", () => {
 			const hooks = await LiveCompactionPlugin({
 				...mockCtx,
 				client: {
-					app: { log: vi.fn().mockResolvedValue(undefined) },
+					app: { log: mock().mockResolvedValue(undefined) },
 					session: { messages },
 				},
 				directory: TMP_DIR,
@@ -2005,7 +1872,7 @@ describe("LiveCompactionPlugin", () => {
 		});
 
 		it("injects the latest user ask into the replace prompt", async () => {
-			const messages = vi.fn().mockResolvedValue({
+			const messages = mock().mockResolvedValue({
 				data: [
 					{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
 					{
@@ -2017,7 +1884,7 @@ describe("LiveCompactionPlugin", () => {
 			const hooks = await LiveCompactionPlugin({
 				...mockCtx,
 				client: {
-					app: { log: vi.fn().mockResolvedValue(undefined) },
+					app: { log: mock().mockResolvedValue(undefined) },
 					session: { messages },
 				},
 				directory: TMP_DIR,
@@ -2033,12 +1900,12 @@ describe("LiveCompactionPlugin", () => {
 		});
 
 		it("does not fetch the previous summary in augment mode", async () => {
-			const messages = vi.fn().mockResolvedValue({ data: [] });
+			const messages = mock().mockResolvedValue({ data: [] });
 			const hooks = await LiveCompactionPlugin(
 				{
 					...mockCtx,
 					client: {
-						app: { log: vi.fn().mockResolvedValue(undefined) },
+						app: { log: mock().mockResolvedValue(undefined) },
 						session: { messages },
 					},
 					directory: TMP_DIR,

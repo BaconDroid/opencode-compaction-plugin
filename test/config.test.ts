@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import {
 	loadConfig,
 	mergeConfig,
@@ -27,183 +27,129 @@ function cleanupTmp() {
 }
 
 describe("mergeConfig()", () => {
-	it("returns defaults for empty input", () => {
+	it("returns the documented defaults", () => {
 		const cfg = mergeConfig({});
 		expect(cfg.enabled).toBe(true);
 		expect(cfg.debug).toBe(false);
+		expect(cfg.promptMode).toBe("replace");
 		expect(cfg.trim.bash).toBe(600);
-		expect(cfg.dedup.enabled).toBe(true);
-		expect(cfg.dedup.protectedTools).toEqual([]);
-		expect(cfg.purgeErrors.enabled).toBe(true);
-		expect(cfg.purgeErrors.turns).toBe(4);
-	});
-
-	it("overrides enabled", () => {
-		const cfg = mergeConfig({ enabled: false });
-		expect(cfg.enabled).toBe(false);
-	});
-
-	it("overrides trim limits", () => {
-		const cfg = mergeConfig({ trim: { bash: 1000, read: 500 } });
-		expect(cfg.trim.bash).toBe(1000);
-		expect(cfg.trim.read).toBe(500);
-		// Other trim defaults preserved
-		expect(cfg.trim.write).toBe(100);
-	});
-
-	it("overrides dedup settings", () => {
-		const cfg = mergeConfig({
-			dedup: { enabled: false, protectedTools: ["bash"] },
+		expect(cfg.dedup).toEqual({ enabled: true, protectedTools: [] });
+		expect(cfg.purgeErrors).toMatchObject({
+			enabled: true,
+			turns: 4,
+			wholeAttempt: false,
+			cascade: false,
 		});
-		expect(cfg.dedup.enabled).toBe(false);
-		expect(cfg.dedup.protectedTools).toEqual(["bash"]);
-	});
-
-	it("overrides purgeErrors settings", () => {
-		const cfg = mergeConfig({ purgeErrors: { enabled: false, turns: 8 } });
-		expect(cfg.purgeErrors.enabled).toBe(false);
-		expect(cfg.purgeErrors.turns).toBe(8);
-	});
-
-	it("defaults wholeAttempt and cascade to false (opt-in)", () => {
-		const cfg = mergeConfig({});
-		expect(cfg.purgeErrors.wholeAttempt).toBe(false);
-		expect(cfg.purgeErrors.cascade).toBe(false);
-		const enabled = mergeConfig({
-			purgeErrors: { wholeAttempt: true, cascade: true },
+		expect(cfg.compress).toEqual({
+			protectedTurns: 3,
+			reversible: true,
+			maxBlocksPerSquash: 8,
 		});
-		expect(enabled.purgeErrors.wholeAttempt).toBe(true);
-		expect(enabled.purgeErrors.cascade).toBe(true);
-	});
-
-	it("defaults the compress settings", () => {
-		const cfg = mergeConfig({});
-		expect(cfg.compress.protectedTurns).toBe(3);
-		expect(cfg.compress.reversible).toBe(true);
-		expect(cfg.compress.maxBlocksPerSquash).toBe(8);
-	});
-
-	it("overrides the compress settings", () => {
-		const cfg = mergeConfig({
-			compress: { protectedTurns: 5, reversible: false, maxBlocksPerSquash: 2 },
+		expect(cfg.eviction).toMatchObject({
+			enabled: false,
+			thresholdTokens: 80000,
+			protectPrologue: true,
 		});
-		expect(cfg.compress.protectedTurns).toBe(5);
-		expect(cfg.compress.reversible).toBe(false);
-		expect(cfg.compress.maxBlocksPerSquash).toBe(2);
-	});
-
-	it("defaults eviction off with all levels", () => {
-		const cfg = mergeConfig({});
-		expect(cfg.eviction.enabled).toBe(false);
-		expect(cfg.eviction.thresholdTokens).toBe(80000);
-		expect(cfg.eviction.protectPrologue).toBe(true);
 		expect(cfg.eviction.levels).toEqual([
 			"reasoning",
 			"bulk_output",
 			"intermediate",
 			"episode",
 		]);
-	});
-
-	it("overrides the eviction settings", () => {
-		const cfg = mergeConfig({
-			eviction: { enabled: true, thresholdTokens: 1000, levels: ["episode"] },
+		expect(cfg.preemptiveCompaction).toMatchObject({
+			enabled: false,
+			threshold: 0.78,
+			countCacheTokens: false,
+			minTokensSinceLast: 0,
+			minMessagesSinceLast: 0,
+			cooldownMs: 60000,
 		});
-		expect(cfg.eviction.enabled).toBe(true);
-		expect(cfg.eviction.thresholdTokens).toBe(1000);
-		expect(cfg.eviction.levels).toEqual(["episode"]);
-	});
-
-	it("defaults preemptive compaction to disabled", () => {
-		const cfg = mergeConfig({});
-		expect(cfg.preemptiveCompaction.enabled).toBe(false);
-		expect(cfg.preemptiveCompaction.threshold).toBe(0.78);
-		expect(cfg.preemptiveCompaction.countCacheTokens).toBe(false);
 		expect(cfg.preemptiveCompaction.absoluteTokenThreshold).toBeUndefined();
-	});
-
-	it("overrides preemptive compaction", () => {
-		const cfg = mergeConfig({
-			preemptiveCompaction: { enabled: true, contextLimit: 1234 },
+		expect(cfg.preemptiveCompaction.tailGuard).toEqual({
+			enabled: false,
+			minNewToolCalls: 3,
 		});
-		expect(cfg.preemptiveCompaction.enabled).toBe(true);
-		expect(cfg.preemptiveCompaction.contextLimit).toBe(1234);
+		expect(cfg.degradationMonitor).toMatchObject({
+			enabled: false,
+			threshold: 4,
+			windowMs: 120000,
+			convergenceThreshold: 0.05,
+			convergencePatience: 3,
+			maxRounds: 12,
+		});
 	});
 
-	it("overrides the hybrid threshold and cache policy", () => {
+	it("overrides top-level and strategy settings", () => {
 		const cfg = mergeConfig({
+			enabled: false,
+			debug: true,
+			promptMode: "augment",
+			trim: { bash: 1000, read: 500 },
+			dedup: { enabled: false, protectedTools: ["bash"] },
+			purgeErrors: { enabled: false, turns: 8, wholeAttempt: true, cascade: true },
+		});
+		expect(cfg.enabled).toBe(false);
+		expect(cfg.debug).toBe(true);
+		expect(cfg.promptMode).toBe("augment");
+		expect(cfg.trim.bash).toBe(1000);
+		expect(cfg.trim.read).toBe(500);
+		expect(cfg.trim.write).toBe(100); // untouched default
+		expect(cfg.dedup).toEqual({ enabled: false, protectedTools: ["bash"] });
+		expect(cfg.purgeErrors).toMatchObject({
+			enabled: false,
+			turns: 8,
+			wholeAttempt: true,
+			cascade: true,
+		});
+	});
+
+	it("overrides compress, eviction, preemptive and degradation settings", () => {
+		const cfg = mergeConfig({
+			compress: { protectedTurns: 5, reversible: false, maxBlocksPerSquash: 2 },
+			eviction: { enabled: true, thresholdTokens: 1000, levels: ["episode"] },
 			preemptiveCompaction: {
-				absoluteTokenThreshold: 330_000,
+				enabled: true,
+				contextLimit: 1234,
+				absoluteTokenThreshold: 330000,
 				countCacheTokens: true,
-			},
-		});
-		expect(cfg.preemptiveCompaction.absoluteTokenThreshold).toBe(330_000);
-		expect(cfg.preemptiveCompaction.countCacheTokens).toBe(true);
-	});
-
-	it("defaults the deterministic gates off", () => {
-		const cfg = mergeConfig({});
-		expect(cfg.preemptiveCompaction.minTokensSinceLast).toBe(0);
-		expect(cfg.preemptiveCompaction.minMessagesSinceLast).toBe(0);
-		expect(cfg.preemptiveCompaction.tailGuard.enabled).toBe(false);
-		expect(cfg.preemptiveCompaction.tailGuard.minNewToolCalls).toBe(3);
-	});
-
-	it("overrides the deterministic gates and tail guard", () => {
-		const cfg = mergeConfig({
-			preemptiveCompaction: {
-				minTokensSinceLast: 20_000,
+				minTokensSinceLast: 20000,
 				minMessagesSinceLast: 6,
 				tailGuard: { enabled: true, minNewToolCalls: 5 },
 			},
-		});
-		expect(cfg.preemptiveCompaction.minTokensSinceLast).toBe(20_000);
-		expect(cfg.preemptiveCompaction.minMessagesSinceLast).toBe(6);
-		expect(cfg.preemptiveCompaction.tailGuard).toEqual({
-			enabled: true,
-			minNewToolCalls: 5,
-		});
-	});
-
-	it("defaults promptMode to replace and the degradation monitor to off", () => {
-		const cfg = mergeConfig({});
-		expect(cfg.promptMode).toBe("replace");
-		expect(cfg.degradationMonitor.enabled).toBe(false);
-	});
-
-	it("overrides promptMode and the degradation monitor", () => {
-		const cfg = mergeConfig({
-			promptMode: "augment",
-			degradationMonitor: { enabled: true, threshold: 2 },
-		});
-		expect(cfg.promptMode).toBe("augment");
-		expect(cfg.degradationMonitor.enabled).toBe(true);
-		expect(cfg.degradationMonitor.threshold).toBe(2);
-	});
-
-	it("defaults the judge-free halting parameters", () => {
-		const cfg = mergeConfig({});
-		expect(cfg.degradationMonitor.convergenceThreshold).toBe(0.05);
-		expect(cfg.degradationMonitor.convergencePatience).toBe(3);
-		expect(cfg.degradationMonitor.maxRounds).toBe(12);
-	});
-
-	it("overrides the judge-free halting parameters", () => {
-		const cfg = mergeConfig({
 			degradationMonitor: {
+				enabled: true,
+				threshold: 2,
 				convergenceThreshold: 0.02,
 				convergencePatience: 5,
 				maxRounds: 20,
 			},
 		});
-		expect(cfg.degradationMonitor.convergenceThreshold).toBe(0.02);
-		expect(cfg.degradationMonitor.convergencePatience).toBe(5);
-		expect(cfg.degradationMonitor.maxRounds).toBe(20);
-	});
-
-	it("overrides debug", () => {
-		const cfg = mergeConfig({ debug: true });
-		expect(cfg.debug).toBe(true);
+		expect(cfg.compress).toEqual({
+			protectedTurns: 5,
+			reversible: false,
+			maxBlocksPerSquash: 2,
+		});
+		expect(cfg.eviction).toMatchObject({
+			enabled: true,
+			thresholdTokens: 1000,
+			levels: ["episode"],
+		});
+		expect(cfg.preemptiveCompaction).toMatchObject({
+			enabled: true,
+			contextLimit: 1234,
+			absoluteTokenThreshold: 330000,
+			countCacheTokens: true,
+			minTokensSinceLast: 20000,
+			minMessagesSinceLast: 6,
+			tailGuard: { enabled: true, minNewToolCalls: 5 },
+		});
+		expect(cfg.degradationMonitor).toMatchObject({
+			enabled: true,
+			threshold: 2,
+			convergenceThreshold: 0.02,
+			convergencePatience: 5,
+			maxRounds: 20,
+		});
 	});
 });
 
@@ -217,173 +163,87 @@ describe("loadConfig()", () => {
 		expect(cfg.dedup.enabled).toBe(true);
 	});
 
-	it("loads live-compaction.json", () => {
+	it("loads json/jsonc, prefers .json and tolerates comments and trailing commas", () => {
 		writeFileSync(
 			join(TMP_DIR, ".opencode", "live-compaction.json"),
 			JSON.stringify({ enabled: false, dedup: { enabled: false } }),
 		);
-		const cfg = loadConfig(TMP_DIR);
+		writeFileSync(
+			join(TMP_DIR, ".opencode", "live-compaction.jsonc"),
+			'{ "debug": true }',
+		);
+		let cfg = loadConfig(TMP_DIR);
 		expect(cfg.enabled).toBe(false);
 		expect(cfg.dedup.enabled).toBe(false);
-	});
+		expect(cfg.debug).toBe(false); // .json preferred over .jsonc
 
-	it("loads live-compaction.jsonc with comments", () => {
-		const jsonc = `{
-			// This is a comment
-			"enabled": false,
-			/* Block comment */
-			"purgeErrors": { "turns": 10 }
-		}`;
-		writeFileSync(join(TMP_DIR, ".opencode", "live-compaction.jsonc"), jsonc);
-		const cfg = loadConfig(TMP_DIR);
+		rmSync(join(TMP_DIR, ".opencode", "live-compaction.json"));
+		cfg = loadConfig(TMP_DIR);
+		expect(cfg.debug).toBe(true); // falls back to .jsonc
+
+		writeFileSync(
+			join(TMP_DIR, ".opencode", "live-compaction.jsonc"),
+			`{
+				// line comment
+				"enabled": false,
+				/* block comment */
+				"purgeErrors": { "turns": 10 },
+			}`,
+		);
+		cfg = loadConfig(TMP_DIR);
 		expect(cfg.enabled).toBe(false);
 		expect(cfg.purgeErrors.turns).toBe(10);
 	});
 
-	it("prefers .json over .jsonc", () => {
-		writeFileSync(
-			join(TMP_DIR, ".opencode", "live-compaction.json"),
-			JSON.stringify({ debug: true }),
-		);
-		writeFileSync(
-			join(TMP_DIR, ".opencode", "live-compaction.jsonc"),
-			'{ "debug": false }',
-		);
-		const cfg = loadConfig(TMP_DIR);
-		expect(cfg.debug).toBe(true);
-	});
-
-	it("falls back to defaults on invalid JSON", () => {
-		writeFileSync(
-			join(TMP_DIR, ".opencode", "live-compaction.json"),
-			"not valid json {{{",
-		);
-		const cfg = loadConfig(TMP_DIR);
-		expect(cfg.enabled).toBe(true);
-	});
-
-	it("loads live-compaction.jsonc with trailing commas", () => {
-		const jsonc = `{
-			"enabled": false,
-			"dedup": { "enabled": false },
-		}`;
-		writeFileSync(join(TMP_DIR, ".opencode", "live-compaction.jsonc"), jsonc);
-		const cfg = loadConfig(TMP_DIR);
-		expect(cfg.enabled).toBe(false);
-		expect(cfg.dedup.enabled).toBe(false);
-	});
-
-	it("reports parse errors through the onError callback", () => {
+	it("falls back to defaults on invalid JSON and reports the error", () => {
 		writeFileSync(
 			join(TMP_DIR, ".opencode", "live-compaction.json"),
 			"not valid json {{{",
 		);
 		const errors: string[] = [];
 		const cfg = loadConfig(TMP_DIR, (message) => errors.push(message));
+		expect(cfg.enabled).toBe(true);
 		expect(errors).toHaveLength(1);
 		expect(errors[0]).toContain("failed to parse");
-		expect(cfg.enabled).toBe(true);
 	});
 
-	it("loads the global config when no project file exists", () => {
-		mkdirSync(join(TMP_DIR, "xdg", "opencode"), { recursive: true });
-		writeFileSync(
-			join(TMP_DIR, "xdg", "opencode", "live-compaction.json"),
-			JSON.stringify({ trim: { bash: 111 } }),
-		);
-		const cfg = loadConfig(TMP_DIR);
-		expect(cfg.trim.bash).toBe(111);
-	});
-
-	it("lets the project config override the global config", () => {
+	it("applies precedence: defaults < global < plugin options < project", () => {
 		mkdirSync(join(TMP_DIR, "xdg", "opencode"), { recursive: true });
 		writeFileSync(
 			join(TMP_DIR, "xdg", "opencode", "live-compaction.json"),
 			JSON.stringify({ trim: { bash: 111, read: 222 } }),
 		);
+		expect(loadConfig(TMP_DIR).trim.bash).toBe(111);
+		expect(
+			loadConfig(TMP_DIR, undefined, { trim: { bash: 777 } }).trim.bash,
+		).toBe(777);
 		writeFileSync(
 			join(TMP_DIR, ".opencode", "live-compaction.json"),
 			JSON.stringify({ trim: { bash: 999 } }),
 		);
-		const cfg = loadConfig(TMP_DIR);
+		const cfg = loadConfig(TMP_DIR, undefined, { trim: { bash: 777 } });
 		expect(cfg.trim.bash).toBe(999);
 		expect(cfg.trim.read).toBe(222);
-	});
-
-	it("applies plugin options over the global config", () => {
-		mkdirSync(join(TMP_DIR, "xdg", "opencode"), { recursive: true });
-		writeFileSync(
-			join(TMP_DIR, "xdg", "opencode", "live-compaction.json"),
-			JSON.stringify({ trim: { bash: 111 } }),
-		);
-		const cfg = loadConfig(TMP_DIR, undefined, { trim: { bash: 777 } });
-		expect(cfg.trim.bash).toBe(777);
-	});
-
-	it("lets the project config override plugin options", () => {
-		writeFileSync(
-			join(TMP_DIR, ".opencode", "live-compaction.json"),
-			JSON.stringify({ trim: { bash: 999 } }),
-		);
-		const cfg = loadConfig(TMP_DIR, undefined, { trim: { bash: 777 } });
-		expect(cfg.trim.bash).toBe(999);
-	});
-
-	it("handles JSONC with escaped quotes in strings", () => {
-		const jsonc = `{ "key": "value with \\"quotes\\" inside" }`;
-		writeFileSync(join(TMP_DIR, ".opencode", "live-compaction.json"), jsonc);
-		const cfg = loadConfig(TMP_DIR);
-		// Should parse without error
-		expect(cfg).toBeDefined();
-	});
-
-	it("handles JSONC with strings containing special chars", () => {
-		const jsonc = `{ "key": "line1\\nline2\\ttab" }`;
-		writeFileSync(join(TMP_DIR, ".opencode", "live-compaction.json"), jsonc);
-		const cfg = loadConfig(TMP_DIR);
-		expect(cfg).toBeDefined();
-	});
-
-	it("handles JSONC with block comments between values", () => {
-		const jsonc = `{
-			/* start comment */
-			"enabled": true,
-			/* middle comment */
-			"debug": false
-			/* end comment */
-		}`;
-		writeFileSync(join(TMP_DIR, ".opencode", "live-compaction.json"), jsonc);
-		const cfg = loadConfig(TMP_DIR);
-		expect(cfg.enabled).toBe(true);
-		expect(cfg.debug).toBe(false);
-	});
-
-	it("handles JSON with string values containing slashes", () => {
-		const jsonc = `{ "path": "C:\\Users\\test" }`;
-		writeFileSync(join(TMP_DIR, ".opencode", "live-compaction.json"), jsonc);
-		const cfg = loadConfig(TMP_DIR);
-		expect(cfg).toBeDefined();
 	});
 });
 
 describe("DEFAULT_CONFIG", () => {
-	it("has all expected fields", () => {
-		expect(DEFAULT_CONFIG).toHaveProperty("enabled");
-		expect(DEFAULT_CONFIG).toHaveProperty("debug");
-		expect(DEFAULT_CONFIG).toHaveProperty("trim");
-		expect(DEFAULT_CONFIG).toHaveProperty("dedup");
-		expect(DEFAULT_CONFIG).toHaveProperty("purgeErrors");
-	});
-
-	it("has all trim tools", () => {
-		expect(DEFAULT_TRIM).toHaveProperty("bash");
-		expect(DEFAULT_TRIM).toHaveProperty("write");
-		expect(DEFAULT_TRIM).toHaveProperty("edit");
-		expect(DEFAULT_TRIM).toHaveProperty("delete");
-		expect(DEFAULT_TRIM).toHaveProperty("read");
-		expect(DEFAULT_TRIM).toHaveProperty("glob");
-		expect(DEFAULT_TRIM).toHaveProperty("grep");
-		expect(DEFAULT_TRIM).toHaveProperty("list");
-		expect(DEFAULT_TRIM).toHaveProperty("default");
+	it("exposes the expected fields and trim tools", () => {
+		for (const key of ["enabled", "debug", "trim", "dedup", "purgeErrors"]) {
+			expect(DEFAULT_CONFIG).toHaveProperty(key);
+		}
+		for (const tool of [
+			"bash",
+			"write",
+			"edit",
+			"delete",
+			"read",
+			"glob",
+			"grep",
+			"list",
+			"default",
+		]) {
+			expect(DEFAULT_TRIM).toHaveProperty(tool);
+		}
 	});
 });
