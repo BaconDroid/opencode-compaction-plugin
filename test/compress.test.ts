@@ -11,13 +11,14 @@ import {
 // ---------------------------------------------------------------------------
 
 describe("buildCompressToolDef()", () => {
-	it("returns a tool definition with description and args", () => {
+	it("returns a valid tool definition with description, args and execute", () => {
 		const def = buildCompressToolDef();
 		expect(def.description).toContain("Compress");
 		expect(def.args).toHaveProperty("topic");
 		expect(def.args).toHaveProperty("start");
 		expect(def.args).toHaveProperty("end");
 		expect(def.args).toHaveProperty("summary");
+		expect(typeof def.execute).toBe("function");
 	});
 });
 
