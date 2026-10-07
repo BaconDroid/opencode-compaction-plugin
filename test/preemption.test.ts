@@ -3,7 +3,7 @@ import {
 	effectiveInputTokens,
 	resolveTriggerThreshold,
 	shouldTriggerPreemptiveCompaction,
-} from "../src/preemptive-compaction.ts";
+} from "../src/preemption.ts";
 
 describe("token helpers", () => {
 	it("effectiveInputTokens excludes cache unless enabled", () => {

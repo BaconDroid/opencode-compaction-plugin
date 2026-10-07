@@ -48,7 +48,7 @@ import {
 	renderTaskState,
 	type TodoSnapshot,
 } from "./todo-preserver.js";
-import type { TokenInfo } from "./preemptive-compaction.js";
+import type { TokenInfo } from "./preemption.js";
 import {
 	DegradationMonitor,
 	countTrailingNoTextAssistant,
@@ -62,7 +62,7 @@ import { buildTrimMap } from "./trim.js";
 import { AutocontinueGuard } from "./autocontinue.js";
 import { PreemptionController } from "./preemption.js";
 import { applyTransform } from "./transform.js";
-import type { Hooks, Plugin } from "./plugin-types.js";
+import type { Hooks, Plugin } from "./types.js";
 
 /** Model-driven tools registered by this plugin (used for permission wiring). */
 const PLUGIN_TOOL_NAMES = ["compress", "squash", "expand", "recall"] as const;

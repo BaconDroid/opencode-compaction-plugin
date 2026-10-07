@@ -1,6 +1,6 @@
 /** Minimal debug logger writing to OpenCode's app log. */
 
-import type { PluginInput } from "./plugin-types.js";
+import type { PluginInput } from "./types.js";
 
 export interface Logger {
 	info: (message: string, data?: unknown) => void;
