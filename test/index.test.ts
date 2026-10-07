@@ -685,9 +685,7 @@ describe("LiveCompactionPlugin", () => {
 		});
 
 		it("purges large inputs from errored tools outside the recent window", async () => {
-			const hooks = await LiveCompactionPlugin(mockCtx as any, {
-				purgeErrors: { wholeAttempt: false },
-			} as any);
+			const hooks = await getHooks();
 			const bigInput = "x".repeat(500);
 			const messages = [
 				{
@@ -723,8 +721,10 @@ describe("LiveCompactionPlugin", () => {
 			expect(messages[0].parts[0].state.output).toBe("command failed");
 		});
 
-		it("purges the whole failed attempt by default", async () => {
-			const hooks = await getHooks();
+		it("purges the whole failed attempt when wholeAttempt is enabled", async () => {
+			const hooks = await LiveCompactionPlugin(mockCtx as any, {
+				purgeErrors: { wholeAttempt: true },
+			} as any);
 			const bigInput = "x".repeat(500);
 			const messages = [
 				{
@@ -761,8 +761,10 @@ describe("LiveCompactionPlugin", () => {
 			expect(messages[0].parts[0].state.output).toContain("command failed");
 		});
 
-		it("cascades the purge to dependent tool calls", async () => {
-			const hooks = await getHooks();
+		it("cascades the purge to dependent tool calls when enabled", async () => {
+			const hooks = await LiveCompactionPlugin(mockCtx as any, {
+				purgeErrors: { cascade: true },
+			} as any);
 			const messages = [
 				{
 					info: { role: "assistant" },

@@ -460,8 +460,33 @@ describe("applyPurgeErrors()", () => {
 		expect(msgs[0].parts[0].state.input).toBe(smallInput);
 	});
 
-	it("purges the whole attempt by default (input + output)", () => {
+	it("preserves error output by default (input-only purge)", () => {
 		const cfg = mergeConfig({});
+		const msgs = [
+			{
+				info: { role: "assistant" },
+				parts: [
+					{
+						type: "tool",
+						tool: "bash",
+						state: {
+							status: "error",
+							output: "ENOENT: no such file or directory",
+							input: "x".repeat(200),
+						},
+					},
+				],
+			},
+		];
+		applyPurgeErrors(msgs as any, cfg);
+		expect((msgs[0].parts[0].state.input as any).purged).toContain("removed");
+		expect(msgs[0].parts[0].state.output).toBe(
+			"ENOENT: no such file or directory",
+		);
+	});
+
+	it("purges the whole attempt when wholeAttempt is enabled", () => {
+		const cfg = mergeConfig({ purgeErrors: { wholeAttempt: true } });
 		const msgs = [
 			{
 				info: { role: "assistant" },
@@ -482,30 +507,6 @@ describe("applyPurgeErrors()", () => {
 		expect((msgs[0].parts[0].state.input as any).purged).toContain("removed");
 		expect(msgs[0].parts[0].state.output).toContain("[purged failed bash:");
 		expect(msgs[0].parts[0].state.output).toContain("ENOENT");
-	});
-
-	it("preserves error output when wholeAttempt is disabled", () => {
-		const cfg = mergeConfig({ purgeErrors: { wholeAttempt: false } });
-		const msgs = [
-			{
-				info: { role: "assistant" },
-				parts: [
-					{
-						type: "tool",
-						tool: "bash",
-						state: {
-							status: "error",
-							output: "ENOENT: no such file or directory",
-							input: "x".repeat(200),
-						},
-					},
-				],
-			},
-		];
-		applyPurgeErrors(msgs as any, cfg);
-		expect(msgs[0].parts[0].state.output).toBe(
-			"ENOENT: no such file or directory",
-		);
 	});
 
 	it("handles parts without input", () => {
