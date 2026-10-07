@@ -28,13 +28,11 @@ Lis, dans cet ordre :
 2. src/index.ts (hooks : tool.execute.after,
    experimental.session.compacting, experimental.chat.messages.transform,
    experimental.compaction.autocontinue, config, event, tool)
-3. src/prompt.ts, src/compress.ts, src/strategies.ts, src/config.ts,
-   src/files-touched.ts, src/glob.ts, src/todo-preserver.ts,
-   src/preemptive-compaction.ts, src/degradation-monitor.ts,
-   src/previous-summary.ts
-4. docs/code-review.md, docs/omo-compaction.md ET
-   docs/context-compaction-research.md — ce qui a déjà été fait, corrigé ou
-   écarté (pour NE PAS reproposer l'existant).
+3. src/core/*.ts (prompt, compress, strategies, trim, blocks, expand, eviction,
+   preemption, previous-summary, todo-preserver, degradation-monitor,
+   files-touched, glob) et src/config/*.ts
+4. docs/omo-compaction.md ET docs/context-compaction-research.md — ce qui a
+   déjà été fait ou écarté (pour NE PAS reproposer l'existant).
 Puis écris un résumé de 5 à 10 lignes : ce que fait le plugin, ses hooks, ses
 limites/frontières actuelles. Ne propose rien à ce stade.
 
@@ -58,7 +56,7 @@ Applique-le TEL QUEL, sans l'adoucir :
 - Les liens sortants non-arXiv (git, docs, outils) sont réservés à la PHASE 2 :
   ne pas les suivre ici.
 - Anti-doublon : ne pas reproposer ce qui est déjà dans
-  docs/context-compaction-research.md ni docs/code-review.md.
+  docs/context-compaction-research.md.
 
 # Étape 3 — recherche
 Démarre à :
