@@ -289,7 +289,7 @@ test/
   degradation-monitor.test.ts — Degradation monitor tests
   previous-summary.test.ts — Previous summary tests
 docs/
-  context-compaction-research.md — Literature catalog and implementation backlog
+  context-compaction-research.md — Consolidated literature catalog, categories and implementation backlog
   code-review.md    — Direct source findings
   omo-compaction.md — oh-my-openagent compaction review and adopted ideas
   research-prompt.md — Reusable prompt to reproduce the literature sweep
@@ -306,8 +306,8 @@ Compatible with [`oh-my-opencode-slim`](https://github.com/alvinunreal/oh-my-ope
 
 - `experimental.session.compacting` — omo-slim only marks the session (it does not touch `output.prompt`/`output.context`), so this plugin's prompt handling is unaffected.
 - `experimental.chat.messages.transform` — omo-slim rewrites user text and image parts; this plugin trims/dedups/purges tool parts and applies compressions. Load omo-slim **before** this plugin so its in-place rewrites run before this plugin's structural compression.
-- `config` — omo-slim manages agents, MCPs and commands; this plugin only ensures the `compress` permission (and leaves a global permission string untouched).
-- No shared tool names (omo-slim: `task*`, `waitForUser`, `acpRun`, `webfetch`, `ast_grep_*`, `marketplace_*`; this plugin: `compress`).
+- `config` — omo-slim manages agents, MCPs and commands; this plugin only ensures permissions for its own tools (`compress`, `squash`, `expand`, `recall`) and leaves a global permission string untouched.
+- No shared tool names (omo-slim: `task*`, `waitForUser`, `acpRun`, `webfetch`, `ast_grep_*`, `marketplace_*`; this plugin: `compress`, `squash`, `expand`, `recall`).
 - omo-slim does not use `experimental.compaction.autocontinue` and does not mutate `permission`.
 
 Recommended `plugin` order in `opencode.json`:

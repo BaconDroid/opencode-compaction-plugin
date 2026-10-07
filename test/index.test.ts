@@ -868,7 +868,7 @@ describe("LiveCompactionPlugin", () => {
 			expect(opencodeConfig.permission).toBe("allow");
 		});
 
-		it("adds the compress permission to an object permission", async () => {
+		it("adds the plugin tool permissions to an object permission", async () => {
 			const hooks = await getHooks();
 			const opencodeConfig: Record<string, unknown> = {
 				permission: { bash: "ask" },
@@ -877,16 +877,34 @@ describe("LiveCompactionPlugin", () => {
 			expect(opencodeConfig.permission).toEqual({
 				bash: "ask",
 				compress: "allow",
+				squash: "allow",
+				expand: "allow",
+				recall: "allow",
 			});
 		});
 
-		it("respects an explicit compress deny", async () => {
+		it("respects an explicit compress deny while allowing the others", async () => {
 			const hooks = await getHooks();
 			const opencodeConfig: Record<string, unknown> = {
 				permission: { compress: "deny" },
 			};
 			await (hooks as any).config(opencodeConfig);
-			expect(opencodeConfig.permission).toEqual({ compress: "deny" });
+			expect(opencodeConfig.permission).toEqual({
+				compress: "deny",
+				squash: "allow",
+				expand: "allow",
+				recall: "allow",
+			});
+		});
+
+		it("respects an explicit deny for any plugin tool", async () => {
+			const hooks = await getHooks();
+			const opencodeConfig: Record<string, unknown> = {
+				permission: { squash: "deny" },
+			};
+			await (hooks as any).config(opencodeConfig);
+			expect((opencodeConfig.permission as any).squash).toBe("deny");
+			expect((opencodeConfig.permission as any).compress).toBe("allow");
 		});
 	});
 

@@ -280,6 +280,9 @@ function makeLogger(client: PluginInput["client"], enabled: boolean) {
 // Plugin
 // ---------------------------------------------------------------------------
 
+/** Model-driven tools registered by this plugin (used for permission wiring). */
+const PLUGIN_TOOL_NAMES = ["compress", "squash", "expand", "recall"] as const;
+
 export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 	// Load config (defaults < global file < plugin options < project file)
 	const configWarnings: string[] = [];
@@ -1087,14 +1090,21 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		// Config: ensure the compress tool is permitted
 		// -----------------------------------------------------------------------
 		config: async (opencodeConfig: Record<string, unknown>) => {
-			// Ensure the compress tool is permitted, without clobbering a global
-			// permission string (e.g. "permission": "allow") or an explicit deny.
+			// Ensure this plugin's model-driven tools are permitted, without
+			// clobbering a global permission string (e.g. "permission": "allow") or
+			// an explicit deny.
 			const permission = opencodeConfig.permission;
 			if (typeof permission !== "string") {
 				const map = (permission as Record<string, unknown> | undefined) ?? {};
-				if (map.compress !== "deny") {
-					opencodeConfig.permission = { ...map, compress: "allow" };
+				const next: Record<string, unknown> = { ...map };
+				let changed = false;
+				for (const toolName of PLUGIN_TOOL_NAMES) {
+					if (next[toolName] !== "deny") {
+						next[toolName] = "allow";
+						changed = true;
+					}
 				}
+				if (changed) opencodeConfig.permission = next;
 			}
 			// The built-in `/compact` command is intentionally left untouched.
 		},
