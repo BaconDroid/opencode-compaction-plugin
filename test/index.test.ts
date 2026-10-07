@@ -1454,7 +1454,11 @@ describe("LiveCompactionPlugin", () => {
 		it("triggers summarize near the context limit", async () => {
 			const summarize = vi.fn().mockResolvedValue(undefined);
 			const list = vi.fn().mockResolvedValue({
-				all: [{ id: "prov", models: { "model-x": { limit: { context: 1000 } } } }],
+				data: {
+					all: [
+						{ id: "prov", models: { "model-x": { limit: { context: 1000 } } } },
+					],
+				},
 			});
 			const hooks = await LiveCompactionPlugin(
 				{
@@ -1507,7 +1511,11 @@ describe("LiveCompactionPlugin", () => {
 		it("triggers on turn end without a tool call", async () => {
 			const summarize = vi.fn().mockResolvedValue(undefined);
 			const list = vi.fn().mockResolvedValue({
-				all: [{ id: "prov", models: { "model-x": { limit: { context: 1000 } } } }],
+				data: {
+					all: [
+						{ id: "prov", models: { "model-x": { limit: { context: 1000 } } } },
+					],
+				},
 			});
 			const hooks = await LiveCompactionPlugin(
 				{
@@ -1608,11 +1616,13 @@ describe("LiveCompactionPlugin", () => {
 	describe("degradation monitor", () => {
 		it("warns when assistant messages lose text after compaction", async () => {
 			const log = vi.fn().mockResolvedValue(undefined);
-			const messages = vi.fn().mockResolvedValue([
-				{ info: { role: "assistant" }, parts: [{ type: "tool" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "tool" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "tool" }] },
-			]);
+			const messages = vi.fn().mockResolvedValue({
+				data: [
+					{ info: { role: "assistant" }, parts: [{ type: "tool" }] },
+					{ info: { role: "assistant" }, parts: [{ type: "tool" }] },
+					{ info: { role: "assistant" }, parts: [{ type: "tool" }] },
+				],
+			});
 			const hooks = await LiveCompactionPlugin(
 				{
 					...mockCtx,

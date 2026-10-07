@@ -388,13 +388,21 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		const list = ctx.client.provider?.list;
 		if (!list) return undefined;
 		try {
+			// The SDK wraps the body in `{ data }`; accept both shapes.
 			const response = (await list({})) as {
 				all?: Array<{
 					id?: string;
 					models?: Record<string, { limit?: { context?: number } }>;
 				}>;
+				data?: {
+					all?: Array<{
+						id?: string;
+						models?: Record<string, { limit?: { context?: number } }>;
+					}>;
+				};
 			};
-			const limit = response?.all?.find((p) => p.id === providerID)?.models?.[
+			const providers = response?.data?.all ?? response?.all;
+			const limit = providers?.find((p) => p.id === providerID)?.models?.[
 				modelID
 			]?.limit?.context;
 			if (typeof limit === "number" && limit > 0) {
