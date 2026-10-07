@@ -22,11 +22,6 @@ export interface CachedUsage {
 	tokens: TokenInfo;
 }
 
-/** Effective prompt tokens used against the context window. */
-export function totalInputTokens(tokens: TokenInfo): number {
-	return (tokens.input ?? 0) + (tokens.cache?.read ?? 0);
-}
-
 /**
  * Effective tokens used to decide preemptive compaction.
  *

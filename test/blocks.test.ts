@@ -1,7 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import {
 	blockId,
-	isDurableId,
 	isCompressedBlockMessage,
 	collectExistingBlockIds,
 	parseCompressBlocks,
@@ -33,28 +32,10 @@ describe("blockId()", () => {
 		).toBe("u:42");
 	});
 
-	it("uses a:<id>:p<j> for other messages", () => {
-		expect(
-			blockId(textMsg("assistant", "hi", { id: "resp-1" }) as BlockMessage),
-		).toBe("a:resp-1:p0");
-	});
-
-	it("is stable across calls", () => {
+	it("uses a:<id> for other messages and is stable", () => {
 		const msg = textMsg("assistant", "hi", { id: "resp-1" }) as BlockMessage;
+		expect(blockId(msg)).toBe("a:resp-1");
 		expect(blockId(msg)).toBe(blockId(msg));
-	});
-});
-
-describe("isDurableId()", () => {
-	it("accepts r:/u:/a: prefixes", () => {
-		expect(isDurableId("r:call-1")).toBe(true);
-		expect(isDurableId("u:42")).toBe(true);
-		expect(isDurableId("a:resp-1:p0")).toBe(true);
-	});
-
-	it("rejects other ids", () => {
-		expect(isDurableId("m:0")).toBe(false);
-		expect(isDurableId("block-1")).toBe(false);
 	});
 });
 

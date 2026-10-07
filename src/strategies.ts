@@ -8,28 +8,7 @@
  */
 
 import type { LiveCompactionConfig } from "./config.js";
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-interface MessagePart {
-	type: string;
-	tool?: string;
-	callID?: string;
-	state?: {
-		status?: string;
-		output?: string;
-		input?: unknown;
-		[key: string]: unknown;
-	};
-	[key: string]: unknown;
-}
-
-interface Message {
-	info: { role: string; [key: string]: unknown };
-	parts: MessagePart[];
-}
+import type { Message, MessagePart } from "./types.js";
 
 export interface StrategyContext {
 	/** The config for this session */

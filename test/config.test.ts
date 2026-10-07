@@ -73,9 +73,6 @@ describe("mergeConfig()", () => {
 			enabled: false,
 			threshold: 4,
 			windowMs: 120000,
-			convergenceThreshold: 0.05,
-			convergencePatience: 3,
-			maxRounds: 12,
 		});
 	});
 
@@ -116,13 +113,7 @@ describe("mergeConfig()", () => {
 				minMessagesSinceLast: 6,
 				tailGuard: { enabled: true, minNewToolCalls: 5 },
 			},
-			degradationMonitor: {
-				enabled: true,
-				threshold: 2,
-				convergenceThreshold: 0.02,
-				convergencePatience: 5,
-				maxRounds: 20,
-			},
+			degradationMonitor: { enabled: true, threshold: 2, windowMs: 60000 },
 		});
 		expect(cfg.compress).toEqual({
 			protectedTurns: 5,
@@ -146,9 +137,7 @@ describe("mergeConfig()", () => {
 		expect(cfg.degradationMonitor).toMatchObject({
 			enabled: true,
 			threshold: 2,
-			convergenceThreshold: 0.02,
-			convergencePatience: 5,
-			maxRounds: 20,
+			windowMs: 60000,
 		});
 	});
 });
