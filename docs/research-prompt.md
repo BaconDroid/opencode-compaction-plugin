@@ -1,33 +1,38 @@
 # Research prompt — context compaction & context management
 
-A reusable prompt to reproduce the literature sweep behind this plugin: start
-from the Nazmi context-compaction series, then descend recursively into the
-**arXiv** links whose **citing context** (plus the host page's title and
-headings) shows they are about context compaction, context management, or agent
-memory — and that are actually portable into a TypeScript OpenCode plugin.
+A reusable prompt to reproduce the literature sweep behind this plugin. Run the
+bootstrap in a fresh session, then apply the sweep block as-is. The sweep block
+is the single source of the rules (relevance gate, plugin-utility test,
+arXiv-only scope, stop conditions, output shape) — do not restate them
+elsewhere.
 
-Two filters bound the recursion:
+## How to use
 
-1. **Relevance gate** — judged from the citing context and the host page's
-   title/subheadings, never from the URL alone. Off-topic links are dropped,
-   not followed.
-2. **Plugin-utility test** — the mechanism inferred from the citing context must
-   be implementable without model training (decide when to compact, choose what
-   to keep/evict/summarize, make compaction reversible, preserve
-   constraints/state, or evaluate compaction). In doubt → discard.
+Copy the sweep block below into a **fresh OpenCode session** at the repo root.
+Run the bootstrap first, then the sweep. Nothing is modified in code; the only
+edits allowed are docs the operator explicitly asks for.
 
-Scope is **arXiv-only** for the primary pass; outgoing links to repos/docs/tools
-found inside retained articles are deferred to a second phase.
+### Bootstrap (read the repo before the sweep)
 
-To bootstrap a fresh session that reads this repo first and then runs the sweep,
-use [`research-kickoff.md`](./research-kickoff.md).
+1. `README.md` — overview, features, config, hooks.
+2. `src/index.ts` — the hooks (`tool.execute.after`,
+   `experimental.session.compacting`, `experimental.chat.messages.transform`,
+   `experimental.compaction.autocontinue`, `config`, `event`, `tool`).
+3. `src/core/*.ts` (prompt, compress, strategies, trim, blocks, expand,
+   eviction, preemption, previous-summary, todo-preserver, degradation-monitor,
+   files-touched, glob) and `src/config/*.ts`.
+4. `docs/context-compaction-research.md` — what has already been done or
+   discarded, so the sweep does **not** re-propose existing work.
+
+Then write a 5–10 line summary of what the plugin does, its hooks and its
+current limits. Propose nothing yet; confirm before launching the sweep.
+
+### Sweep prompt
 
 ```text
 # Mission
-Construis un INDEX hiérarchique des travaux **arXiv** portant sur la compaction de
-contexte et la gestion/rétention du contexte des agents LLM, **réellement
-implémentables** dans le plugin OpenCode `opencode-live-compaction` (TypeScript,
-sans entraînement de modèle), en partant de :
+Construis un INDEX hiérarchique des travaux **arXiv** sur la compaction de
+contexte et la gestion/rétention du contexte des agents LLM, en partant de :
 https://nazmi.tech/blog/context-compaction-llm-agents-fundamentals
 et de ses suites (Part 2/3/4). Ces 4 URLs sont les seules racines autorisées.
 
@@ -35,25 +40,22 @@ et de ses suites (Part 2/3/4). Ces 4 URLs sont les seules racines autorisées.
 - PHASE 1 (cette recherche) : ne suivre QUE les liens `arxiv.org` /
   `www.arxiv.org` (abs, html, pdf). Tout descendant non-arXiv (blog, docs,
   GitHub, Medium, ACL, site produit) est IGNORÉ : ni listé comme nœud, ni suivi.
-- PHASE 2 (différée, hors de cette passe) : les liens sortants des articles
-  retenus (git/repos, docs, outils) seront examinés plus tard, uniquement pour
-  vérifier leur pertinence. Ils ne servent PAS à décider la traversée en Phase 1.
+- PHASE 2 (différée) : les liens sortants des articles retenus seront examinés
+  plus tard ; ils ne servent PAS à décider la traversée en Phase 1.
 - [Interrupteur] Suivre les pages ACL (aclanthology.org) : OFF par défaut.
 
 # Test d'utilité plugin (décisif, en plus du gate thématique)
 Un lien n'est RETENU (🟢/🟡) que si le CONTEXTE QUI LE CITE permet d'inférer un
-mécanisme implémentable SANS entraînement, dans un plugin TS OpenCode. Le
-mécanisme doit concerner au moins un de ces axes :
-  décider QUAND compacter ; choisir QUOI garder/évincer/résumer ; rendre la
-  compaction RÉVERSIBLE ; PRÉSERVER contraintes/état/tâche ; ÉVALUER la compaction.
+mécanisme implémentable SANS entraînement, dans un plugin TS OpenCode, sur au
+moins un axe : décider QUAND compacter ; choisir QUOI garder/évincer/résumer ;
+rendre la compaction RÉVERSIBLE ; PRÉSERVER contraintes/état/tâche ; ÉVALUER la
+compaction.
 Exclusions fermes → ne pas lister, ne pas suivre :
-  - entraînement / RL / fine-tuning seuls ;
-  - internes KV-cache (éviction, quantization, sparsité attention) ;
-  - architecture / état récurrent / SSM ; latent / gist / distillation ;
-  - multimodal ;
-  - sécurité mémoire hors compaction ;
-  - benchmarks sans mécanisme transposable ;
-  - frameworks/harnais génériques ; blogs, docs produit, profils d'auteur.
+  entraînement / RL / fine-tuning seuls ; internes KV-cache (éviction,
+  quantization, sparsité attention) ; architecture / état récurrent / SSM ;
+  latent / gist / distillation ; multimodal ; sécurité mémoire hors compaction ;
+  benchmarks sans mécanisme transposable ; frameworks/harnais génériques ;
+  blogs, docs produit, profils d'auteur.
 En cas de doute → ÉCARTER.
 
 # Règle de pertinence (gate thématique)
@@ -61,10 +63,9 @@ Pour CHAQUE lien extrait, juge à partir :
   (a) du CONTEXTE QUI LE CITE (1–2 phrases autour du lien), ET
   (b) du TITRE de l'article hôte + de ses SOUS-TITRES (h1→h4).
 Jamais de l'URL seule.
-PERTINENT (sujet) = compaction de contexte, gestion/rétention de contexte,
-long-contexte, résumé, pruning, mémoire d'agent, consolidation cross-session,
+PERTINENT = compaction de contexte, gestion/rétention de contexte, long-contexte,
+résumé, pruning, mémoire d'agent, consolidation cross-session,
 déclenchement/évaluation de compaction, contraintes liées au contexte.
-HORS-SUJET = sans rapport avec la compaction/contexte.
 Un lien pertinent doit EN PLUS passer le test d'utilité plugin ci-dessus.
 
 # Classement
@@ -75,12 +76,11 @@ Pour chaque 🟢 : une phrase « comment ça améliorerait le plugin » mappée 
 fichier/hook précis de `opencode-live-compaction`.
 
 # Traversée
-1. Fetch la page. Relève ses titres/sous-titres (h1→h4).
+1. Fetch la page ; relève ses titres/sous-titres (h1→h4).
 2. Extrais chaque lien AVEC son contexte citant (1–2 phrases).
-3. Applique portée arXiv → gate (contexte + titre/sous-titres) → test d'utilité plugin.
+3. Applique portée arXiv → gate → test d'utilité plugin.
 4. Déduplique les URLs déjà vues (visited set).
 5. Journalise brièvement le motif d'exclusion des liens écartés.
-Ne suis AUCUN lien sortant non-arXiv en Phase 1 (réservés à la Phase 2).
 
 # Conditions d'arrêt et reprise
 - Profondeur par défaut : 4 niveaux sous la racine.
@@ -112,21 +112,5 @@ re-développer.
 - Sépare ce que tu as LU de ce que tu déduis du contexte citant.
 ```
 
-## Expected shape
-
-- Level 0 — the Nazmi article (the only non-arXiv root, with Part 2/3/4).
-- Level 1 — the four compaction families + the follow-ups; the arXiv links
-  cited there (semantic compression, LongLLMLingua, Provence, recursive
-  summarization, DTCRS, …).
-- Level 2 — cited arXiv preprints portable to the plugin (SelfCompact, ACON,
-  Governance Decay, the rate-distortion survey, …).
-- Level 3 — their references, mostly 🟡 (KV cache / architecture / RL) → discard
-  or mark non-portable.
-- Level 4 — references of the level-3 papers that stay within the plugin-utility
-  test; stop at ~64 pages.
-
-Outgoing non-arXiv links (repos, docs, tools) are **not** followed here; they are
-left for a second phase.
-
-See `context-compaction-research.md` — the consolidated reference document
-(both sweep passes merged into a single catalog).
+The consolidated result of the sweep goes into
+`docs/context-compaction-research.md`.
