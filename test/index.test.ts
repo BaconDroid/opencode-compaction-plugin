@@ -24,8 +24,15 @@ function cleanupTmp() {
 // We test through the public plugin interface only
 
 describe("LiveCompactionPlugin", () => {
+	const logMock = () => mock().mockResolvedValue(undefined);
+	const userTurns = (n: number) =>
+		Array.from({ length: n }, (_, i) => [
+			{ info: { role: "user" }, parts: [{ type: "text", text: `r${i + 1}` }] },
+			{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
+		]).flat();
+
 	const mockCtx = {
-		client: { app: { log: mock().mockResolvedValue(undefined) } },
+		client: { app: { log: logMock() } },
 		project: { id: "test-project", name: "test" },
 		directory: TMP_DIR,
 		worktree: TMP_DIR,
@@ -401,15 +408,7 @@ describe("LiveCompactionPlugin", () => {
 						{ type: "tool", tool: "bash", state: { output: longOutput } },
 					],
 				},
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r1" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r2" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r3" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r4" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r5" }] },
+				...userTurns(5),
 			];
 			await hooks["experimental.chat.messages.transform"]!({} as any, {
 				messages,
@@ -452,15 +451,7 @@ describe("LiveCompactionPlugin", () => {
 						{ type: "tool", tool: "read", state: { output: fileContent } },
 					],
 				},
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r1" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r2" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r3" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r4" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r5" }] },
+				...userTurns(5),
 			];
 			await hooks["experimental.chat.messages.transform"]!({} as any, {
 				messages,
@@ -480,15 +471,7 @@ describe("LiveCompactionPlugin", () => {
 						{ type: "tool", tool: "bash", state: { output: longOutput } },
 					],
 				},
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r1" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r2" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r3" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r4" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r5" }] },
+				...userTurns(5),
 			];
 
 			await hooks["experimental.chat.messages.transform"]!({} as any, {
@@ -569,15 +552,7 @@ describe("LiveCompactionPlugin", () => {
 						},
 					],
 				},
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r1" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r2" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r3" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r4" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r5" }] },
+				...userTurns(5),
 			];
 			await hooks["experimental.chat.messages.transform"]!({} as any, {
 				messages,
@@ -608,15 +583,7 @@ describe("LiveCompactionPlugin", () => {
 						},
 					],
 				},
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r1" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r2" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r3" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r4" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r5" }] },
+				...userTurns(5),
 			];
 			await hooks["experimental.chat.messages.transform"]!({} as any, {
 				messages,
@@ -663,15 +630,7 @@ describe("LiveCompactionPlugin", () => {
 						},
 					],
 				},
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r1" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r2" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r3" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r4" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r5" }] },
+				...userTurns(5),
 			];
 			await hooks["experimental.chat.messages.transform"]!({} as any, {
 				messages,
@@ -846,15 +805,7 @@ describe("LiveCompactionPlugin", () => {
 						},
 					],
 				},
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r1" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r2" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r3" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r4" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r5" }] },
+				...userTurns(5),
 			];
 			await hooks["experimental.chat.messages.transform"]!({} as any, {
 				messages,
@@ -925,15 +876,7 @@ describe("LiveCompactionPlugin", () => {
 						},
 					],
 				},
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r1" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r2" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r3" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r4" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r5" }] },
+				...userTurns(5),
 			];
 			await hooks["experimental.chat.messages.transform"]!({} as any, {
 				messages,
@@ -1232,7 +1175,7 @@ describe("LiveCompactionPlugin", () => {
 				{
 					...mockCtx,
 					client: {
-						app: { log: mock().mockResolvedValue(undefined) },
+						app: { log: logMock() },
 						provider: { list },
 					},
 					directory: TMP_DIR,
@@ -1301,7 +1244,7 @@ describe("LiveCompactionPlugin", () => {
 				{
 					...mockCtx,
 					client: {
-						app: { log: mock().mockResolvedValue(undefined) },
+						app: { log: logMock() },
 						provider: { list },
 					},
 					directory: TMP_DIR,
@@ -1495,7 +1438,7 @@ describe("LiveCompactionPlugin", () => {
 			});
 			const hooks = await LiveCompactionPlugin({
 				...mockCtx,
-				client: { app: { log: mock().mockResolvedValue(undefined) }, session: { todo } },
+				client: { app: { log: logMock() }, session: { todo } },
 				directory: TMP_DIR,
 			} as any);
 
@@ -1534,7 +1477,7 @@ describe("LiveCompactionPlugin", () => {
 				{
 					...mockCtx,
 					client: {
-						app: { log: mock().mockResolvedValue(undefined) },
+						app: { log: logMock() },
 						session: { summarize },
 						provider: { list },
 					},
@@ -1591,7 +1534,7 @@ describe("LiveCompactionPlugin", () => {
 				{
 					...mockCtx,
 					client: {
-						app: { log: mock().mockResolvedValue(undefined) },
+						app: { log: logMock() },
 						session: { summarize },
 						provider: { list },
 					},
@@ -1637,7 +1580,7 @@ describe("LiveCompactionPlugin", () => {
 				{
 					...mockCtx,
 					client: {
-						app: { log: mock().mockResolvedValue(undefined) },
+						app: { log: logMock() },
 						session: { summarize },
 						provider: { list },
 					},
@@ -1689,7 +1632,7 @@ describe("LiveCompactionPlugin", () => {
 			const hooks = await LiveCompactionPlugin({
 				...mockCtx,
 				client: {
-					app: { log: mock().mockResolvedValue(undefined) },
+					app: { log: logMock() },
 					session: { summarize },
 					provider: { list: mock() },
 				},
@@ -1806,7 +1749,7 @@ describe("LiveCompactionPlugin", () => {
 			const hooks = await LiveCompactionPlugin({
 				...mockCtx,
 				client: {
-					app: { log: mock().mockResolvedValue(undefined) },
+					app: { log: logMock() },
 					session: { messages },
 				},
 				directory: TMP_DIR,
@@ -1833,7 +1776,7 @@ describe("LiveCompactionPlugin", () => {
 			const hooks = await LiveCompactionPlugin({
 				...mockCtx,
 				client: {
-					app: { log: mock().mockResolvedValue(undefined) },
+					app: { log: logMock() },
 					session: { messages },
 				},
 				directory: TMP_DIR,
@@ -1888,7 +1831,7 @@ describe("LiveCompactionPlugin", () => {
 			const hooks = await LiveCompactionPlugin({
 				...mockCtx,
 				client: {
-					app: { log: mock().mockResolvedValue(undefined) },
+					app: { log: logMock() },
 					session: { messages },
 				},
 				directory: TMP_DIR,
@@ -1909,7 +1852,7 @@ describe("LiveCompactionPlugin", () => {
 				{
 					...mockCtx,
 					client: {
-						app: { log: mock().mockResolvedValue(undefined) },
+						app: { log: logMock() },
 						session: { messages },
 					},
 					directory: TMP_DIR,
@@ -1939,7 +1882,7 @@ describe("LiveCompactionPlugin", () => {
 				{
 					...mockCtx,
 					client: {
-						app: { log: mock().mockResolvedValue(undefined) },
+						app: { log: logMock() },
 						session: { messages },
 					},
 					directory: TMP_DIR,
@@ -1968,15 +1911,7 @@ describe("LiveCompactionPlugin", () => {
 						{ type: "tool", tool: "bash", state: { output: longOutput } },
 					],
 				},
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r1" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r2" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r3" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r4" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "r5" }] },
+				...userTurns(5),
 			];
 			await hooks["experimental.chat.messages.transform"]!({} as any, {
 				messages,
