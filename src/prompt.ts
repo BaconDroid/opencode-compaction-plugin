@@ -8,6 +8,8 @@
  * `experimental.session.compacting` hook.
  */
 
+import { partsText } from "./text.js";
+
 /**
  * Extract the most recent user message text (the "ask") to anchor the summary,
  * truncated to `maxLen` characters.
@@ -19,17 +21,10 @@ export function extractLatestUserAsk(
 	if (!Array.isArray(messages)) return undefined;
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const msg = messages[i] as
-			| {
-					info?: { role?: string };
-					parts?: Array<{ type?: string; text?: string }>;
-			  }
+			| { info?: { role?: string }; parts?: unknown }
 			| undefined;
 		if (msg?.info?.role !== "user") continue;
-		const text = (msg.parts ?? [])
-			.filter((p) => p?.type === "text" && typeof p.text === "string")
-			.map((p) => p.text as string)
-			.join("\n")
-			.trim();
+		const text = partsText(msg.parts);
 		if (!text) continue;
 		return text.length > maxLen ? `${text.slice(0, maxLen)}…` : text;
 	}

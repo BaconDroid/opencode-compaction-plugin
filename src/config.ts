@@ -325,95 +325,11 @@ export function loadConfig(
 /**
  * Merge user config over defaults. Deep-merges nested objects.
  */
-export function mergeConfig(user: LiveCompactionConfig) {
-	return {
-		enabled: user.enabled ?? DEFAULT_CONFIG.enabled,
-		debug: user.debug ?? DEFAULT_CONFIG.debug,
-		trim: { ...DEFAULT_CONFIG.trim, ...user.trim },
-		dedup: {
-			enabled: user.dedup?.enabled ?? DEFAULT_CONFIG.dedup.enabled,
-			protectedTools:
-				user.dedup?.protectedTools ?? DEFAULT_CONFIG.dedup.protectedTools,
-		},
-		purgeErrors: {
-			enabled: user.purgeErrors?.enabled ?? DEFAULT_CONFIG.purgeErrors.enabled,
-			turns: user.purgeErrors?.turns ?? DEFAULT_CONFIG.purgeErrors.turns,
-			wholeAttempt:
-				user.purgeErrors?.wholeAttempt ??
-				DEFAULT_CONFIG.purgeErrors.wholeAttempt,
-			cascade:
-				user.purgeErrors?.cascade ?? DEFAULT_CONFIG.purgeErrors.cascade,
-		},
-		compress: {
-			protectedTurns:
-				user.compress?.protectedTurns ?? DEFAULT_CONFIG.compress.protectedTurns,
-			reversible:
-				user.compress?.reversible ?? DEFAULT_CONFIG.compress.reversible,
-			maxBlocksPerSquash:
-				user.compress?.maxBlocksPerSquash ??
-				DEFAULT_CONFIG.compress.maxBlocksPerSquash,
-		},
-		eviction: {
-			enabled: user.eviction?.enabled ?? DEFAULT_CONFIG.eviction.enabled,
-			thresholdTokens:
-				user.eviction?.thresholdTokens ??
-				DEFAULT_CONFIG.eviction.thresholdTokens,
-			levels: user.eviction?.levels ?? DEFAULT_CONFIG.eviction.levels,
-			protectPrologue:
-				user.eviction?.protectPrologue ??
-				DEFAULT_CONFIG.eviction.protectPrologue,
-		},
-		turnProtection: {
-			enabled:
-				user.turnProtection?.enabled ?? DEFAULT_CONFIG.turnProtection.enabled,
-			turns: user.turnProtection?.turns ?? DEFAULT_CONFIG.turnProtection.turns,
-		},
-		preemptiveCompaction: {
-			enabled:
-				user.preemptiveCompaction?.enabled ??
-				DEFAULT_CONFIG.preemptiveCompaction.enabled,
-			threshold:
-				user.preemptiveCompaction?.threshold ??
-				DEFAULT_CONFIG.preemptiveCompaction.threshold,
-			countCacheTokens:
-				user.preemptiveCompaction?.countCacheTokens ??
-				DEFAULT_CONFIG.preemptiveCompaction.countCacheTokens,
-			minTokensSinceLast:
-				user.preemptiveCompaction?.minTokensSinceLast ??
-				DEFAULT_CONFIG.preemptiveCompaction.minTokensSinceLast,
-			minMessagesSinceLast:
-				user.preemptiveCompaction?.minMessagesSinceLast ??
-				DEFAULT_CONFIG.preemptiveCompaction.minMessagesSinceLast,
-			tailGuard: {
-				enabled:
-					user.preemptiveCompaction?.tailGuard?.enabled ??
-					DEFAULT_CONFIG.preemptiveCompaction.tailGuard.enabled,
-				minNewToolCalls:
-					user.preemptiveCompaction?.tailGuard?.minNewToolCalls ??
-					DEFAULT_CONFIG.preemptiveCompaction.tailGuard.minNewToolCalls,
-			},
-			cooldownMs:
-				user.preemptiveCompaction?.cooldownMs ??
-				DEFAULT_CONFIG.preemptiveCompaction.cooldownMs,
-			contextLimit: user.preemptiveCompaction?.contextLimit,
-			absoluteTokenThreshold:
-				user.preemptiveCompaction?.absoluteTokenThreshold,
-		},
-		promptMode: user.promptMode ?? DEFAULT_CONFIG.promptMode,
-		degradationMonitor: {
-			enabled:
-				user.degradationMonitor?.enabled ??
-				DEFAULT_CONFIG.degradationMonitor.enabled,
-			threshold:
-				user.degradationMonitor?.threshold ??
-				DEFAULT_CONFIG.degradationMonitor.threshold,
-			windowMs:
-				user.degradationMonitor?.windowMs ??
-				DEFAULT_CONFIG.degradationMonitor.windowMs,
-		},
-		protectedFilePatterns:
-			user.protectedFilePatterns ?? DEFAULT_CONFIG.protectedFilePatterns,
-	};
+export function mergeConfig(user: LiveCompactionConfig): ResolvedConfig {
+	return deepMerge(
+		DEFAULT_CONFIG as LiveCompactionConfig,
+		user,
+	) as ResolvedConfig;
 }
 
 // ---------------------------------------------------------------------------
@@ -528,4 +444,4 @@ function stripTrailingCommas(json: string): string {
 }
 
 /** The fully-resolved config returned by {@link loadConfig}/{@link mergeConfig}. */
-export type ResolvedConfig = ReturnType<typeof mergeConfig>;
+export type ResolvedConfig = typeof DEFAULT_CONFIG;
