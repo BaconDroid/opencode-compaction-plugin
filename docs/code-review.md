@@ -231,12 +231,13 @@ required `typeof input === "string"`, so it never matched and the purge was dead
 a large input with a small `{ purged: "..." }` marker (object inputs stay
 objects). Types updated from `string` to `unknown`.
 
-### Notes (not changed)
-- `ToolState` status union is `pending | running | completed | error`; the
-  `"failed"` check in `findErroredParts` is dead but harmless.
-- `applyDedup` may set `output` on an error state (which carries `error`, not
-  `output`). Left as-is: the behavior is covered by tests and the effect is a
-  harmless extra field.
+### F6 — Dead `"failed"` status and dedup on error states
+`src/strategies.ts`. `ToolState` status is `pending | running | completed |
+error`, so the `"failed"` check in `findErroredParts` was dead. `applyDedup`
+also marked parts that carry `error` (no `output`), adding an `output` field to
+an error state.
+→ Resolved: `findErroredParts` matches only `error`; `applyDedup` only considers
+parts with a string `output`. Tests updated accordingly.
 
 
 

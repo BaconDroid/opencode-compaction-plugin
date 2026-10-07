@@ -161,7 +161,7 @@ describe("applyDedup()", () => {
 		expect(count).toBe(0);
 	});
 
-	it("handles duplicate tool calls without state gracefully", () => {
+	it("ignores duplicate tool calls without an output", () => {
 		const cfg = mergeConfig({});
 		const msgs = [
 			{
@@ -173,9 +173,38 @@ describe("applyDedup()", () => {
 				parts: [{ type: "tool", tool: "read", args: { filePath: "a.ts" } }],
 			},
 		];
-		const count = applyDedup(msgs as any, cfg);
-		// First one should be "deduped" (but no state to modify)
-		expect(count).toBe(1);
+		// Nothing to dedup: the parts have no output.
+		expect(applyDedup(msgs as any, cfg)).toBe(0);
+	});
+
+	it("does not dedup errored tool calls", () => {
+		const cfg = mergeConfig({});
+		const msgs = [
+			{
+				info: { role: "assistant" },
+				parts: [
+					{
+						type: "tool",
+						tool: "read",
+						args: { filePath: "a.ts" },
+						state: { status: "error", error: "boom" },
+					},
+				],
+			},
+			{
+				info: { role: "assistant" },
+				parts: [
+					{
+						type: "tool",
+						tool: "read",
+						args: { filePath: "a.ts" },
+						state: { output: "ok" },
+					},
+				],
+			},
+		];
+		expect(applyDedup(msgs as any, cfg)).toBe(0);
+		expect(msgs[0].parts[0].state!.error).toBe("boom");
 	});
 
 	it("deduplicates with nested args objects", () => {
@@ -264,7 +293,7 @@ describe("findErroredParts()", () => {
 		expect(found[0]).toEqual({ msgIdx: 0, partIdx: 0 });
 	});
 
-	it("finds parts with failed status", () => {
+	it("only matches the error status", () => {
 		const msgs = [
 			{
 				info: { role: "assistant" },
@@ -277,8 +306,8 @@ describe("findErroredParts()", () => {
 				],
 			},
 		];
-		const found = findErroredParts(msgs as any);
-		expect(found).toHaveLength(1);
+		// "failed" is not a real ToolState status.
+		expect(findErroredParts(msgs as any)).toHaveLength(0);
 	});
 
 	it("ignores successful tool calls", () => {

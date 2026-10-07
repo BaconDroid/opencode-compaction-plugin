@@ -92,6 +92,9 @@ export function applyDedup(
 			const part = msg.parts[pi];
 			if (part.type !== "tool" || !part.tool) continue;
 			if (protectedTools.has(part.tool)) continue;
+			// Only completed tool parts have an output to dedup; error states
+			// carry `error`, not `output`.
+			if (typeof part.state?.output !== "string") continue;
 
 			const args = (part as Record<string, unknown>).args ?? part.state?.input;
 			const key = toolCallKey(part.tool, args);
@@ -141,7 +144,7 @@ export function findErroredParts(
 			if (part.type !== "tool" || !part.state) continue;
 
 			const status = part.state.status;
-			if (status === "error" || status === "failed") {
+			if (status === "error") {
 				errored.push({ msgIdx: mi, partIdx: pi });
 			}
 		}
