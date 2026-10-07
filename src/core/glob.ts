@@ -74,10 +74,7 @@ export function matchesGlob(inputPath: string, pattern: string): boolean {
  * Extract file paths from tool arguments.
  * Checks common parameter names: filePath, path, file.
  */
-export function extractFilePaths(
-	_tool: string,
-	args: Record<string, unknown>,
-): string[] {
+export function extractFilePaths(args: Record<string, unknown>): string[] {
 	const paths: string[] = [];
 
 	// Standard file path parameters

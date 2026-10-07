@@ -10,11 +10,6 @@
 
 import { hasText } from "./messages.js";
 
-/** True when a message's parts include a non-empty text part. */
-export function messageHasText(parts: unknown): boolean {
-	return hasText(parts);
-}
-
 /** Count trailing assistant messages that carry no text. */
 export function countTrailingNoTextAssistant(
 	messages: Array<{ info?: { role?: string }; parts?: unknown }>,
@@ -23,7 +18,7 @@ export function countTrailingNoTextAssistant(
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const msg = messages[i];
 		if (msg?.info?.role !== "assistant") break;
-		if (messageHasText(msg.parts)) break;
+		if (hasText(msg.parts)) break;
 		count++;
 	}
 	return count;

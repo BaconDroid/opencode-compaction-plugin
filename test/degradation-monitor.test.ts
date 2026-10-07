@@ -1,16 +1,16 @@
 import { describe, it, expect } from "bun:test";
+import { hasText } from "../src/core/messages.ts";
 import {
-	messageHasText,
 	countTrailingNoTextAssistant,
 	DegradationMonitor,
 } from "../src/core/degradation-monitor.ts";
 
-describe("messageHasText()", () => {
+describe("hasText()", () => {
 	it("detects non-empty text parts only", () => {
-		expect(messageHasText([{ type: "text", text: "hi" }])).toBe(true);
-		expect(messageHasText([{ type: "text", text: "   " }])).toBe(false);
-		expect(messageHasText([{ type: "tool" }])).toBe(false);
-		expect(messageHasText(undefined)).toBe(false);
+		expect(hasText([{ type: "text", text: "hi" }])).toBe(true);
+		expect(hasText([{ type: "text", text: "   " }])).toBe(false);
+		expect(hasText([{ type: "tool" }])).toBe(false);
+		expect(hasText(undefined)).toBe(false);
 	});
 });
 

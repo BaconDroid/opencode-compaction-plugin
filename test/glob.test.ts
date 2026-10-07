@@ -31,18 +31,18 @@ describe("matchesGlob()", () => {
 
 describe("extractFilePaths()", () => {
 	it("extracts, deduplicates and ignores empty paths", () => {
-		expect(extractFilePaths("read", { filePath: "src/a.ts" })).toEqual(["src/a.ts"]);
-		expect(extractFilePaths("read", { path: "src/b.ts" })).toEqual(["src/b.ts"]);
-		expect(extractFilePaths("read", { file: "src/c.ts" })).toEqual(["src/c.ts"]);
+		expect(extractFilePaths({ filePath: "src/a.ts" })).toEqual(["src/a.ts"]);
+		expect(extractFilePaths({ path: "src/b.ts" })).toEqual(["src/b.ts"]);
+		expect(extractFilePaths({ file: "src/c.ts" })).toEqual(["src/c.ts"]);
 		expect(
-			extractFilePaths("read", { filePath: "src/a.ts", path: "src/a.ts" }),
+			extractFilePaths({ filePath: "src/a.ts", path: "src/a.ts" }),
 		).toEqual(["src/a.ts"]);
-		expect(extractFilePaths("bash", { command: "ls" })).toEqual([]);
-		expect(extractFilePaths("read", { filePath: "" })).toEqual([]);
+		expect(extractFilePaths({ command: "ls" })).toEqual([]);
+		expect(extractFilePaths({ filePath: "" })).toEqual([]);
 	});
 
 	it("extracts from a multi-edit edits array", () => {
-		const paths = extractFilePaths("multiedit", {
+		const paths = extractFilePaths({
 			filePath: "main.ts",
 			edits: [{ filePath: "a.ts" }, { filePath: "b.ts" }],
 		});
