@@ -1,232 +1,432 @@
-# opencode-live-compaction — Recherche Context Compaction & Backlog
+# opencode-live-compaction — Recherche compaction & contexte (document de référence)
 
-> Notes de recherche compilées à partir de la série « Context Compaction in LLM Agents »
-> (Nazmi, 4 parties) et de ses références, filtrées par pertinence pour le plugin
-> `opencode-live-compaction` (fork `BaconDroid/opencode-live-compaction`).
+> **Document de référence unique** : consolide et remplace les deux passes de recherche
+> précédentes (ancienne passe 1 et passe 2), dont la redondance a été supprimée.
 >
-> Date : 2026-10-06
+> - Racine autorisée : `https://nazmi.tech/blog/context-compaction-llm-agents-fundamentals`
+>   + suites Part 2/3/4.
+> - Passe 1 = crawl large (profondeur 0→2). Passe 2 = crawl arXiv ciblé (profondeur 0→4,
+>   ~86/96 pages). Provenance indiquée par `[P1]` / `[P2]`.
+> - Consolidé le 2026-10-07.
 
 ---
 
-## 1. Périmètre & méthode
+## 1. Méthode
 
-- **Objectif** : identifier ce qui, dans la littérature référencée, est réellement
-  implémentable dans un plugin OpenCode en TypeScript (sans entraînement de modèle).
-- **Filtrage** : crawl large mais **ciblé sur la pertinence** — on ne suit une
-  référence que si le contexte qui la cite indique un mécanisme portable.
-- **Profondeur** : articles (niveau 0) → papiers cités (niveau 1) → références des
-  papiers les plus riches (niveau 2). Au-delà, le substrat devient spécifique
-  (KV-cache, quantization, architecture) et non transposable.
-
-### Statut de vérification
-- ✅ **Lu directement** (texte complet ou abstract ouvert).
-- 📄 **Via le résumé de l'article** uniquement (non ouvert individuellement).
-- 🧩 **Cité dans une liste de références** d'un papier lu, non ouvert.
-
----
-
-## 2. État actuel du plugin (baseline)
-
-Hooks utilisés (`src/index.ts`) :
-- `tool.execute.after` — tracking des fichiers + capture des appels `compress`.
-- `experimental.session.compacting` — remplace le prompt par un template 11 sections.
-- `experimental.chat.messages.transform` — compressions en attente, **trim** des
-  sorties d'outils, **dedup**, **purge** des inputs en erreur.
-- `command.execute.before` — `/compact`, `/compact:focus <directive>`.
-- `experimental.compaction.autocontinue`, `event`, `dispose`, `config`.
-
-Fichiers :
-- `src/index.ts` (481 l.) — hooks, trim, turn protection, protected patterns.
-- `src/prompt.ts` (88 l.) — template 11 sections (attend `<previous-summary>` mais
-  **jamais injecté**).
-- `src/compress.ts` (175 l.) — tool `compress` **index-based** (0-based, non fiable).
-- `src/strategies.ts` (179 l.) — dedup + purge erreurs.
-- `src/glob.ts` (115 l.) — matcher glob + chemins protégés.
-- `src/files-touched.ts` (164 l.) — tracker d'opérations fichiers.
-- `src/config.ts` (258 l.) — config + défauts.
-
-### Faiblesses identifiées dans le code actuel
-1. **Trim destructif et aveugle** : `output.slice(-limit)` garde uniquement la fin
-   (`index.ts:135-147`), par type d'outil, sans égard à la requête. Irréversible.
-2. **`<previous-summary>` jamais injecté** : pas de résumé glissant entre compactions
-   (`prompt.ts:27` vs `index.ts`).
-3. **Aucune garantie de survie des contraintes** : section « Constraints » dans le
-   prompt mais rien ne protège les règles de gouvernance de l'éviction.
-4. **`purgeErrors.turns` inutilisé** : la config existe (`config.ts:46,178`), la purge
-   est immédiate (`index.ts:377`, `strategies.ts:158`).
-5. **Tool `compress` fragile** : le modèle doit deviner des indices de messages
-   qu'il ne voit pas (`compress.ts:145-175`).
-6. **Aucune rubric** pour décider *quand* compacter (SelfCompact : tool seul
-   insuffisant).
-7. **`focusDirectives` diffusé à toutes les sessions** au `/compact:focus`
-   (`index.ts:401-403`).
+- **Gate thématique** : jugé sur le **contexte citant** + le **titre/sous-titres** de la page
+  (jamais l'URL seule).
+- **Test d'utilité plugin** (décisif) : mécanisme implémentable **sans entraînement**, sur au
+  moins un axe — *quand* compacter ; *quoi* garder/évincer/résumer ; rendre la compaction
+  *réversible* ; *préserver* contraintes/état/tâche ; *évaluer* la compaction. Doute → écarté.
+- **Exclusions fermes** : entraînement/RL/fine-tuning, internes KV-cache, architecture/SSM,
+  latent/gist/distillation, multimodal, benchmarks sans mécanisme transposable, frameworks.
+- **Classement** : 🟢 direct · 🟡 indirect · ⚪ écarté.
+- **Statut de lecture** : ✅ lu · 📄 via résumé · 🧩 cité non ouvert · ⚠️ inaccessible.
+- **Portée** : arXiv pour le crawl principal ; liens non-arXiv (GitHub/docs/outils) réservés
+  à une phase 2.
 
 ---
 
-## 3. Références collectées
+## 2. État du plugin (baseline courant, après E1–E5)
 
-### 3.1 Articles sources
-| Réf | ID/URL | Statut |
-|---|---|---|
-| Part 1 — The Fundamentals | nazmi.tech/blog/context-compaction-llm-agents-fundamentals | ✅ |
-| Part 2 — Learning to Compact | .../context-compaction-llm-agents-learning-to-compact | ✅ |
-| Part 3 — Post-Hoc Compilation | .../context-compaction-llm-agents-post-hoc-compilation | ✅ |
-| Part 4 — Theory and Safety | .../context-compaction-llm-agents-theory-and-safety | ✅ |
-| Lerim (README) | github.com/nablo-io/lerim | ✅ |
+Hooks actifs (`src/index.ts`) : `tool.execute.after` (suivi fichiers + capture
+`compress`/`squash`/`expand`/`recall`), `experimental.session.compacting` (prompt 11 sections,
+`replace`/`augment`, `<previous-summary>` glissant, `<task-state>`, `<latest-user-ask>`),
+`experimental.chat.messages.transform` (compressions, squash, expand, trim, dedup,
+purge + cascade, éviction graduée), `experimental.compaction.autocontinue`, `config`, `event`,
+`dispose`.
 
-### 3.2 Niveau 1 — papiers cités (ouverts)
-| Réf | ID | Statut |
-|---|---|---|
-| Rate–Distortion survey (What to Keep, What to Forget) | arXiv 2607.08032 | ✅ (corps + Appendix A) |
-| Governance Decay | arXiv 2606.22528 | ✅ (texte complet) |
-| Self-Compact (SelfCompact) | arXiv 2606.23525 | ✅ |
-| CompactionRL | arXiv 2607.05378 | ✅ |
-| ACON | arXiv 2510.00615 | ✅ |
-| Mem0 | arXiv 2504.19413 | ✅ |
-| A-Mem | arXiv 2502.12110 | ✅ |
-| DTCRS | aclanthology 2025.acl-long.536 | ✅ |
-| Code semantic compression | aclanthology 2024.findings-acl.306 | ✅ |
-| LangChain short-term memory docs | docs.langchain.com/oss/python/langchain/short-term-memory | ✅ |
-| LangMem SummarizationNode | langchain-ai.github.io/langmem/reference/short_term/ | ✅ |
+Modules : `prompt.ts` · `compress.ts` (tools `compress`/`squash`, span déterministe) ·
+`blocks.ts` (ids durables) · `expand.ts` (sidecar réversible) · `strategies.ts`
+(dedup/purge/cascade) · `eviction.ts` (éviction graduée) · `glob.ts` · `files-touched.ts` ·
+`todo-preserver.ts` · `preemptive-compaction.ts` (seuil hybride + gates) ·
+`degradation-monitor.ts` (diagnostic + arrêt judge-free) · `previous-summary.ts` (état glissant).
 
-### 3.3 Niveau 2 — références des papiers (ouverts)
-| Réf | ID | Statut |
-|---|---|---|
-| Slipstream (Trajectory-Grounded Compaction Validation) | arXiv 2605.08580 | ✅ |
-| Beyond Compaction: Structured Context Eviction (CWL) | arXiv 2606.11213 | ✅ |
-| Omission Constraints Decay (SRD) | arXiv 2604.20911 | ✅ |
-| Ghost in the Context / ControlCapsule | arXiv 2605.12535 | ✅ |
-| MemGPT | arXiv 2310.08560 | ✅ |
-| RAPTOR | arXiv 2401.18059 | ✅ |
-| Generative Agents | arXiv 2304.03442 | ✅ |
-| MemoryBank (Ebbinghaus decay) | arXiv 2305.10250 | ✅ |
+Limites traitées par E1–E5 : tool `compress` fragile (indices non observables) → span
+déterministe + labels `[bN]` ; réversibilité → `expand`/`recall` (sidecar mémoire) ; purge
+d'erreur → essai entier + cascade ; éviction → graduée sans modèle ; déclenchement → seuil
+hybride + gates déterministes.
+Restent hors périmètre : mémoire inter-sessions, embeddings/retrieval (E4/E6+), rubric
+« quand compacter » par modèle.
 
-### 3.4 Niveau 1 — via résumé d'article (non ouverts)
-| Réf | ID | Statut |
-|---|---|---|
-| LLM semantic compression | arXiv 2304.12512 | 📄 |
-| LongLLMLingua | arXiv 2310.06839 | 📄 |
-| Perplexity-based prompt compression | arXiv 2310.06201 | 📄 |
-| Provence | arXiv 2501.16214 | 📄 |
-| Recursive dialogue summarization | arXiv 2308.15022 | 📄 |
-| llmlingua.com (impl.) | llmlingua.com/llmlingua.html | 📄 |
-
-### 3.5 Niveau 2 — cités, non ouverts (contexte suffisant)
-| Réf | Source citante | Statut |
-|---|---|---|
-| Spotlighting | Governance Decay | 🧩 |
-| Constraint Decay in Backend Code Gen (`2605.06445`) | Governance Decay | 🧩 |
-| Parallel Context Compaction (`2605.23296`) | Governance Decay | 🧩 |
-| When Refusals Fail (`2512.02445`) | Governance Decay | 🧩 |
-| Context Rot (Chroma, Hong et al. 2025) | Governance Decay | 🧩 |
-| Lost in the Middle (Liu et al. 2024a) | Governance Decay | 🧩 |
-| Quest, H2O, SnapKV, StreamingLLM, Ada-KV, PyramidKV, KIVI, Palu, MLA, CaM, RMT, Mamba, Titans, gisting, ICAE, xRAG, Cartridges, NSA, MoBA, ToMe, PagedAttention, InfiniGen… | Survey Appendix A | 🧩 |
-
-> ⚠️ Le catalogue « non portable » (§6) provient de l'**Appendix A du survey**
-> (table méthode-par-axe), pas d'une lecture individuelle.
+> Les correctifs décrits dans le code (F1–F11) sont suivis dans `code-review.md` ; le présent
+> document reflète l'état courant des hooks.
 
 ---
 
-## 4. Catalogue des mécanismes portables (mapping plugin)
+## 3. Index arborescent (niveaux 0 → 4)
 
-| # | Mécanisme | Référence | Mapping |
-|---|---|---|---|
-| 1 | Constraint Pinning : buffer épinglé, réinjecté + intégrité après compaction | Governance Decay 2606.22528 | nouveau `src/pinned.ts`, hook compacting |
-| 2 | ControlCapsule : provenance typée, budget de contrôle isolé, preflight, fail-closed | Ghost in the Context 2605.12535 | idem #1 |
-| 3 | Omission constraints (prohibitions) décayent plus → priorité d'épinglage | SRD 2604.20911 | politique du buffer |
-| 4 | Validation post-compaction (juge vs intent/facts/constraints, asynchrone) | Slipstream 2605.08580 | étape après résumé |
-| 5 | Rolling summary `RunningSummary{summary, summarizedIds, lastId}` | LangMem docs + 2308.15022 | `src/summary-state.ts`, `<previous-summary>` |
-| 6 | Éviction structurée : épisodes typés + dépendances, politique LLM-free, garde user turns + raisonnement actif | CWL 2606.11213 | remplace trim plat `index.ts:339` |
-| 7 | Query-aware retention (perplexité contrastive / info mutuelle / sequence labeling) | LongLLMLingua 2310.06839, QUITO-X, Provence 2501.16214 | scoring des lignes de tool-output |
-| 8 | Réversibilité keep-all + retrieve (P-rev) | Quest (survey), survey 2607.08032 | sidecar store + tool de retrieval |
-| 9 | Rubric SelfCompact (quand compacter / supprimer) | SelfCompact 2606.23525 | description `compress.ts:145` |
-| 10 | Scoring importance+pertinence+récence | Generative Agents 2304.03442 | fonction de sélection |
-| 11 | Courbe d'oubli d'Ebbinghaus | MemoryBank 2305.10250 | politique de rétention |
-| 12 | Arbre récursif + retrieve | RAPTOR 2401.18059, DTCRS 2025.acl-long.536 | résumés hiérarchiques |
-| 13 | Paging / virtual context (tiers) | MemGPT 2310.08560 | mémoire à étages |
-| 14 | Observations vs historique séparés + guidelines affinées par analyse d'échecs | ACON 2510.00615 | `prompt.ts`, `strategies.ts` |
-| 15 | Memory add/update/delete cross-session | Mem0 2504.19413, A-Mem 2502.12110 | mémoire inter-sessions |
-| 16 | Règle d'arrêt par borne d'erreur | Ada-KV (survey) | arrêt de summarization |
-| 17 | Head+tail / attention sinks | StreamingLLM (survey) + reco Governance Decay | trim tête+queue |
-| 18 | Provenance / spotlighting des données ingérées | Spotlighting 2403.14720 | avant le summarizer |
-| 19 | Post-hoc compile vers JSONL `trajectory-v1` | Lerim (README) | export de session |
+> Statut + raison = courte citation du contexte citant (ou titre/sous-titre). `[P1]`/`[P2]` = provenance.
+
+### Niveau 0 — Racines (non arXiv)
+- **Context Compaction in LLM Agents: Part 1 — The Fundamentals** — `nazmi.tech/blog/context-compaction-llm-agents-fundamentals` — ✅
+- **Part 2 — Learning to Compact** — `.../learning-to-compact` — ✅
+- **Part 3 — Post-Hoc Compilation** — `.../post-hoc-compilation` — ✅
+- **Part 4 — Theory and Safety** — `.../theory-and-safety` — ✅
+- (annexe) **Lerim** — `github.com/nablo-io/lerim` — 📄 `[P1]` (outil, phase 2)
+
+### Niveau 1 — papiers cités directement par les racines
+- arXiv:**2304.12512** LLM semantic compression — ⚪ `[P1]` — « encode a long passage … in a shorter representation »
+- arXiv:**2310.06839** LongLLMLingua — ⚪ `[P1]` — « prompt compression and budget control »
+- arXiv:**2310.06201** Perplexity-based prompt compression — ⚪ `[P1]`
+- arXiv:**2501.16214** Provence — ⚪ `[P1]` — pruner entraîné
+- arXiv:**2308.15022** Recursive dialogue summarization — 🟡 `[P1]`
+- arXiv:**2606.23525** Self-Compacting Language Model Agents (SelfCompact) — 🟢 `[P1+P2]` — « compaction tool + task-specific rubric »
+- arXiv:**2607.05378** CompactionRL — ⚪ `[P1+P2]` (RL)
+- arXiv:**2510.00615** ACON — 🟡 `[P1+P2]`
+- arXiv:**2504.19413** Mem0 — ⚪ `[P1+P2]`
+- arXiv:**2502.12110** A-Mem — ⚪ `[P1+P2]`
+- arXiv:**2607.08032** Rate–Distortion survey — 🟡 `[P1+P2]` — « seven-axis taxonomy »
+- arXiv:**2606.22528** Governance Decay — 🟢 `[P1+P2]` — « Constraint Pinning … no violations »
+- aclanthology 2025.acl-long.536 DTCRS — 📄 `[P1]` ; aclanthology 2024.findings-acl.306 code semantic compression — 📄 `[P1]`
+- LangChain short-term memory docs · LangMem SummarizationNode — 📄 `[P1]` (docs, phase 2)
+
+### Niveau 2 — références (passe 2, nouvelles)
+- arXiv:**2509.13313** **ReSum: Unlocking Long-Horizon Search Intelligence via Context Summarization** — 🟢 `[P2]`
+  - ↳ arXiv:**2509.25140** ReasoningBank — 🟡 ; arXiv:**2507.03724** MemOS — 🟡
+- arXiv:**2510.24699** **AgentFold: Long-Horizon Web Agents with Proactive Context Management** — 🟢 `[P2]`
+  - ↳ arXiv:**2509.13309** WebResearcher — 🟡 ; arXiv:**2505.22101** MemOS — 🟡
+- arXiv:**2602.02486** **RE-TRAC: REcursive TRAjectory Compression for Deep Search Agents** — 🟢 `[P2]`
+  - ↳ arXiv:**2511.07327** IterResearch — 🟢
+- arXiv:**2604.03679** **LightThinker++: From Reasoning Compression to Memory Management** — 🟢 `[P2]`
+  - ↳ arXiv:**2602.12108** Pensieve — 🟢 ; arXiv:**2602.08030** Free() — ⚪
+- arXiv:**2602.04288** **Contextual Drag: How Errors in the Context Affect LLM Reasoning** — 🟢 `[P2]`
+  - ↳ arXiv:**2601.07226** Lost in the Noise — 🟡
+- arXiv:**2602.03249** Accordion-Thinking — 🟡 `[P2]`
+- arXiv:**2502.15589** LightThinker — 🟡 `[P2]`
+- arXiv:**2510.11967** Scaling Long-Horizon LLM Agent via Context-Folding — 🟡 `[P2]` (cœur RL)
+- arXiv:**2512.22733** FoldAct — 🟡 `[P2]` (cœur RL)
+- arXiv:**2507.13334** A Survey of Context Engineering for Large Language Models — 🟡 `[P2]`
+- arXiv:**2510.13797** Breadcrumbs Reasoning — ⚪ `[P2]` (KV + entraînement)
+
+### Niveau 2 — références (passe 1)
+- arXiv:**2605.08580** Slipstream (validation post-compaction) — 🟡 `[P1]`
+- arXiv:**2606.11213** Beyond Compaction: Structured Context Eviction (CWL) — 🟡 `[P1]`
+- arXiv:**2604.20911** Omission Constraints Decay (SRD) — 🟡 `[P1]`
+- arXiv:**2605.12535** Ghost in the Context / ControlCapsule — 🟢 `[P1]`
+- arXiv:**2310.08560** MemGPT — ⚪/🟡 `[P1]`
+- arXiv:**2401.18059** RAPTOR — 🟡 `[P1]`
+- arXiv:**2304.03442** Generative Agents — 🟡 `[P1]`
+- arXiv:**2305.10250** MemoryBank (Ebbinghaus decay) — 🟡 `[P1]`
+- arXiv:**2403.14720** Spotlighting — 🟡 `[P1]`
+- arXiv:**2605.06445** Constraint Decay in backend code gen — 🧩 `[P1]`
+- arXiv:**2605.23296** Parallel Context Compaction — 🧩 `[P1]`
+- arXiv:**2512.02445** When Refusals Fail — 🧩 `[P1]`
+- Context Rot (Chroma, Hong et al.) · Lost in the Middle (Liu et al.) — 🧩 `[P1]` (non arXiv)
+
+### Niveaux 2 → 3 (passe 2)
+- arXiv:**2511.07327** **IterResearch: Rethinking Long-Horizon Agents with Interaction Scaling** — 🟢 `[P2]`
+  - ↳ arXiv:**2508.16629** Learn-to-memorize — 🟡 ; arXiv:**2505.00675** Rethinking Memory in LLM-based Agents — 🟡 ; arXiv:**2407.01178** Memory3 — ⚪ (architecture)
+- arXiv:**2602.12108** **The Pensieve Paradigm: Stateful Language Models Mastering Their Own Context** — 🟢 `[P2]`
+- arXiv:**2408.09559** **HiAgent: Hierarchical Working Memory Management…** — 🟢 `[P2]`
+  - ↳ arXiv:**2402.11975** Compress to Impress — ⚪ ; arXiv:**2305.14788** Adapting LMs to Compress Contexts — ⚪ ; arXiv:**2311.08719** Think-in-Memory — 🟢 ; arXiv:**2402.03610** RAP — 🟡 ; arXiv:**2404.13501** Survey Memory Mechanism — 🟡
+- arXiv:**2503.06692** **InftyThink: Breaking the Length Limits of Long-Context Reasoning** — 🟢 `[P2]`
+- arXiv:**2412.18547** **Token-Budget-Aware LLM Reasoning (TALE)** — 🟢 `[P2]`
+- arXiv:**2510.08790** COMPASS — 🟡 `[P2]`
+- arXiv:**2505.22101** MemOS (MAG) — 🟡 `[P2]` ; arXiv:**2507.03724** MemOS: A Memory OS — 🟡 `[P2]`
+- arXiv:**2407.09450** EM-LLM — ⚪ `[P2]` (KV/attention) — ↳ arXiv:**2403.11901** Larimar — ⚪
+- arXiv:**2602.08030** Free() — ⚪ `[P2]`
+
+### Niveau 4 (passe 2)
+- arXiv:**2503.11951** **SagaLLM: Context Management, Validation, and Transaction Guarantees…** — 🟢 `[P2]`
+- arXiv:**2308.01542** **Memory Sandbox: Transparent and Interactive Memory Management** — 🟢 `[P2]`
+- arXiv:**2304.13343** **SCM: Enhancing LLM with Self-Controlled Memory Framework** — 🟢 `[P2]`
+- arXiv:**2311.08719** **Think-in-Memory: Recalling and Post-thinking…** — 🟢 `[P2]`
+- arXiv:**2501.13956** **Zep: A Temporal Knowledge Graph Architecture for Agent Memory** — 🟢 `[P2]`
+- arXiv:**2310.05029** **Walking Down the Memory Maze (MemWalker)** — 🟢 `[P2]`
+- arXiv:**2505.16067** **How Memory Management Impacts LLM Agents** — 🟢 `[P2]`
+- arXiv:**2305.14322** RET-LLM — 🟡 `[P2]`
+- arXiv:**2402.03610** RAP — 🟡 `[P2]`
+- arXiv:**2505.00675** Rethinking Memory in LLM-based Agents — 🟡 `[P2]`
+- arXiv:**2404.13501** A Survey on the Memory Mechanism of LLM-based Agents — 🟡 `[P2]`
+- arXiv:**2504.15965** From Human Memory to AI Memory — 🟡 `[P2]`
+- arXiv:**2409.05591** MemoRAG — ⚪/🟡 `[P2]`
+- arXiv:**2312.17259** Empowering Working Memory for LLM Agents — ⚪ ⚠️ `[P2]`
+- arXiv:**2211.05110** LLMs with Controllable Working Memory — ⚪ `[P2]`
+- arXiv:**2403.11901** Larimar — ⚪ `[P2]`
 
 ---
 
-## 5. Liste implémentable ordonnée
+## 4. Ensembles implémentables (batches ~12 pages)
 
-Barème (1–5) :
-- **Impact** = bénéfice tâche/sécurité (5 majeur → 1 mineur)
-- **Effort** = coût d'implémentation (5 trivial → 1 lourd)
-- **Perf** = coût runtime/tokens ajouté (5 gratuit → 1 cher)
-- **Score = 3×Impact + 2×Effort + 1×Perf** (impact dominant, puis effort, puis perf)
+> Chaque **ensemble (E)** = un lot d'analyse/implémentation d'environ **12 pages** (~7–10 liens).
+> Objectif : décider « qu'est-ce qu'on en fait pour le plugin », avec un fichier/hook cible.
+> Un lot peut être **plus petit** si ses pages contiennent des **liens sortants non explorés**
+> (marge d'extension). Les statuts renvoient au §5.
+>
+> **Flag 🔌** = le lot/l'item semble nécessiter un **composant externe** (autre plugin, MCP,
+> store/vecteurs/graphe, service, modèle de scoring ou UI). Ce n'est alors **pas** un ajout
+> direct à `live-compaction` mais plutôt un **plugin/MCP séparé**.
+> `🔌?` = dépendance externe **optionnelle** (une version interne dégradée reste possible).
 
-| # | Implémentation | Impact | Effort | Perf | Score | Points d'accroche |
-|---|---|---|---|---|---|---|
-| 1 | Rubric SelfCompact dans le tool `compress` (+ nudge périodique) | 4 | 5 | 5 | 27 | `compress.ts:145`, `index.ts` transform |
-| 2 | Constraint Pinning / ControlCapsule (buffer épinglé, réinjecté + intégrité, omission-first) | 5 | 3 | 5 | 26 | nouveau `src/pinned.ts`, `index.ts:274`, `prompt.ts:40` |
-| 3 | Rolling summary (`RunningSummary` + `<previous-summary>`) ⚠️ API | 5 | 3 | 4 | 25 | `index.ts:274`, `prompt.ts:27` |
-| 4 | Trim tête+queue (StreamingLLM) | 3 | 5 | 5 | 24 | `index.ts:135` |
-| 5 | Brancher `purgeErrors.turns` (config inutilisée) | 3 | 5 | 5 | 24 | `index.ts:377`, `config.ts:178` |
-| 6 | Provenance/spotlighting des tool-outputs avant summarizer | 3 | 4 | 5 | 22 | `index.ts` transform |
-| 7 | Pruning réversible (sidecar des originaux + tool de retrieval) | 4 | 3 | 3 | 21 | `index.ts:357` + store |
-| 8 | Rétention query-aware (scoring lexical vs msg user/focus) | 4 | 3 | 2 | 20 | `index.ts:339` |
-| 9 | Éviction structurée (épisodes typés, politique LLM-free) | 4 | 2 | 4 | 20 | `index.ts` transform + modèle d'épisodes |
-| 10 | Fiabiliser le tool `compress` (indices de messages non visibles) | 3 | 3 | 5 | 20 | `compress.ts:145`, `index.ts:247` |
-| 11 | Scoring importance+pertinence+récence + courbe d'oubli | 3 | 3 | 3 | 18 | `index.ts` sélection |
-| 12 | Export post-hoc `trajectory-v1` JSONL (pont Lerim) | 3 | 2 | 5 | 18 | `event`/`dispose` |
-| 13 | Validation post-compaction (juge vs intent/facts) | 4 | 2 | 1 | 17 | `index.ts:274` + appel juge |
-| 14 | ACON (observations vs historique + guidelines par échecs) | 3 | 2 | 2 | 15 | `prompt.ts`, `strategies.ts` |
-| 15 | Règle d'arrêt Ada-KV (borne d'erreur) | 2 | 2 | 4 | 14 | `index.ts:135` |
-| 16 | Paging MemGPT (mémoire à étages) | 3 | 1 | 2 | 13 | nouveau module |
-| 17 | Mémoire cross-session Mem0/A-Mem | 3 | 1 | 2 | 13 | nouveau module |
-| 18 | Arbre récursif RAPTOR/DTCRS (embeddings/clustering) | 3 | 1 | 1 | 12 | nouveau module |
+### Synthèse des ensembles
+
+| Ens. | Thème | Liens | ~pages | Extension | Ext. |
+|---|---|---|---|---|---|
+| E1 | Déclenchement & rythme de compaction | 8 | ~12 | moyenne | — |
+| E2 | Résumé structuré & continuité d'état | 6 | ~9 | forte (survey) | — |
+| E3 | Folding & compression multi-échelle | 7 | ~10 | moyenne | — |
+| E4 | Réversibilité, inspection & retrieval | 7 | ~9 | moyenne | 🔌? (index de retrieval) |
+| E5 | Éviction, purge & anti-contamination | 7 | ~9 | moyenne | — |
+| E6 | Contraintes, gouvernance & validation | 7 | ~7 | forte (cités non ouverts) | 🔌? (juge LLM) |
+| E7 | Store mémoire, graphe & read/write | 6 | ~10 | forte (MemOS) | 🔌 (store/graphe) |
+| E8 | Mémoire d'expérience & cross-session | 10 | ~13 | forte (benchmarks) | 🔌 (store/vecteurs) |
+| E9 | Compression sémantique / pruning (P1) | 7 | ~6 | faible | 🔌? (modèle de scoring) |
+| E10 | Théorie, taxonomie & évaluation | 9 | ~11 | forte (surveys) | 🔌? (juge/benchmark) |
+
+> Recherche ciblée par ensemble (prompts approfondis durcis + index dédié) :
+> voir [`ensembles/`](./ensembles/) — E1, E2, E3, E5 (les lots internes, sans dépendance
+> externe requise).
+
+### E1 — Déclenchement & rythme de compaction (~12)
+- 🟢 SelfCompact **2606.23525** `[P1+P2]` · ReSum **2509.13313** · InftyThink **2503.06692** ·
+  TALE **2412.18547** · SCM **2304.13343** · Governance Decay **2606.22528** `[P1+P2]`
+- 🟡 LightThinker **2502.15589** · Rate–Distortion **2607.08032** `[P1+P2]`
+- **Cible** : `src/preemptive-compaction.ts`, `src/config.ts` (`preemptiveCompaction.threshold`).
+- **À analyser** : substituer un déclencheur structurel (unité close/sous-tâche) au seuil token.
+- **Extension** : RAPTOR/Ada-KV (arrêt), surveys.
+
+### E2 — Résumé structuré & continuité d'état (~9)
+- 🟢 RE-TRAC **2602.02486** · IterResearch **2511.07327** · Rolling summary (LangMem) `[P1]`
+- 🟡 WebResearcher **2509.13309** · COMPASS **2510.08790** · Survey Context Engineering **2507.13334**
+- **Cible** : `src/prompt.ts` (11 sections), `src/previous-summary.ts`.
+- **À analyser** : « Task Continuity » = rapport reconstruit + facettes (provenance, incertitudes,
+  échecs, pistes écartées).
+- **Extension** : forte — `2507.13334` (~1400 réf.) non déroulée.
+
+### E3 — Folding & compression multi-échelle (~10)
+- 🟢 AgentFold **2510.24699** · LightThinker++ **2604.03679** · SelfCompact **2606.23525** `[P1+P2]`
+- 🟡 Context-Folding **2510.11967** · FoldAct **2512.22733** · Accordion-Thinking **2602.03249** ·
+  CWL **2606.11213** `[P1]`
+- **Cible** : `src/compress.ts` (`start/end/summary`), `src/index.ts` (transform).
+- **À analyser** : échelle granular/deep + granularité par pas.
+- **Extension** : moyenne (réf. CoT-compression RL).
+
+### E4 — Réversibilité, inspection & retrieval des évincés (~9)
+- 🟢 Memory Sandbox **2308.01542** · SagaLLM **2503.11951** · MemWalker **2310.05029** ·
+  HiAgent **2408.09559** · Pensieve **2602.12108** · LightThinker++ **2604.03679** ·
+  Pruning réversible (sidecar) `[P1]`
+- 🟡 CWL **2606.11213** `[P1]`
+- **Cible** : `src/compress.ts` (`<compressed-block>`), sidecar d'originaux + tool de retrieval.
+- **À analyser** : ré-injection/`expand` + retrieval des évincés.
+- **Extension** : moyenne.
+- **Externe** : 🔌? — le retrieval des évincés peut exiger un index/vecteurs ; un sidecar local reste possible.
+
+### E5 — Éviction, purge & anti-contamination (~9)
+- 🟢 Contextual Drag **2602.04288** · How Memory Management Impacts **2505.16067**
+- 🟡 Lost in the Noise **2601.07226** · Survey Memory Mechanism **2404.13501** ·
+  Rethinking Memory **2505.00675** · ACON **2510.00615** `[P1+P2]`
+- ⚪ Free() **2602.08030**
+- **Cible** : `src/strategies.ts` (`applyPurgeErrors`, dedup), `src/config.ts` (`purgeErrors.turns`).
+- **À analyser** : purge des brouillons erronés ; filtrage des distracteurs proches.
+- **Extension** : moyenne (benchmarks de distracteurs).
+
+### E6 — Contraintes, gouvernance & validation post-compaction (~7)
+- 🟢 Governance Decay **2606.22528** `[P1+P2]` · Ghost/ControlCapsule **2605.12535** `[P1]`
+- 🟡 SRD **2604.20911** · Slipstream **2605.08580** · Spotlighting **2403.14720** ·
+  Constraint Decay **2605.06445** · When Refusals Fail **2512.02445**
+- **Cible** : `src/prompt.ts` (section Constraints) + buffer épinglé + intégrité post-compaction.
+- **À analyser** : buffer épinglé réinjecté + vérification d'intégrité.
+- **Extension** : forte — plusieurs réf. citées non ouvertes (`2605.06445`, `2512.02445`).
+- **Externe** : 🔌? — la validation type Slipstream requiert un juge LLM (appel modèle séparé) ; le pinning reste interne.
+
+### E7 — Store mémoire, graphe & read/write (~10)
+- 🟢 Zep **2501.13956** · Think-in-Memory **2311.08719** · SCM **2304.13343**
+- 🟡 RET-LLM **2305.14322** · MemOS **2505.22101** / **2507.03724**
+- **Cible** : store de faits + tool de retrieval ; invalidation temporelle.
+- **À analyser** : mémoire structurée read/write, lifecycle/provenance.
+- **Extension** : forte (MemOS cite d'autres systèmes).
+- **Externe** : 🔌 — store/graphe persistant (Zep, MemOS…) → MCP/plugin dédié.
+
+### E8 — Mémoire d'expérience & cross-session (~13)
+- 🟡 MemWalker **2310.05029** · RAP **2402.03610** · Learn-to-memorize **2508.16629** ·
+  RAPTOR **2401.18059** `[P1]` · Generative Agents **2304.03442** `[P1]` ·
+  MemoryBank **2305.10250** `[P1]` · MemoRAG **2409.05591**
+- ⚪ Mem0 **2504.19413** · A-Mem **2502.12110** · MemGPT **2310.08560**
+- **Cible** : mémoire cross-session + scoring importance/pertinence/récence + oubli.
+- **À analyser** : retrieval d'expériences, oubli, paging.
+- **Extension** : forte (benchmarks/rapports).
+- **Externe** : 🔌 — mémoire cross-session et vecteurs → MCP/plugin dédié.
+
+### E9 — Compression sémantique / pruning (P1) (~6)
+- 📄 LLM semantic compression **2304.12512** · LongLLMLingua **2310.06839** ·
+  Perplexity pruning **2310.06201** · Provence **2501.16214** · Recursive dialogue **2308.15022** ·
+  DTCRS (ACL) · Code compression (ACL)
+- **Statut** : traité en P1 (sous-jacent à query-aware #8, head+tail #4/#17, scoring #11).
+- **Extension** : faible.
+- **Externe** : 🔌? — le pruning par perplexité (LongLLMLingua) exige un modèle de scoring ; les heuristiques texte restent internes.
+
+### E10 — Théorie, taxonomie & évaluation (~11)
+- 🟢 How Memory Management Impacts **2505.16067**
+- 🟡 Rate–Distortion **2607.08032** `[P1+P2]` · Survey Context Engineering **2507.13334** ·
+  Rethinking Memory **2505.00675** · Survey Memory Mechanism **2404.13501** ·
+  From Human Memory to AI Memory **2504.15965** · LightThinker **2502.15589** ·
+  Lost in the Noise **2601.07226** · Slipstream **2605.08580** `[P1]`
+- **Cible** : évaluateur de compaction du plugin.
+- **À analyser** : métriques + signaux de dérive (entropie, distracteurs, transitions).
+- **Extension** : forte (surveys).
+- **Externe** : 🔌? — l'évaluateur/juge peut être interne (appel modèle) mais un harnais d'évaluation externe est souvent requis.
+
+---
+
+## 5. Classement détaillé & mapping plugin
+
+### 🟢 Directs — « comment ça pourrait améliorer le plugin »
+- **ReSum (2509.13313)** → `src/preemptive-compaction.ts` (déclencheur budget) + `src/prompt.ts`/`src/compress.ts` (spec de résumé certain, continuation `(question, résumé)`).
+- **AgentFold (2510.24699)** → `src/compress.ts` (échelle granular/deep sur `{range, summary}`) ; `src/index.ts` (transform).
+- **RE-TRAC (2602.02486)** → `src/prompt.ts` + `src/previous-summary.ts` (facettes d'état + provenance + « free-use »).
+- **LightThinker++ (2604.03679)** → `src/compress.ts` (`commit/expand/fold` réversibles) ; `src/strategies.ts` (invariants anti-jitter).
+- **Contextual Drag (2602.04288)** → `src/strategies.ts` (étendre la purge aux brouillons erronés).
+- **IterResearch (2511.07327)** → `src/prompt.ts` (Task Continuity = rapport reconstruit) ; `src/todo-preserver.ts`.
+- **Pensieve (2602.12108)** → `src/compress.ts` (stubs `deleteContext` + notes + `readChunk`).
+- **HiAgent (2408.09559)** → `src/prompt.ts`/`src/compress.ts` (chunking par sous-buts + retrieval).
+- **InftyThink (2503.06692)** → `src/preemptive-compaction.ts` (summarize-and-continue + arrêt sur conclusion).
+- **TALE (2412.18547)** → `src/preemptive-compaction.ts`/`src/config.ts` (budget minimum / token elasticity).
+- **SagaLLM (2503.11951)** → store d'état + `src/todo-preserver.ts` (checkpoint/restore + compensation).
+- **Memory Sandbox (2308.01542)** → `src/compress.ts` (objets mémoire inspectables/réversibles).
+- **SCM (2304.13343)** → `src/preemptive-compaction.ts`/`src/strategies.ts` (contrôleur « mémoire nécessaire ? » + rang).
+- **Think-in-Memory (2311.08719)** → `src/prompt.ts`/`src/compress.ts` (conclusions évoluées + insert/forget/merge).
+- **Zep (2501.13956)** → `src/previous-summary.ts` + store de faits (invalidation temporelle + retrieval hybride).
+- **MemWalker (2310.05029)** → `src/compress.ts` + tool de retrieval (arbre de résumés navigable).
+- **How Memory Management Impacts (2505.16067)** → `src/strategies.ts` (gate d'écriture + suppression par utilité).
+- **Pruning réversible (sidecar)** `[P1]` → `src/index.ts` + store.
+- **Constraint Pinning / ControlCapsule** `[P1]` → `src/prompt.ts` + buffer épinglé.
+- **Rolling summary** `[P1]` → `src/previous-summary.ts`.
+- **Rubric SelfCompact** `[P1]` → `src/compress.ts`.
+
+### 🟡 Indirects — « ce qu'on pourrait en tirer »
+- **Survey Context Engineering (2507.13334)** : vocabulaire des opérations + axe d'évaluation.
+- **FoldAct (2512.22733)** : résumés typés (`think` vs `information`).
+- **LightThinker (2502.15589)** : métrique **Dependency** ; frontière de pensée comme déclencheur.
+- **Context-Folding (2510.11967)** : structure branch→fold→résumé (cœur RL).
+- **Accordion-Thinking (2602.03249)** : plancher de résumé, bornes de pas.
+- **COMPASS (2510.08790)** : détection boucles/dérive → refresh.
+- **WebResearcher (2509.13309)** : rapport réécrit.
+- **MemOS (2505.22101 / 2507.03724)** : lifecycle/provenance/TTL/rollback.
+- **RET-LLM (2305.14322)** : triplet + API `[MEM_WRITE]/[MEM_READ]`.
+- **RAP (2402.03610)** : restitution d'expériences par score pondéré.
+- **Rethinking Memory / Survey Memory Mechanism / From Human Memory to AI Memory** : taxonomies + éval.
+- **Lost in the Noise (2601.07226)** : hard-negatives ; entropie comme signal.
+- **Learning-to-memorize (2508.16629)** : mémoire adaptative.
+- **MemoRAG (2409.05591)** : surrogate « indice » guidant le retrieval.
+- **Slipstream (2605.08580)** : validation post-compaction ; **SRD (2604.20911)** : omissions ; **CWL (2606.11213)** : éviction structurée ; **Spotlighting (2403.14720)** : provenance.
+- **RAPTOR / Generative Agents / MemoryBank** : hiérarchie / scoring / oubli.
+
+### ⚪ Écartés
+- KV-cache : StreamingLLM, SnapKV, PyramidKV, H2O, TOVA, Keydiff, EpiCache, Breadcrumbs **2510.13797**, activation beacon.
+- Architecture/SSM : Markovian Thinker **2510.06557**, Memory3 **2407.01178**, Larimar **2403.11901**, RMT, Mamba, Titans.
+- RL/entraînement : CompactionRL **2607.05378**, MEM1 **2506.15841**, MemAgent **2507.02259**, Memory-R1 **2508.19828**, FoldAct **2512.22733**, Context-Folding **2510.11967**, Accordion **2602.03249** (politique), LightThinker/++ **2502.15589**/**2604.03679**, Free() **2602.08030**, MemoRAG **2409.05591**, LLMLingua-2, TACO-RL, Adapting LMs to Compress Contexts **2305.14788**, Compress to Impress **2402.11975**.
+- Latent/gist : ICAE **2307.06945**, gisting, AutoCompressor, Cartridges **2506.06266**.
+- Multimodal : JARVIS-1 **2311.05997**, RAP (vision), OSWorld **2404.06654**.
+- Controllable Working Memory **2211.05110** (KAFT) ; Empowering Working Memory **2312.17259** ⚠️ (HTML indisponible).
+- Benchmarks/rapports : BrowseComp **2504.12516**, BrowseComp-Plus **2508.06600**, LongMemEval **2410.10813**, RULER **2404.06654**, NoLiMa **2502.05167**, YaRN **2309.00071**, MiMo-v2 **2601.02780**, GLM-4.5 **2508.06471**, MiroThinker **2511.11793**, Kimi-K2 **2507.20534**.
+
+---
+
+## 6. Backlog unifié
+
+> Barème : **Score = 3×Impact + 2×Effort + 1×Perf** (Impact 5 majeur → 1 ; Effort 5 trivial → 1 ;
+> Perf 5 gratuit → 1). Items `[P1]` = ancienne liste ; items `[P2]` = nouveaux (scores = inférence).
+
+| # | Implémentation | Ens. | Imp. | Eff. | Perf | Score | Orig. | Ext. |
+|---|---|---|---|---|---|---|---|---|
+| 1 | Rubric SelfCompact dans le tool `compress` (+ nudge) | E1 | 4 | 5 | 5 | 27 | P1 | — |
+| 2 | Constraint Pinning / ControlCapsule (buffer épinglé, intégrité) | E6 | 5 | 3 | 5 | 26 | P1 | — |
+| 3 | Rolling summary (`RunningSummary` + `<previous-summary>`) | E2 | 5 | 3 | 4 | 25 | P1 | — |
+| 4 | Trim tête+queue (StreamingLLM) | E9 | 3 | 5 | 5 | 24 | P1 | — |
+| 5 | Brancher `purgeErrors.turns` (config inutilisée) | E5 | 3 | 5 | 5 | 24 | P1 | — |
+| 6 | Provenance/spotlighting des tool-outputs avant summarizer | E6 | 3 | 4 | 5 | 22 | P1 | — |
+| 7 | Pruning réversible (sidecar originaux + tool de retrieval) | E4 | 4 | 3 | 3 | 21 | P1 | 🔌? |
+| 8 | Rétention query-aware (scoring lexical vs msg/focus) | E9 | 4 | 3 | 2 | 20 | P1 | 🔌 |
+| 9 | Éviction structurée (épisodes typés, LLM-free) | E5 | 4 | 2 | 4 | 20 | P1 | — |
+| 10 | Fiabiliser le tool `compress` (indices non visibles) | E3 | 3 | 3 | 5 | 20 | P1 | — |
+| 11 | Scoring importance+pertinence+récence + oubli | E8/E10 | 3 | 3 | 3 | 18 | P1 | 🔌 |
+| 12 | Export post-hoc `trajectory-v1` JSONL | E8 | 3 | 2 | 5 | 18 | P1 | — |
+| 13 | Validation post-compaction (juge vs intent/facts) | E10 | 4 | 2 | 1 | 17 | P1 | 🔌? |
+| 14 | ACON (observations vs historique + guidelines) | E5 | 3 | 2 | 2 | 15 | P1 | — |
+| 15 | Règle d'arrêt par borne d'erreur | E5 | 2 | 2 | 4 | 14 | P1 | — |
+| 16 | Paging MemGPT (mémoire à étages) | E8 | 3 | 1 | 2 | 13 | P1 | 🔌 |
+| 17 | Mémoire cross-session Mem0/A-Mem | E8 | 3 | 1 | 2 | 13 | P1 | 🔌 |
+| 18 | Arbre récursif RAPTOR/DTCRS | E2/E8 | 3 | 1 | 1 | 12 | P1 | 🔌 |
+| 19 | Échelle de fold granular/deep dans `compress` (AgentFold) | E3 | 4 | 4 | 4 | 24 | P2 | — |
+| 20 | Éviction des brouillons erronés (Contextual Drag) | E5 | 4 | 4 | 5 | 25 | P2 | — |
+| 21 | Facettes d'état + provenance dans le prompt (RE-TRAC) | E2 | 4 | 4 | 4 | 24 | P2 | — |
+| 22 | Déclencheur structurel multi-échelle (ReSum/InftyThink) | E1 | 4 | 3 | 4 | 22 | P2 | — |
+| 23 | Gate d'écriture mémoire + suppression utilité (2505.16067) | E5/E8 | 4 | 3 | 3 | 21 | P2 | 🔌? |
+| 24 | `commit/expand/fold` + expand réversible (LightThinker++) | E3/E4 | 4 | 3 | 3 | 21 | P2 | — |
+| 25 | Arbre de résumés navigable (MemWalker) | E2/E4 | 3 | 2 | 4 | 20 | P2 | 🔌? |
+| 26 | Checkpoint/restore + compensation (SagaLLM) | E4 | 4 | 2 | 3 | 19 | P2 | — |
+| 27 | Invalidation temporelle des faits (Zep) | E7 | 3 | 2 | 4 | 19 | P2 | 🔌 |
+| 28 | Objets mémoire inspectables/réversibles (Memory Sandbox) | E4 | 3 | 3 | 4 | 19 | P2 | 🔌 |
+| 29 | Contrôleur de mémoire + seuils (SCM) | E1/E7 | 3 | 3 | 4 | 19 | P2 | — |
+| 30 | Résumés typés think/information (FoldAct) | E5 | 3 | 3 | 5 | 19 | P2 | — |
+| 31 | Budget minimum de raisonnement (TALE) | E1 | 3 | 3 | 4 | 19 | P2 | — |
+| 32 | Retrieval de chunks à la demande (HiAgent) | E4 | 3 | 2 | 4 | 19 | P2 | — |
+| 33 | Mémoire triplet read/write (RET-LLM) | E7 | 2 | 3 | 4 | 17 | P2 | 🔌 |
+| 34 | Rapport évolutif reconstruit (IterResearch) | E2 | 3 | 2 | 4 | 17 | P2 | — |
+| 35 | Pensées évoluées + insert/forget/merge (TiM) | E7 | 3 | 2 | 3 | 17 | P2 | 🔌? |
+| 36 | Évaluateur de compaction (surveys) | E10 | 3 | 2 | 2 | 15 | P2 | 🔌? |
 
 ### Lecture
-- **Quick wins** (effort 5) : #1, #4, #5 — quasi gratuits.
-- **Meilleur ratio impact/effort** : #2 (pinning), #3 (rolling summary).
-  - ⚠️ #3 dépend de l'API : le hook `experimental.session.compacting` ne renvoie que
-    `output.prompt`/`context` ; vérifier qu'OpenCode expose le résumé généré avant
-    de s'engager.
-- **Hot path** : #8 et #11 coûtent O(longueur totale) à chaque `messages.transform`
-  → cacher.
-- **Coûteux en tokens** : #13 (appel juge), #18 (embeddings).
+- **Quick wins** (effort 5) : #1, #4, #5.
+- **Meilleur ratio impact/effort** : #2, #3, puis #20.
+- **Hot path** : #8, #11 → cacher.
+- **Coûteux en tokens** : #13, #18.
 - **Gros chantiers** : #16, #17, #18.
 
 ### Ordre d'exécution recommandé
-1. **Lot 0 (≈1 jour)** : #1, #4, #5, #10.
-2. **Lot 1 (sécurité)** : #2 (+ #6).
-3. **Lot 2 (continuité)** : #3 (après validation API), puis #13.
-4. **Lot 3 (efficacité contexte)** : #7, #8, #9.
-5. **Lot 4 (long terme)** : #11, #12, puis #16/#17/#18.
+1. **Lot 0** : #1, #4, #5, #10.
+2. **Lot 1 (sécurité)** : #2, #6.
+3. **Lot 2 (continuité)** : #3, #21, #34, #13.
+4. **Lot 3 (efficacité contexte)** : #7, #8, #9, #19, #20.
+5. **Lot 4 (mémoire/réversibilité)** : #22→#32, puis #23, #26, #27, #28.
+6. **Lot 5 (long terme)** : #11, #12, #16, #17, #18, #36.
+
+### Dépendances externes (🔌) — « plutôt un autre plugin/MCP »
+
+- **🔌 requis** (hors périmètre direct de `live-compaction`) : **E7** (store/graphe : Zep,
+  MemOS) · **E8** (mémoire cross-session + vecteurs : Mem0, A-Mem, MemGPT, RAPTOR, RAP) ·
+  items #8, #11, #16, #17, #18, #27, #28, #33.
+- **🔌? optionnel** (une version interne dégradée reste possible) : **E4** (index de
+  retrieval) · **E6** (juge LLM de validation) · **E9** (modèle de scoring perplexité) ·
+  **E10** (juge/benchmark) · items #7, #13, #23, #25, #35, #36.
+- **Internes** (aucune dépendance externe) : **E1, E2, E3, E5** et les items sans flag.
 
 ---
 
-## 6. Non portable (substrat différent, à écarter)
+## 7. Non portable (substrat différent)
 
-- **KV-cache** : KIVI, KVQuant, Palu, MLA, H2O, SnapKV, PyramidKV, Ada-KV (interne),
-  CaM, xKV, MiniCache, StreamingLLM (mécanique).
-- **Architectural** : RMT, Mamba, Titans, Infini-attn, DMC.
+- **KV-cache** : éviction/quantization/sparsité d'attention, StreamingLLM, SnapKV, PyramidKV,
+  H2O, TOVA, Keydiff, EpiCache, Breadcrumbs, activation beacon.
+- **Architecture / récurrent / SSM** : RMT, Mamba, Titans, Infini-attn, DMC, Markovian Thinker,
+  Memory3, Larimar.
 - **Sparsité apprise** : NSA, MoBA, MInference, DuoAttention.
-- **Latent / gist** : gisting, ICAE, xRAG, 500xCompressor, Cartridges,
-  AutoCompressor, KV-Distill.
-- **Multimodal** : ToMe, LOOK-M.
-- **RL / entraîné** : CompactionRL (2607.05378), MEM1, TACO-RL, LLMLingua-2.
+- **Latent / gist / distillation** : gisting, ICAE, xRAG, AutoCompressor, Cartridges, KV-Distill.
+- **Multimodal** : ToMe, LOOK-M, JARVIS-1, RAP (vision), OSWorld.
+- **RL / entraîné** : CompactionRL, MEM1, TACO-RL, LLMLingua-2, FoldAct, Context-Folding,
+  Accordion, LightThinker/++, Free(), MemoRAG.
 - **Systèmes** : PagedAttention, InfiniGen.
+- **Sécurité mémoire hors compaction** : spotlighting, injection worms, GuardAgent.
 
-> Source : Appendix A du survey 2607.08032 (table méthode-par-axe).
+> Source : croisement Appendix A du survey `2607.08032` + jugements de la passe 2.
 
 ---
 
-## 7. Incertitudes & prochaines étapes
+## 8. Vérification, corrections, incertitudes
 
-1. **API OpenCode** : le hook `experimental.session.compacting` expose-t-il le résumé
-   généré (nécessaire pour #3 et #13) ? À vérifier.
-2. **Extraction des contraintes** (#2) : partir d'AGENTS.md + `permission` + directives
-   utilisateur explicites ; les contraintes implicites sont hors périmètre
-   (limitation reconnue par Governance Decay).
-3. **Coût du juge** (#13) : appel LLM supplémentaire → mesurer l'impact.
-4. **Hot path** : valider le surcoût de #8/#11 sur de grands contextes.
+- **LU** : titres/auteurs/dates/IDs/abstracts/textes intégraux ; **DÉDUIT** : verdicts de
+  portabilité et mappings plugin.
+- **Titres réels ≠ titre cité** (corrigés) : `2511.07327` *IterResearch: Rethinking Long-Horizon
+  Agents with Interaction Scaling* · `2505.00675` *Rethinking Memory in LLM based Agents* ·
+  `2404.13501` *A Survey on the Memory Mechanism of Large Language Model based Agents* ·
+  `2409.05591` *MemoRAG: Boosting Long Context Processing…* · `2407.09450` *Human-inspired
+  Episodic Memory…* · `2509.13309` *WebResearcher: Unleashing unbounded reasoning…*.
+- **⚠️ inaccessible** : `2312.17259` (HTML indisponible, abstract seul) ; `2510.11967`
+  (HTML 404, portabilité jugée sur abstract).
+- **Incertitudes** : API `experimental.session.compacting` (exposition du résumé généré) ;
+  extraction des contraintes ; coût du juge ; surcoût hot path ; IDs de niveau 4 non tous
+  revérifiés indépendamment.
 
-### Prochaine action proposée
-Transformer le **Lot 0** (#1, #4, #5, #10) en tickets ou l'implémenter directement.
+### Prochaines étapes
+Traiter **E1 (déclenchement/rythme)** et **E4 (réversibilité/retrieval)** en premier,
+puis **E2 (résumé/état)** et **E5 (éviction)**, en s'appuyant sur le backlog §6.
