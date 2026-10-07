@@ -18,7 +18,7 @@ OpenCode's built-in compaction produces a 7-section summary. This plugin replace
 | **Prompt** | Hardcoded | Replaced via plugin hook (customizable) |
 | **Tool output size** | Unmanaged | **Configurable per-tool trim limits** |
 | **Duplicate tool calls** | Kept as-is | **Deduplicated** (keeps only latest) |
-| **Errored tool calls** | Kept forever | Inputs purged after N turns; opt-in **whole-attempt** purge (input + output, compact error extract) and **cascade** to dependent calls |
+| **Errored tool calls** | Kept forever | Whole failed attempt purged after N turns (input + output, compact error extract); cascades to dependent calls |
 | **Manual compaction** | `/compact` (built-in) | left to OpenCode (the plugin does not override it) |
 | **Protected files** | None | **Glob patterns** (`AGENTS.md`, `**/*.config.ts`) never trimmed |
 | **Recent turn protection** | None | **Last N turns** protected from trimming (default: 4) |
@@ -97,7 +97,7 @@ Runs on every message batch sent to the LLM. Applies the following strategies in
 3. **Expand / recall** — Restores a block's original messages from the in-memory sidecar (`expand` is sticky, `recall` is one-shot).
 4. **Tool output trimming** — Truncates long tool outputs (bash, read, grep, etc.) to configurable limits. Keeps the *end* of the output (usually has the result/error).
 5. **Deduplication** — When the same tool is called with the same args multiple times, only the latest output is kept. Earlier duplicates are replaced with a short marker.
-6. **Error purge** — Strips the input from errored tool calls older than N turns. Opt-in `wholeAttempt` also replaces the output with a compact error extract; opt-in `cascade` extends the purge to calls that depend on a purged call.
+6. **Error purge** — Purges the whole failed attempt (input + output, with a compact error extract) from errored tool calls older than N turns; `cascade` extends the purge to calls that depend on a purged call.
 7. **Graduated eviction** — Opt-in, LLM-free eviction (`reasoning → bulk output → intermediate → episode`) once the estimated budget is exceeded; user turns are never evicted.
 
 Messages matching `pinning.patterns` are **pinned**: they are skipped by trimming, dedup, purge and eviction, and their clauses are re-injected into the compaction prompt as `<pinned-constraints>`.
@@ -136,7 +136,7 @@ The plugin exposes six model-driven tools for proactive context management: `com
 | `start` | number *(optional, legacy)* | Explicit start message index (inclusive, 0-based) |
 | `end` | number *(optional, legacy)* | Explicit end message index (inclusive, 0-based) |
 
-When `start`/`end` are omitted, the plugin selects the range **deterministically**: everything after the newest existing compressed block, excluding the last `compress.protectedTurns` user turns. The range is replaced with a `<compressed-block>` carrying a durable `id` and a stable `[bN]` label. The originals are kept in memory when `compress.reversible` is enabled (default).
+When `start`/`end` are omitted, the plugin selects the range **deterministically**: everything after the newest existing compressed block, excluding the last `compress.protectedTurns` user turns. The range is replaced with a `<compressed-block>` carrying a durable `id` and a stable `[bN]` label. The originals are kept in memory when `compress.reversible` is enabled (off by default).
 
 ### `squash`
 
@@ -198,13 +198,13 @@ Each feature below lists **what** it does, its **config** keys and how it
 | Turn protection | `turnProtection.{enabled,turns}` | `true`, `4` |
 | Protected files | `protectedFilePatterns` | `[]` |
 | Deduplication | `dedup.{enabled,protectedTools}` | `true`, `[]` |
-| Error purge | `purgeErrors.{enabled,turns,wholeAttempt,cascade}` | `true`, `4`, `false`, `false` |
-| Graduated eviction | `eviction.{enabled,thresholdTokens,levels,protectPrologue}` | `false`, `80000`, all levels, `true` |
+| Error purge | `purgeErrors.{enabled,turns,wholeAttempt,cascade}` | `true`, `4`, `true`, `true` |
+| Graduated eviction | `eviction.{enabled,thresholdTokens,levels,protectPrologue}` | `true`, `80000`, all levels, `true` |
 | Constraint pinning | `pinning.{enabled,patterns,maxClauses}` | `true`, `[]`, `20` |
 | Preemptive compaction | `preemptiveCompaction.*` | disabled |
 | Degradation monitor | `degradationMonitor.{enabled,threshold,windowMs}` | `false`, `4`, `120000` |
 | Auto-continue | — | — |
-| Compression tools | `compress.{protectedTurns,reversible,maxBlocksPerSquash,searchMaxResults}` | `3`, `true`, `8`, `5` |
+| Compression tools | `compress.{protectedTurns,reversible,maxBlocksPerSquash,searchMaxResults}` | `3`, `false`, `8`, `5` |
 
 ### Structured compaction prompt
 - **What** — replaces (or augments) OpenCode's default prompt with the 11-section
@@ -256,8 +256,8 @@ Each feature below lists **what** it does, its **config** keys and how it
 - **Interactions** — skipped for pinned messages; runs before error purge.
 
 ### Error purge
-- **What** — strips errored tool inputs after N turns; opt-in `wholeAttempt`
-  (input + output + compact error extract) and `cascade` (dependent calls).
+- **What** — purges the whole failed attempt after N turns (`wholeAttempt`: input
+  + output + compact error extract) and `cascade`s to dependent calls.
 - **Config** — `purgeErrors.{enabled,turns,wholeAttempt,cascade}`.
 - **Interactions** — recent turns and pinned messages are never purged; `cascade`
   only fires for calls actually purged.
@@ -366,25 +366,25 @@ Precedence, low to high: **defaults → global file → plugin options → proje
         "protectedTools": []  // Tool names to exclude from dedup
     },
 
-    // Error purge: strip inputs from errored calls (opt-in whole-attempt + cascade)
+    // Error purge: strip the whole failed attempt (input + output) after N turns
     "purgeErrors": {
         "enabled": true,
-        "turns": 4,              // Purge errored calls older than N user turns
-        "wholeAttempt": false,   // Opt-in: also replace the output with a compact error extract
-        "cascade": false         // Opt-in: cascade the purge to calls depending on a purged call
+        "turns": 4,             // Purge errored calls older than N user turns
+        "wholeAttempt": true,   // Also replace the output with a compact error extract
+        "cascade": true         // Cascade the purge to calls depending on a purged call
     },
 
     // Model-driven compression tools
     "compress": {
         "protectedTurns": 3,        // Trailing user turns excluded from deterministic selection
-        "reversible": true,         // Keep originals in memory for expand/recall
+        "reversible": false,        // Keep originals in memory for expand/recall
         "maxBlocksPerSquash": 8,    // Max blocks merged by a single squash
         "searchMaxResults": 5       // Max hits returned by the `search` tool
     },
 
-    // Graduated, LLM-free eviction (opt-in)
+    // Graduated, LLM-free eviction
     "eviction": {
-        "enabled": false,
+        "enabled": true,
         "thresholdTokens": 80000,   // Eviction runs only above this estimated budget
         "levels": ["reasoning", "bulk_output", "intermediate", "episode"],
         "protectPrologue": true     // Never evict the first message
@@ -408,7 +408,7 @@ Precedence, low to high: **defaults → global file → plugin options → proje
         "enabled": false,             // enable to compact before the context is full
         "threshold": 0.78,            // fraction of the context limit that triggers it
         "absoluteTokenThreshold": 0,  // optional absolute ceiling (0 = disabled); min(ratio, this) wins
-        "countCacheTokens": false,    // count cache read/write tokens (off avoids premature triggers)
+        "countCacheTokens": true,     // count cache read/write tokens (matches OpenCode's context size)
         "minTokensSinceLast": 0,      // gate: minimum new tokens since the last compaction
         "minMessagesSinceLast": 0,    // gate: minimum new messages since the last compaction
         "tailGuard": { "enabled": false, "minNewToolCalls": 3 },  // gate: minimum new tool calls

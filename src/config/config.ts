@@ -44,11 +44,11 @@ export interface PurgeErrorsConfig {
 	turns?: number;
 	/**
 	 * Purge the whole failed attempt (input + output) instead of only the input.
-	 * The error output is replaced by a compact extract (default: false)
+	 * The error output is replaced by a compact extract (default: true)
 	 */
 	wholeAttempt?: boolean;
 	/**
-	 * Cascade the purge to work that depends on a purged call (default: false)
+	 * Cascade the purge to work that depends on a purged call (default: true)
 	 */
 	cascade?: boolean;
 }
@@ -56,7 +56,7 @@ export interface PurgeErrorsConfig {
 export interface CompressConfig {
 	/** Trailing user turns protected from deterministic span selection (default: 3) */
 	protectedTurns?: number;
-	/** Keep compressed originals in memory for expand (default: true) */
+	/** Keep compressed originals in memory for expand (default: false) */
 	reversible?: boolean;
 	/** Maximum number of blocks merged by a single squash (default: 8) */
 	maxBlocksPerSquash?: number;
@@ -74,7 +74,7 @@ export interface PinningConfig {
 }
 
 export interface EvictionSettings {
-	/** Enable graduated LLM-free eviction (default: false) */
+	/** Enable graduated LLM-free eviction (default: true) */
 	enabled?: boolean;
 	/** Token budget; eviction runs only above it (default: 80000) */
 	thresholdTokens?: number;
@@ -105,7 +105,7 @@ export interface PreemptiveCompactionConfig {
 	threshold?: number;
 	/** Absolute token ceiling for the trigger; the smaller of ratio and this wins */
 	absoluteTokenThreshold?: number;
-	/** Count cache read/write tokens in the usage (default: false) */
+	/** Count cache read/write tokens in the usage (default: true) */
 	countCacheTokens?: boolean;
 	/** Minimum new tokens since the last compaction before compacting (default: 0) */
 	minTokensSinceLast?: number;
@@ -213,17 +213,17 @@ export const DEFAULT_CONFIG: Required<
 	purgeErrors: {
 		enabled: true,
 		turns: 4,
-		wholeAttempt: false,
-		cascade: false,
+		wholeAttempt: true,
+		cascade: true,
 	},
 	compress: {
 		protectedTurns: 3,
-		reversible: true,
+		reversible: false,
 		maxBlocksPerSquash: 8,
 		searchMaxResults: 5,
 	},
 	eviction: {
-		enabled: false,
+		enabled: true,
 		thresholdTokens: 80000,
 		levels: ["reasoning", "bulk_output", "intermediate", "episode"],
 		protectPrologue: true,
@@ -240,7 +240,7 @@ export const DEFAULT_CONFIG: Required<
 	preemptiveCompaction: {
 		enabled: false,
 		threshold: 0.78,
-		countCacheTokens: false,
+		countCacheTokens: true,
 		minTokensSinceLast: 0,
 		minMessagesSinceLast: 0,
 		tailGuard: {
