@@ -11,12 +11,7 @@
  * right after a compaction replaced the history).
  */
 
-import { partsText } from "./messages.js";
-
-interface SummaryMessageLike {
-	info?: { role?: string; summary?: boolean; id?: string };
-	parts?: Array<{ type?: string; text?: string }>;
-}
+import { lastMessageWhere, partsText } from "./messages.js";
 
 export interface SlidingState {
 	/** Only consider summaries strictly after this message index (inclusive cutoff). */
@@ -27,38 +22,35 @@ export interface SlidingState {
 	lastSummaryText?: string;
 }
 
-function summaryText(msg: SummaryMessageLike): string | undefined {
-	return partsText(msg.parts) || undefined;
-}
-
 /** Return the text of the most recent compaction summary, if any. */
 export function extractPreviousSummary(
 	messages: unknown,
 	state?: SlidingState,
 ): string | undefined {
-	if (!Array.isArray(messages)) return undefined;
-
-	for (let i = messages.length - 1; i >= 0; i--) {
-		if (state?.cutoffIndex !== undefined && i <= state.cutoffIndex) break;
-
-		const msg = messages[i] as SummaryMessageLike | undefined;
-		if (msg?.info?.role !== "assistant" || msg.info.summary !== true) continue;
-
+	const found = lastMessageWhere(messages, (message, index) => {
+		if (state?.cutoffIndex !== undefined && index <= state.cutoffIndex) {
+			return false;
+		}
+		if (message.info?.role !== "assistant" || message.info.summary !== true) {
+			return false;
+		}
 		// The summary already carried forward is not re-emitted; a newer summary
 		// supersedes it, otherwise the fallback below keeps continuity.
-		if (state?.lastSummaryMessageId && msg.info.id === state.lastSummaryMessageId) {
-			continue;
+		if (
+			state?.lastSummaryMessageId &&
+			message.info.id === state.lastSummaryMessageId
+		) {
+			return false;
 		}
+		return partsText(message.parts) !== "";
+	});
 
-		const text = summaryText(msg);
-		if (!text) continue;
+	if (!found) return state?.lastSummaryText;
 
-		if (state) {
-			state.lastSummaryMessageId = msg.info.id;
-			state.lastSummaryText = text;
-		}
-		return text;
+	const text = partsText(found.message.parts);
+	if (state) {
+		state.lastSummaryMessageId = found.message.info?.id;
+		state.lastSummaryText = text;
 	}
-
-	return state?.lastSummaryText;
+	return text;
 }

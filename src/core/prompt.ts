@@ -8,7 +8,7 @@
  * `experimental.session.compacting` hook.
  */
 
-import { partsText } from "./messages.js";
+import { lastMessageWhere, partsText } from "./messages.js";
 
 /**
  * Extract the most recent user message text (the "ask") to anchor the summary,
@@ -18,17 +18,13 @@ export function extractLatestUserAsk(
 	messages: unknown,
 	maxLen = 800,
 ): string | undefined {
-	if (!Array.isArray(messages)) return undefined;
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const msg = messages[i] as
-			| { info?: { role?: string }; parts?: unknown }
-			| undefined;
-		if (msg?.info?.role !== "user") continue;
-		const text = partsText(msg.parts);
-		if (!text) continue;
-		return text.length > maxLen ? `${text.slice(0, maxLen)}…` : text;
-	}
-	return undefined;
+	const found = lastMessageWhere(
+		messages,
+		(message) => message.info?.role === "user" && partsText(message.parts) !== "",
+	);
+	if (!found) return undefined;
+	const text = partsText(found.message.parts);
+	return text.length > maxLen ? `${text.slice(0, maxLen)}…` : text;
 }
 
 export function buildCompactionPrompt(input: {

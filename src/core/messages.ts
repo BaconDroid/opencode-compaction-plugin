@@ -30,6 +30,28 @@ export function partInput(part: MessagePart): unknown {
 	return (part as Record<string, unknown>).args ?? part.state?.input;
 }
 
+/** Loosely-typed message used by the backward scanners. */
+export interface MessageLike {
+	info?: { role?: string; summary?: boolean; id?: string };
+	parts?: unknown;
+}
+
+/**
+ * Scan `messages` from the end and return the last message matching `predicate`,
+ * with its index, or `undefined`.
+ */
+export function lastMessageWhere(
+	messages: unknown,
+	predicate: (message: MessageLike, index: number) => boolean,
+): { message: MessageLike; index: number } | undefined {
+	if (!Array.isArray(messages)) return undefined;
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const message = messages[i] as MessageLike | undefined;
+		if (message && predicate(message, i)) return { message, index: i };
+	}
+	return undefined;
+}
+
 /**
  * Index (0-based) of the Nth user turn from the end, or `undefined` when there
  * are fewer than N user turns.

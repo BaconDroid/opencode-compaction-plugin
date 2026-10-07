@@ -470,46 +470,33 @@ describe("applySquash()", () => {
 		expect(msgs[0].parts[0].text).toContain('squashed="true"');
 	});
 
-	it("refuses a single-block request", () => {
-		const msgs = [blockMsg("a", "A", "[b0]\n\nfirst")];
-		const merged = applySquash(msgs as any, [
-			{ from: "b0", to: "b0", topic: "T", summary: "S", timestamp: 1 },
-		]);
-		expect(merged).toBe(0);
-		expect(msgs).toHaveLength(1);
-	});
-
-	it("refuses non-contiguous blocks", () => {
-		const msgs = [
+	it("refuses ambiguous requests (single, non-contiguous, unknown, over max)", () => {
+		const single = [blockMsg("a", "A", "[b0]\n\nfirst")];
+		const nonContiguous = [
 			blockMsg("a", "A", "[b0]\n\nfirst"),
 			{ info: { role: "user" }, parts: [{ type: "text", text: "interrupt" }] },
 			blockMsg("b", "B", "[b1]\n\nsecond"),
 		];
-		const merged = applySquash(msgs as any, [
-			{ from: "b0", to: "b1", topic: "T", summary: "S", timestamp: 1 },
-		]);
-		expect(merged).toBe(0);
-	});
-
-	it("refuses unknown labels", () => {
-		const msgs = [blockMsg("a", "A", "[b0]\n\nfirst")];
-		const merged = applySquash(msgs as any, [
-			{ from: "b0", to: "b9", topic: "T", summary: "S", timestamp: 1 },
-		]);
-		expect(merged).toBe(0);
-	});
-
-	it("refuses more blocks than maxBlocks", () => {
-		const msgs = [
+		const three = [
 			blockMsg("a", "A", "[b0]\n\na"),
 			blockMsg("b", "B", "[b1]\n\nb"),
 			blockMsg("c", "C", "[b2]\n\nc"),
 		];
-		const merged = applySquash(
-			msgs as any,
-			[{ from: "b0", to: "b2", topic: "T", summary: "S", timestamp: 1 }],
-			{ maxBlocks: 2 },
-		);
-		expect(merged).toBe(0);
+		const req = (from: string, to: string): SquashRequest => ({
+			from,
+			to,
+			topic: "T",
+			summary: "S",
+			timestamp: 1,
+		});
+		const cases: Array<[unknown[], SquashRequest, { maxBlocks: number }?]> = [
+			[single, req("b0", "b0")],
+			[nonContiguous, req("b0", "b1")],
+			[single, req("b0", "b9")],
+			[three, req("b0", "b2"), { maxBlocks: 2 }],
+		];
+		for (const [msgs, request, opts] of cases) {
+			expect(applySquash(msgs as any, [request], opts)).toBe(0);
+		}
 	});
 });

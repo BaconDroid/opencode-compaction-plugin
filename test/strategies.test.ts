@@ -58,33 +58,28 @@ describe("applyDedup()", () => {
 		expect(msgs[2].parts[0].state.output).toBe("v3");
 	});
 
-	it("does not dedup different tools or args", () => {
-		const cfg = mergeConfig({});
-		const msgs = [
+	it("does not dedup different tools/args, protected tools or pinned indices", () => {
+		const diff = [
 			msg("read", { filePath: "a.ts" }, "1"),
 			msg("write", { filePath: "a.ts" }, "2"),
 			msg("read", { filePath: "b.ts" }, "3"),
 		];
-		expect(applyDedup(msgs as never, cfg)).toBe(0);
-	});
+		expect(applyDedup(diff as never, mergeConfig({}))).toBe(0);
 
-	it("skips protected tools", () => {
-		const cfg = mergeConfig({ dedup: { protectedTools: ["bash"] } });
-		const msgs = [
+		const prot = [
 			msg("bash", { command: "ls" }, "v1"),
 			msg("bash", { command: "ls" }, "v2"),
 		];
-		expect(applyDedup(msgs as never, cfg)).toBe(0);
-	});
+		expect(
+			applyDedup(prot as never, mergeConfig({ dedup: { protectedTools: ["bash"] } })),
+		).toBe(0);
 
-	it("skips protected message indices (pinned)", () => {
-		const cfg = mergeConfig({});
-		const msgs = [
+		const pinned = [
 			msg("read", { filePath: "a.ts" }, "v1"),
 			msg("read", { filePath: "a.ts" }, "v2"),
 		];
-		expect(applyDedup(msgs as never, cfg, new Set([0]))).toBe(0);
-		expect(msgs[0].parts[0].state.output).toBe("v1");
+		expect(applyDedup(pinned as never, mergeConfig({}), new Set([0]))).toBe(0);
+		expect(pinned[0].parts[0].state.output).toBe("v1");
 	});
 
 	it("ignores parts without output, non-tool parts and errored calls", () => {
