@@ -450,7 +450,9 @@ describe("LiveCompactionPlugin", () => {
 		});
 
 		it("purges large inputs from errored tools outside the recent window", async () => {
-			const hooks = await getHooks();
+			const hooks = await LiveCompactionPlugin(mockCtx as any, {
+				purgeErrors: { wholeAttempt: false },
+			} as any);
 			const bigInput = "x".repeat(500);
 			const messages = [
 				{
@@ -1115,7 +1117,9 @@ describe("LiveCompactionPlugin", () => {
 		});
 
 		it("restores original messages via expand", async () => {
-			const hooks = await getHooks();
+			const hooks = await LiveCompactionPlugin(mockCtx as any, {
+				compress: { reversible: true },
+			} as any);
 
 			await afterTool(hooks, "compress", "sess-expand", "", { topic: "T", start: 0, end: 1, summary: "S" });
 

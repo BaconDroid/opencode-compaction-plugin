@@ -23,17 +23,17 @@ describe("mergeConfig()", () => {
 		expect(cfg.purgeErrors).toMatchObject({
 			enabled: true,
 			turns: 4,
-			wholeAttempt: false,
-			cascade: false,
+			wholeAttempt: true,
+			cascade: true,
 		});
 		expect(cfg.compress).toEqual({
 			protectedTurns: 3,
-			reversible: true,
+			reversible: false,
 			maxBlocksPerSquash: 8,
 			searchMaxResults: 5,
 		});
 		expect(cfg.eviction).toMatchObject({
-			enabled: false,
+			enabled: true,
 			thresholdTokens: 80000,
 			protectPrologue: true,
 		});
@@ -51,7 +51,7 @@ describe("mergeConfig()", () => {
 		expect(cfg.preemptiveCompaction).toMatchObject({
 			enabled: false,
 			threshold: 0.78,
-			countCacheTokens: false,
+			countCacheTokens: true,
 			minTokensSinceLast: 0,
 			minMessagesSinceLast: 0,
 			cooldownMs: 60000,

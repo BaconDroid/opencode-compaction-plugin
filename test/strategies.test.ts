@@ -160,16 +160,19 @@ describe("applyPurgeErrors()", () => {
 		expect(applyPurgeErrors(none as never, cfg)).toBe(0);
 	});
 
-	it("preserves error output by default and purges the whole attempt when enabled", () => {
+	it("purges the whole attempt by default and preserves output when disabled", () => {
 		const input = "x".repeat(200);
 		const def = errored({ output: "ENOENT: no such file", input });
 		applyPurgeErrors(def as never, mergeConfig({}));
-		expect(def[0].parts[0].state.output).toBe("ENOENT: no such file");
+		expect(def[0].parts[0].state.output).toContain("[purged failed bash:");
+		expect(def[0].parts[0].state.output).toContain("ENOENT");
 
-		const whole = errored({ output: "ENOENT: no such file", input });
-		applyPurgeErrors(whole as never, mergeConfig({ purgeErrors: { wholeAttempt: true } }));
-		expect(whole[0].parts[0].state.output).toContain("[purged failed bash:");
-		expect(whole[0].parts[0].state.output).toContain("ENOENT");
+		const keep = errored({ output: "ENOENT: no such file", input });
+		applyPurgeErrors(
+			keep as never,
+			mergeConfig({ purgeErrors: { wholeAttempt: false } }),
+		);
+		expect(keep[0].parts[0].state.output).toBe("ENOENT: no such file");
 	});
 
 	it("reports purged call ids and skips protected indices", () => {
