@@ -14,6 +14,15 @@
  */
 
 import { tool } from "@opencode-ai/plugin";
+import {
+	blockId,
+	collectExistingBlockIds,
+	orderCompressBlocks,
+	parseCompressBlocks,
+	renderBlockBody,
+	selectDeterministicSpan,
+	type Scale,
+} from "./blocks.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -22,12 +31,14 @@ import { tool } from "@opencode-ai/plugin";
 export interface CompressRequest {
 	/** Topic label for the compression (3-5 words) */
 	topic: string;
-	/** Start message index (inclusive, 0-based) */
-	start: number;
-	/** End message index (inclusive, 0-based) */
-	end: number;
+	/** Start message index (inclusive, 0-based). Legacy: omit to auto-select. */
+	start?: number;
+	/** End message index (inclusive, 0-based). Legacy: omit to auto-select. */
+	end?: number;
 	/** Summary text written by the model */
 	summary: string;
+	/** Compression scale: one message (granular) or a range (deep) */
+	scale?: Scale;
 	/** Timestamp for ordering */
 	timestamp: number;
 	/** callID of the compress tool call that produced this request */
@@ -59,7 +70,9 @@ export class CompressionStore {
 	drain(sessionID: string): CompressRequest[] {
 		const queue = this.queues.get(sessionID) ?? [];
 		this.queues.delete(sessionID);
-		return queue.sort((a, b) => b.start - a.start); // Process from end to start
+		// Explicit-index requests are processed from end to start; auto-selected
+		// requests (no index) go last since they recompute their span.
+		return queue.sort((a, b) => (b.start ?? -1) - (a.start ?? -1));
 	}
 
 	/** Clear all pending compressions for a session. */
@@ -123,23 +136,59 @@ export function selectCompressions(
 	return { applicable, deferred };
 }
 
+export interface ApplyCompressionOptions {
+	/** Trailing user turns protected from deterministic span selection. */
+	protectedTurns?: number;
+	/** Called before a range is replaced, with the original messages. */
+	record?: (info: {
+		id: string;
+		label: string;
+		original: Message[];
+	}) => void;
+}
+
 /**
  * Apply pending compressions to a messages array.
- * Processes from end to start to keep indices stable.
+ *
+ * Requests with explicit `{start,end}` are processed from end to start to keep
+ * indices stable. Requests without indices select their span deterministically
+ * (after the newest existing block, excluding the protected tail).
  *
  * Returns the number of messages replaced.
  */
 export function applyCompressions(
 	messages: Message[],
 	requests: CompressRequest[],
+	opts: ApplyCompressionOptions = {},
 ): number {
 	if (requests.length === 0) return 0;
 
 	let totalReplaced = 0;
 
-	for (const req of requests) {
-		const start = Math.max(0, req.start);
-		const end = Math.min(messages.length - 1, req.end);
+	const hasIndex = (req: CompressRequest): boolean =>
+		typeof req.start === "number" && typeof req.end === "number";
+
+	const explicit = requests
+		.filter(hasIndex)
+		.sort((a, b) => (b.start as number) - (a.start as number));
+	const auto = requests.filter((req) => !hasIndex(req));
+
+	for (const req of [...explicit, ...auto]) {
+		let start: number;
+		let end: number;
+
+		if (hasIndex(req)) {
+			start = Math.max(0, req.start as number);
+			end = Math.min(messages.length - 1, req.end as number);
+		} else {
+			const span = selectDeterministicSpan(
+				messages as Parameters<typeof selectDeterministicSpan>[0],
+				{ protectedTurns: opts.protectedTurns ?? 3 },
+			);
+			if (!span) continue;
+			start = span.start;
+			end = span.end;
+		}
 
 		if (start > end || start >= messages.length) continue;
 
@@ -151,13 +200,24 @@ export function applyCompressions(
 		const prevRole = messages[start - 1]?.info?.role;
 		const role = prevRole === "user" ? "assistant" : "user";
 
+		// Assign a durable id and a stable label based on existing blocks.
+		const id = blockId(messages[start]);
+		const existingCount = collectExistingBlockIds(messages).size;
+		const label = `b${existingCount}`;
+
+		// Capture the originals before they are replaced (for expand).
+		if (opts.record) {
+			opts.record({ id, label, original: messages.slice(start, end + 1) });
+		}
+
 		// Create a synthetic summary message
+		const scaleAttr = req.scale ? ` scale="${escapeAttr(req.scale)}"` : "";
 		const summaryMessage: Message = {
 			info: { role },
 			parts: [
 				{
 					type: "text",
-					text: `<compressed-block topic="${escapeAttr(req.topic)}" range="${start}-${end}" count="${count}">\n${req.summary}\n</compressed-block>`,
+					text: `<compressed-block id="${escapeAttr(id)}" label="${label}" topic="${escapeAttr(req.topic)}" range="${start}-${end}" count="${count}"${scaleAttr}>\n${renderBlockBody(label, req.summary)}\n</compressed-block>`,
 				},
 			],
 		};
@@ -168,6 +228,112 @@ export function applyCompressions(
 	}
 
 	return totalReplaced;
+}
+
+// ---------------------------------------------------------------------------
+// Squash: merge contiguous compressed blocks into one
+// ---------------------------------------------------------------------------
+
+export interface SquashRequest {
+	/** First block label (`bN`) to merge. */
+	from: string;
+	/** Last block label (`bN`) to merge. */
+	to: string;
+	summary: string;
+	topic: string;
+	timestamp: number;
+	callID?: string;
+}
+
+/** Per-plugin-instance store of pending squash requests, keyed by session. */
+export class SquashStore {
+	private queues = new Map<string, SquashRequest[]>();
+
+	queue(sessionID: string, request: SquashRequest): void {
+		let queue = this.queues.get(sessionID);
+		if (!queue) {
+			queue = [];
+			this.queues.set(sessionID, queue);
+		}
+		queue.push(request);
+	}
+
+	drain(sessionID: string): SquashRequest[] {
+		const queue = this.queues.get(sessionID) ?? [];
+		this.queues.delete(sessionID);
+		return queue;
+	}
+
+	clear(sessionID: string): void {
+		this.queues.delete(sessionID);
+	}
+
+	clearAll(): void {
+		this.queues.clear();
+	}
+}
+
+export interface ApplySquashOptions {
+	/** Maximum number of blocks merged by a single squash (default: 8). */
+	maxBlocks?: number;
+}
+
+/**
+ * Merge contiguous compressed blocks into a single block.
+ *
+ * Fail-closed: refuses requests that reference unknown labels, fewer than two
+ * blocks, more than `maxBlocks`, or blocks that are not contiguous messages.
+ * Returns the number of blocks merged.
+ */
+export function applySquash(
+	messages: Message[],
+	requests: SquashRequest[],
+	opts: ApplySquashOptions = {},
+): number {
+	const maxBlocks = opts.maxBlocks ?? 8;
+	let merged = 0;
+
+	for (const req of requests) {
+		const blocks = orderCompressBlocks(
+			parseCompressBlocks(
+				messages as Parameters<typeof parseCompressBlocks>[0],
+			),
+		);
+		const fromIndex = blocks.findIndex((b) => b.label === req.from);
+		const toIndex = blocks.findIndex((b) => b.label === req.to);
+		if (fromIndex === -1 || toIndex === -1 || fromIndex >= toIndex) continue;
+
+		const selected = blocks.slice(fromIndex, toIndex + 1);
+		if (selected.length < 2 || selected.length > maxBlocks) continue;
+
+		// Require the selected blocks to occupy adjacent messages.
+		const contiguous = selected.every(
+			(block, i) => i === 0 || block.index === selected[i - 1].index + 1,
+		);
+		if (!contiguous) continue;
+
+		const firstIndex = selected[0].index;
+		const lastIndex = selected[selected.length - 1].index;
+		const prevRole = messages[firstIndex - 1]?.info?.role;
+		const role = prevRole === "user" ? "assistant" : "user";
+		const label = selected[0].label as string;
+		const id = selected[0].id;
+
+		const summaryMessage: Message = {
+			info: { role },
+			parts: [
+				{
+					type: "text",
+					text: `<compressed-block id="${escapeAttr(id)}" label="${label}" topic="${escapeAttr(req.topic)}" range="${firstIndex}-${lastIndex}" count="${selected.length}" squashed="true">\n${renderBlockBody(label, req.summary)}\n</compressed-block>`,
+				},
+			],
+		};
+
+		messages.splice(firstIndex, lastIndex - firstIndex + 1, summaryMessage);
+		merged += selected.length;
+	}
+
+	return merged;
 }
 
 function escapeAttr(s: string): string {
@@ -193,26 +359,76 @@ export function buildCompressToolDef() {
 Use this tool when you have completed a task phase and want to reduce context size.
 You write the summary — you have the full context. Be thorough but concise.
 
+When to compact:
+- After a phase is finished and verified (tests passing, task done), not mid-edit.
+- When the context is growing with completed, self-contained work you no longer need verbatim.
+- Not when the context is small or the recent turns are still being actively worked on.
+
 The compressed range will be replaced with your summary in the conversation.
 Message indices are 0-based. Use the message order visible in the conversation.`,
 		args: {
 			topic: tool.schema
 				.string()
 				.describe("Short label (3-5 words) for display, e.g., 'Auth Bug Fix'"),
-			start: tool.schema
-				.number()
-				.describe("Start message index (inclusive, 0-based)"),
-			end: tool.schema
-				.number()
-				.describe("End message index (inclusive, 0-based)"),
 			summary: tool.schema
 				.string()
 				.describe(
 					"Complete technical summary replacing all messages in the range. Include file paths, decisions, error strings, and code snippets that are still relevant.",
 				),
+			scale: tool.schema
+				.enum(["granular", "deep"])
+				.optional()
+				.describe(
+					"granular compresses a single message; deep compresses a whole range (default: deep)",
+				),
+			start: tool.schema
+				.number()
+				.optional()
+				.describe(
+					"Legacy start message index (inclusive, 0-based). Omit to auto-select the range.",
+				),
+			end: tool.schema
+				.number()
+				.optional()
+				.describe(
+					"Legacy end message index (inclusive, 0-based). Omit to auto-select the range.",
+				),
 		},
 		async execute(args) {
-			return `Compression queued for messages ${args.start}-${args.end} (${args.topic}). It will be applied on the next message transform.`;
+			const range =
+				typeof args.start === "number" && typeof args.end === "number"
+					? `messages ${args.start}-${args.end}`
+					: "an auto-selected range";
+			return `Compression queued for ${range} (${args.topic}). It will be applied on the next message transform.`;
+		},
+	});
+}
+
+/**
+ * Build the `squash` tool definition: merge two or more contiguous compressed
+ * blocks (referenced by their `bN` labels) into a single block.
+ */
+export function buildSquashToolDef() {
+	return tool({
+		description: `Merge contiguous compressed blocks into a single block.
+
+Use this after several compressions have accumulated to collapse them into one
+coherent summary. Reference blocks by their [bN] labels. The blocks must be
+adjacent; ambiguous requests are refused.`,
+		args: {
+			from: tool.schema
+				.string()
+				.describe("First block label to merge, e.g. 'b0'"),
+			to: tool.schema.string().describe("Last block label to merge, e.g. 'b2'"),
+			topic: tool.schema
+				.string()
+				.describe("Short label (3-5 words) for the merged block"),
+			summary: tool.schema
+				.string()
+				.describe("Merged summary replacing the selected blocks"),
+		},
+		async execute(args) {
+			return `Squash queued for blocks ${args.from}-${args.to} (${args.topic}). It will be applied on the next message transform.`;
 		},
 	});
 }

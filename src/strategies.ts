@@ -153,9 +153,19 @@ export function findErroredParts(
 	return errored;
 }
 
+/** Compact marker replacing a purged failed attempt's output. */
+function errorExtract(part: MessagePart, output: unknown): string {
+	const head =
+		typeof output === "string"
+			? output.replace(/\s+/g, " ").trim().slice(0, 100)
+			: "";
+	return `[purged failed ${part.tool ?? "tool"}: ${head}]`;
+}
+
 /**
- * Strip the input content from errored tool calls.
- * The error output is preserved; only the potentially large input is removed.
+ * Strip the input content from errored tool calls. When
+ * `purgeErrors.wholeAttempt` is enabled (default), the output is replaced by a
+ * compact extract too, so the failed attempt no longer occupies the context.
  * Message indices in `protectedIndices` (recent turns) are skipped so an error
  * the agent may still be working on is not purged.
  * Returns the number of parts purged.
@@ -164,9 +174,11 @@ export function applyPurgeErrors(
 	messages: Message[],
 	config: LiveCompactionConfig,
 	protectedIndices?: Set<number>,
+	purgedCallIds?: Set<string>,
 ): number {
 	if (!config.purgeErrors?.enabled) return 0;
 
+	const wholeAttempt = config.purgeErrors.wholeAttempt ?? true;
 	const erroredParts = findErroredParts(messages);
 	let purged = 0;
 
@@ -184,7 +196,114 @@ export function applyPurgeErrors(
 			typeof input === "string" ? input.length : JSON.stringify(input).length;
 		if (inputLen > 100) {
 			state.input = { purged: `${inputLen} chars of errored input removed` };
+			if (wholeAttempt) {
+				state.output = errorExtract(part, state.output);
+			}
+			if (purgedCallIds && typeof part.callID === "string") {
+				purgedCallIds.add(part.callID);
+			}
 			purged++;
+		}
+	}
+
+	return purged;
+}
+
+/** Serialize a tool part's input/args for dependency scanning. */
+function serializeInput(part: MessagePart): string {
+	const raw = (part as Record<string, unknown>).args ?? part.state?.input;
+	if (raw === undefined || raw === null) return "";
+	return typeof raw === "string" ? raw : JSON.stringify(raw);
+}
+
+/**
+ * Purge work that depends on already-purged tool calls.
+ *
+ * Dependencies are derived deterministically from the tool inputs: a part
+ * depends on a call when its serialized input references that call's `callID`.
+ * A contaminated part is purged only once every part that depends on it has
+ * been purged (reverse topological order), so the message graph stays coherent.
+ *
+ * Returns the number of parts purged.
+ */
+export function applyCascadePurge(
+	messages: Message[],
+	purgedCallIds: Set<string>,
+	protectedIndices?: Set<number>,
+): number {
+	if (purgedCallIds.size === 0) return 0;
+
+	// Index tool parts by callID.
+	const partsByCall = new Map<string, { msgIdx: number; partIdx: number }>();
+	for (let mi = 0; mi < messages.length; mi++) {
+		for (let pi = 0; pi < messages[mi].parts.length; pi++) {
+			const part = messages[mi].parts[pi];
+			if (part.type === "tool" && typeof part.callID === "string") {
+				partsByCall.set(part.callID, { msgIdx: mi, partIdx: pi });
+			}
+		}
+	}
+
+	// reverseDeps: callID -> calls that reference it (its dependents).
+	const reverseDeps = new Map<string, Set<string>>();
+	for (const [call, pos] of partsByCall) {
+		const inputText = serializeInput(messages[pos.msgIdx].parts[pos.partIdx]);
+		if (!inputText) continue;
+		for (const other of partsByCall.keys()) {
+			if (other === call) continue;
+			if (inputText.includes(other)) {
+				// `call` depends on `other`: record `call` as a dependent of `other`.
+				let deps = reverseDeps.get(other);
+				if (!deps) {
+					deps = new Set();
+					reverseDeps.set(other, deps);
+				}
+				deps.add(call);
+			}
+		}
+	}
+
+	// Descendants of the purged work (transitive closure over dependents).
+	const contaminated = new Set<string>();
+	const stack = [...purgedCallIds];
+	while (stack.length > 0) {
+		const call = stack.pop() as string;
+		for (const dep of reverseDeps.get(call) ?? []) {
+			if (!contaminated.has(dep) && !purgedCallIds.has(dep)) {
+				contaminated.add(dep);
+				stack.push(dep);
+			}
+		}
+	}
+
+	// Purge leaves first: a part is purgeable only when all its dependents are
+	// already purged. Iterate to a fixpoint.
+	const purgedNow = new Set<string>();
+	let purged = 0;
+	let changed = true;
+	while (changed) {
+		changed = false;
+		for (const call of contaminated) {
+			if (purgedNow.has(call)) continue;
+			const dependents = reverseDeps.get(call) ?? new Set<string>();
+			const allPurged = [...dependents].every(
+				(dep) => purgedCallIds.has(dep) || purgedNow.has(dep),
+			);
+			if (!allPurged) continue;
+
+			const pos = partsByCall.get(call);
+			if (!pos) continue;
+			if (protectedIndices?.has(pos.msgIdx)) continue;
+
+			const part = messages[pos.msgIdx].parts[pos.partIdx];
+			if (part.state) {
+				part.state.input = { purged: "cascade: depends on purged work" };
+				part.state.output =
+					"[purged cascade: depends on purged work]";
+			}
+			purgedNow.add(call);
+			purged++;
+			changed = true;
 		}
 	}
 

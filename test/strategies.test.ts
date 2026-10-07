@@ -4,6 +4,7 @@ import {
 	applyDedup,
 	findErroredParts,
 	applyPurgeErrors,
+	applyCascadePurge,
 } from "../src/strategies.ts";
 import { mergeConfig } from "../src/config.ts";
 
@@ -459,8 +460,32 @@ describe("applyPurgeErrors()", () => {
 		expect(msgs[0].parts[0].state.input).toBe(smallInput);
 	});
 
-	it("preserves error output (only input is purged)", () => {
+	it("purges the whole attempt by default (input + output)", () => {
 		const cfg = mergeConfig({});
+		const msgs = [
+			{
+				info: { role: "assistant" },
+				parts: [
+					{
+						type: "tool",
+						tool: "bash",
+						state: {
+							status: "error",
+							output: "ENOENT: no such file or directory",
+							input: "x".repeat(200),
+						},
+					},
+				],
+			},
+		];
+		applyPurgeErrors(msgs as any, cfg);
+		expect((msgs[0].parts[0].state.input as any).purged).toContain("removed");
+		expect(msgs[0].parts[0].state.output).toContain("[purged failed bash:");
+		expect(msgs[0].parts[0].state.output).toContain("ENOENT");
+	});
+
+	it("preserves error output when wholeAttempt is disabled", () => {
+		const cfg = mergeConfig({ purgeErrors: { wholeAttempt: false } });
 		const msgs = [
 			{
 				info: { role: "assistant" },
@@ -499,5 +524,80 @@ describe("applyPurgeErrors()", () => {
 		];
 		const count = applyPurgeErrors(msgs as any, cfg);
 		expect(count).toBe(0);
+	});
+
+	it("reports purged call ids through the out parameter", () => {
+		const cfg = mergeConfig({});
+		const msgs = [
+			{
+				info: { role: "assistant" },
+				parts: [
+					{
+						type: "tool",
+						tool: "bash",
+						callID: "call-err",
+						state: { status: "error", output: "fail", input: "x".repeat(200) },
+					},
+				],
+			},
+		];
+		const ids = new Set<string>();
+		applyPurgeErrors(msgs as any, cfg, undefined, ids);
+		expect(ids).toEqual(new Set(["call-err"]));
+	});
+});
+
+// ---------------------------------------------------------------------------
+// applyCascadePurge
+// ---------------------------------------------------------------------------
+
+describe("applyCascadePurge()", () => {
+	function callMsg(callID: string, input: unknown) {
+		return {
+			info: { role: "assistant" },
+			parts: [
+				{
+					type: "tool",
+					tool: "bash",
+					callID,
+					state: { status: "success", output: "ok", input },
+				},
+			],
+		};
+	}
+
+	it("returns 0 for an empty purged set", () => {
+		const msgs = [callMsg("a", { x: 1 })];
+		expect(applyCascadePurge(msgs as any, new Set())).toBe(0);
+	});
+
+	it("purges descendants leaf-first and leaves unrelated calls", () => {
+		const msgs = [
+			callMsg("callA", { command: "run A" }),
+			callMsg("callB", { command: "use callA" }),
+			callMsg("callC", { command: "use callB" }),
+			callMsg("callX", { command: "independent" }),
+		];
+		const purged = applyCascadePurge(msgs as any, new Set(["callA"]));
+		expect(purged).toBe(2);
+		expect((msgs[1].parts[0].state.input as any).purged).toContain("cascade");
+		expect((msgs[2].parts[0].state.input as any).purged).toContain("cascade");
+		// The errored call and the unrelated call are untouched here.
+		expect((msgs[0].parts[0].state.input as any).purged).toBeUndefined();
+		expect((msgs[3].parts[0].state.input as any).purged).toBeUndefined();
+	});
+
+	it("skips protected message indices", () => {
+		const msgs = [
+			callMsg("callA", { command: "run A" }),
+			callMsg("callB", { command: "use callA" }),
+		];
+		const purged = applyCascadePurge(
+			msgs as any,
+			new Set(["callA"]),
+			new Set([1]),
+		);
+		expect(purged).toBe(0);
+		expect((msgs[1].parts[0].state.input as any).purged).toBeUndefined();
 	});
 });

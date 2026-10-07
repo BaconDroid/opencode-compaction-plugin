@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
 	messageHasText,
 	countTrailingNoTextAssistant,
+	textDistance,
+	shpShouldHalt,
 	DegradationMonitor,
 } from "../src/degradation-monitor.ts";
 
@@ -61,5 +63,72 @@ describe("DegradationMonitor", () => {
 		monitor.markCompacted("a", 0);
 		monitor.clear("a");
 		expect(monitor.shouldCheck("a", 0, 100)).toBe(false);
+	});
+});
+
+describe("textDistance()", () => {
+	it("returns 0 for identical text", () => {
+		expect(textDistance("hello world", "Hello   World")).toBe(0);
+	});
+
+	it("returns 1 when one side is empty", () => {
+		expect(textDistance("", "x")).toBe(1);
+		expect(textDistance("x", "")).toBe(1);
+		expect(textDistance("", "")).toBe(0);
+	});
+
+	it("is between 0 and 1 for partial overlap", () => {
+		const d = textDistance("the quick brown fox", "the quick blue fox");
+		expect(d).toBeGreaterThan(0);
+		expect(d).toBeLessThan(1);
+	});
+});
+
+describe("shpShouldHalt()", () => {
+	const config = {
+		convergenceThreshold: 0.1,
+		convergencePatience: 3,
+		maxRounds: 12,
+	};
+
+	it("does not halt while distances are high", () => {
+		expect(shpShouldHalt(2, [0.5, 0.6, 0.7], config).shouldHalt).toBe(false);
+	});
+
+	it("halts on entropy when the last k distances converge", () => {
+		const decision = shpShouldHalt(5, [0.5, 0.01, 0.02, 0.03], config);
+		expect(decision.shouldHalt).toBe(true);
+		expect(decision.reason).toBe("entropy");
+	});
+
+	it("halts at maxRounds as a failsafe", () => {
+		const decision = shpShouldHalt(12, [0.5, 0.5], config);
+		expect(decision.shouldHalt).toBe(true);
+		expect(decision.reason).toBe("max_rounds");
+	});
+});
+
+describe("DegradationMonitor.pushDraft()", () => {
+	const config = {
+		convergenceThreshold: 0.1,
+		convergencePatience: 2,
+		maxRounds: 10,
+	};
+
+	it("tracks distances and halts once drafts converge", () => {
+		const monitor = new DegradationMonitor();
+		expect(monitor.pushDraft("s", "draft one", config).shouldHalt).toBe(false);
+		expect(monitor.pushDraft("s", "draft one", config).shouldHalt).toBe(false);
+		const decision = monitor.pushDraft("s", "draft one", config);
+		expect(decision.shouldHalt).toBe(true);
+		expect(decision.reason).toBe("entropy");
+	});
+
+	it("clear resets the draft history", () => {
+		const monitor = new DegradationMonitor();
+		monitor.pushDraft("s", "draft one", config);
+		monitor.clear("s");
+		// After clearing, the first draft has no predecessor.
+		expect(monitor.pushDraft("s", "draft one", config).shouldHalt).toBe(false);
 	});
 });

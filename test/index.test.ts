@@ -685,7 +685,9 @@ describe("LiveCompactionPlugin", () => {
 		});
 
 		it("purges large inputs from errored tools outside the recent window", async () => {
-			const hooks = await getHooks();
+			const hooks = await LiveCompactionPlugin(mockCtx as any, {
+				purgeErrors: { wholeAttempt: false },
+			} as any);
 			const bigInput = "x".repeat(500);
 			const messages = [
 				{
@@ -719,6 +721,99 @@ describe("LiveCompactionPlugin", () => {
 				"removed",
 			);
 			expect(messages[0].parts[0].state.output).toBe("command failed");
+		});
+
+		it("purges the whole failed attempt by default", async () => {
+			const hooks = await getHooks();
+			const bigInput = "x".repeat(500);
+			const messages = [
+				{
+					info: { role: "assistant" },
+					parts: [
+						{
+							type: "tool",
+							tool: "bash",
+							state: {
+								status: "error",
+								output: "command failed badly",
+								input: bigInput,
+							},
+						},
+					],
+				},
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r1" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r2" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r3" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r4" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r5" }] },
+			];
+			await hooks["experimental.chat.messages.transform"]!({} as any, {
+				messages,
+			});
+			expect((messages[0].parts[0].state.input as any).purged).toContain(
+				"removed",
+			);
+			expect(messages[0].parts[0].state.output).toContain("[purged failed bash:");
+			expect(messages[0].parts[0].state.output).toContain("command failed");
+		});
+
+		it("cascades the purge to dependent tool calls", async () => {
+			const hooks = await getHooks();
+			const messages = [
+				{
+					info: { role: "assistant" },
+					parts: [
+						{
+							type: "tool",
+							tool: "bash",
+							callID: "callA",
+							state: {
+								status: "error",
+								output: "boom",
+								input: { command: "run A", data: "x".repeat(200) },
+							},
+						},
+					],
+				},
+				{
+					info: { role: "assistant" },
+					parts: [
+						{
+							type: "tool",
+							tool: "bash",
+							callID: "callB",
+							state: {
+								status: "success",
+								output: "ok",
+								input: { command: "use callA result" },
+							},
+						},
+					],
+				},
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r1" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r2" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r3" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r4" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
+				{ info: { role: "user" }, parts: [{ type: "text", text: "r5" }] },
+			];
+			await hooks["experimental.chat.messages.transform"]!({} as any, {
+				messages,
+			});
+			// callA is errored and purged; callB depends on it and is cascaded.
+			expect((messages[0].parts[0].state.input as any).purged).toContain(
+				"removed",
+			);
+			expect((messages[1].parts[0].state.input as any).purged).toContain(
+				"cascade",
+			);
 		});
 
 		it("preserves recent errored tool inputs", async () => {
@@ -1153,6 +1248,40 @@ describe("LiveCompactionPlugin", () => {
 			expect(messages[1].parts[0].text).toBe("next task");
 		});
 
+		it("exposes a squash tool and merges contiguous blocks", async () => {
+			const hooks = await getHooks();
+			expect((hooks as any).tool.squash).toBeDefined();
+
+			await hooks["tool.execute.after"]!(
+				{
+					tool: "squash",
+					sessionID: "sess-squash",
+					callID: "c-sq",
+					args: { from: "b0", to: "b1", topic: "Merged", summary: "combined" },
+				},
+				{ title: "", output: "", metadata: {} },
+			);
+
+			const block = (id: string, label: string, body: string) => ({
+				info: { role: "assistant" },
+				parts: [
+					{
+						type: "text",
+						text: `<compressed-block id="${id}" label="${label}">${body}</compressed-block>`,
+					},
+				],
+			});
+			const messages = [
+				block("a", "b0", "[b0]\n\nfirst"),
+				block("b", "b1", "[b1]\n\nsecond"),
+			];
+			await hooks["experimental.chat.messages.transform"]!({} as any, {
+				messages,
+			});
+			expect(messages).toHaveLength(1);
+			expect(messages[0].parts[0].text).toContain("combined");
+		});
+
 		it("does not apply a compression to a different session's messages", async () => {
 			const hooks = await getHooks();
 
@@ -1198,6 +1327,188 @@ describe("LiveCompactionPlugin", () => {
 			});
 			expect(own).toHaveLength(2); // 3 - 2 + 1 = 2
 			expect((own[0].parts[0] as any).text).toContain("sumA");
+		});
+
+		it("defers a compression requested far below the compaction threshold", async () => {
+			const list = vi.fn().mockResolvedValue({
+				data: {
+					all: [
+						{ id: "prov", models: { "model-x": { limit: { context: 1000 } } } },
+					],
+				},
+			});
+			const hooks = await LiveCompactionPlugin(
+				{
+					...mockCtx,
+					client: {
+						app: { log: vi.fn().mockResolvedValue(undefined) },
+						provider: { list },
+					},
+					directory: TMP_DIR,
+				} as any,
+				{ preemptiveCompaction: { enabled: true } } as any,
+			);
+
+			await hooks.event!({
+				event: {
+					id: "e",
+					type: "message.updated",
+					properties: {
+						info: {
+							sessionID: "sess-low",
+							role: "assistant",
+							providerID: "prov",
+							modelID: "model-x",
+							finish: "stop",
+							tokens: { input: 100 },
+						},
+					},
+				},
+			});
+
+			await hooks["tool.execute.after"]!(
+				{
+					tool: "compress",
+					sessionID: "sess-low",
+					callID: "c-low",
+					args: { topic: "T", start: 0, end: 1, summary: "S" },
+				},
+				{ title: "", output: "", metadata: {} },
+			);
+
+			const msgs = [
+				{ info: { role: "user" }, parts: [{ type: "text", text: "x" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "y" }] },
+				{
+					info: { role: "assistant" },
+					parts: [
+						{
+							type: "tool",
+							tool: "compress",
+							callID: "c-low",
+							state: { output: "ok" },
+						},
+					],
+				},
+			];
+			await hooks["experimental.chat.messages.transform"]!({} as any, {
+				messages: msgs,
+			});
+			// Not eligible: the compression is not applied.
+			expect(msgs).toHaveLength(3);
+		});
+
+		it("allows a compression near the compaction threshold", async () => {
+			const list = vi.fn().mockResolvedValue({
+				data: {
+					all: [
+						{ id: "prov", models: { "model-x": { limit: { context: 1000 } } } },
+					],
+				},
+			});
+			const hooks = await LiveCompactionPlugin(
+				{
+					...mockCtx,
+					client: {
+						app: { log: vi.fn().mockResolvedValue(undefined) },
+						provider: { list },
+					},
+					directory: TMP_DIR,
+				} as any,
+				{ preemptiveCompaction: { enabled: true } } as any,
+			);
+
+			await hooks.event!({
+				event: {
+					id: "e",
+					type: "message.updated",
+					properties: {
+						info: {
+							sessionID: "sess-high",
+							role: "assistant",
+							providerID: "prov",
+							modelID: "model-x",
+							finish: "stop",
+							tokens: { input: 900 },
+						},
+					},
+				},
+			});
+
+			await hooks["tool.execute.after"]!(
+				{
+					tool: "compress",
+					sessionID: "sess-high",
+					callID: "c-high",
+					args: { topic: "T", start: 0, end: 1, summary: "S" },
+				},
+				{ title: "", output: "", metadata: {} },
+			);
+
+			const msgs = [
+				{ info: { role: "user" }, parts: [{ type: "text", text: "x" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "y" }] },
+				{
+					info: { role: "assistant" },
+					parts: [
+						{
+							type: "tool",
+							tool: "compress",
+							callID: "c-high",
+							state: { output: "ok" },
+						},
+					],
+				},
+			];
+			await hooks["experimental.chat.messages.transform"]!({} as any, {
+				messages: msgs,
+			});
+			expect(msgs).toHaveLength(2);
+			expect((msgs[0].parts[0] as any).text).toContain("S");
+		});
+
+		it("restores original messages via expand", async () => {
+			const hooks = await getHooks();
+
+			await hooks["tool.execute.after"]!(
+				{
+					tool: "compress",
+					sessionID: "sess-expand",
+					callID: "",
+					args: { topic: "T", start: 0, end: 1, summary: "S" },
+				},
+				{ title: "", output: "", metadata: {} },
+			);
+
+			const messages = [
+				{
+					info: { role: "user", timestamp: 1 },
+					parts: [{ type: "text", text: "orig1" }],
+				},
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "orig2" }] },
+				{ info: { role: "user" }, parts: [{ type: "text", text: "keep" }] },
+			];
+			await hooks["experimental.chat.messages.transform"]!({} as any, {
+				messages,
+			});
+			expect(messages).toHaveLength(2);
+			expect(messages[0].parts[0].text).toContain("[b0]");
+
+			await hooks["tool.execute.after"]!(
+				{
+					tool: "expand",
+					sessionID: "sess-expand",
+					callID: "c-expand",
+					args: { block: "b0" },
+				},
+				{ title: "", output: "", metadata: {} },
+			);
+			await hooks["experimental.chat.messages.transform"]!({} as any, {
+				messages,
+			});
+			expect(messages).toHaveLength(3);
+			expect(messages[0].parts[0].text).toBe("orig1");
+			expect(messages[1].parts[0].text).toBe("orig2");
 		});
 
 		it("drops stale deferred compressions", async () => {
@@ -1278,6 +1589,33 @@ describe("LiveCompactionPlugin", () => {
 					},
 				}),
 			).resolves.toBeUndefined();
+		});
+
+		it("renders the captured todos as task-state in the prompt", async () => {
+			const todo = vi.fn().mockResolvedValue({
+				data: [
+					{
+						id: "t1",
+						content: "write tests",
+						status: "in_progress",
+						priority: "high",
+					},
+				],
+			});
+			const hooks = await LiveCompactionPlugin({
+				...mockCtx,
+				client: { app: { log: vi.fn().mockResolvedValue(undefined) }, session: { todo } },
+				directory: TMP_DIR,
+			} as any);
+
+			const output = { context: [], prompt: undefined };
+			await hooks["experimental.session.compacting"]!(
+				{ sessionID: "sess-task" },
+				output,
+			);
+			expect(output.prompt).toContain("<task-state>");
+			expect(output.prompt).toContain("- [~] write tests");
+			expect(output.prompt).toContain("status=in_progress");
 		});
 
 		it("does not throw when the todo API is unavailable", async () => {
@@ -1393,6 +1731,66 @@ describe("LiveCompactionPlugin", () => {
 				body: { providerID: "prov", modelID: "model-x", auto: true },
 				query: { directory: TMP_DIR },
 			});
+		});
+
+		it("honors the tail guard until enough new tool calls", async () => {
+			const summarize = vi.fn().mockResolvedValue(undefined);
+			const list = vi.fn().mockResolvedValue({
+				data: {
+					all: [
+						{ id: "prov", models: { "model-x": { limit: { context: 1000 } } } },
+					],
+				},
+			});
+			const hooks = await LiveCompactionPlugin(
+				{
+					...mockCtx,
+					client: {
+						app: { log: vi.fn().mockResolvedValue(undefined) },
+						session: { summarize },
+						provider: { list },
+					},
+					directory: TMP_DIR,
+				} as any,
+				{
+					preemptiveCompaction: {
+						enabled: true,
+						tailGuard: { enabled: true, minNewToolCalls: 3 },
+					},
+				} as any,
+			);
+
+			await hooks.event!({
+				event: {
+					id: "e",
+					type: "message.updated",
+					properties: {
+						info: {
+							sessionID: "sess-tail",
+							role: "assistant",
+							providerID: "prov",
+							modelID: "model-x",
+							finish: "stop",
+							tokens: { input: 900 },
+						},
+					},
+				},
+			});
+			expect(summarize).not.toHaveBeenCalled();
+
+			for (let i = 0; i < 3; i++) {
+				await hooks["tool.execute.after"]!(
+					{
+						tool: "read",
+						sessionID: "sess-tail",
+						callID: `c${i}`,
+						args: { filePath: "a.ts" },
+					},
+					{ title: "", output: "", metadata: {} },
+				);
+			}
+
+			expect(summarize).toHaveBeenCalledTimes(1);
 		});
 
 		it("does not trigger when disabled", async () => {
@@ -1530,6 +1928,88 @@ describe("LiveCompactionPlugin", () => {
 			);
 			expect(output.prompt).toContain("<previous-summary>");
 			expect(output.prompt).toContain("PRIOR SUMMARY");
+		});
+
+		it("keeps continuity across repeated compactions without duplication", async () => {
+			const messages = vi.fn().mockResolvedValue({
+				data: [
+					{
+						info: { role: "assistant", summary: true, id: "s1" },
+						parts: [{ type: "text", text: "FIRST SUMMARY" }],
+					},
+				],
+			});
+			const hooks = await LiveCompactionPlugin({
+				...mockCtx,
+				client: {
+					app: { log: vi.fn().mockResolvedValue(undefined) },
+					session: { messages },
+				},
+				directory: TMP_DIR,
+			} as any);
+
+			const out1 = { context: [] as string[], prompt: undefined as string | undefined };
+			await hooks["experimental.session.compacting"]!(
+				{ sessionID: "sess-slide" },
+				out1,
+			);
+			expect(out1.prompt).toContain("FIRST SUMMARY");
+
+			// Same summary still present: continuity is preserved.
+			const out2 = { context: [] as string[], prompt: undefined as string | undefined };
+			await hooks["experimental.session.compacting"]!(
+				{ sessionID: "sess-slide" },
+				out2,
+			);
+			expect(out2.prompt).toContain("FIRST SUMMARY");
+
+			// A newer summary supersedes the carried one.
+			messages.mockResolvedValue({
+				data: [
+					{
+						info: { role: "assistant", summary: true, id: "s1" },
+						parts: [{ type: "text", text: "FIRST SUMMARY" }],
+					},
+					{
+						info: { role: "assistant", summary: true, id: "s2" },
+						parts: [{ type: "text", text: "SECOND SUMMARY" }],
+					},
+				],
+			});
+			const out3 = { context: [] as string[], prompt: undefined as string | undefined };
+			await hooks["experimental.session.compacting"]!(
+				{ sessionID: "sess-slide" },
+				out3,
+			);
+			expect(out3.prompt).toContain("SECOND SUMMARY");
+		});
+
+		it("injects the latest user ask into the replace prompt", async () => {
+			const messages = vi.fn().mockResolvedValue({
+				data: [
+					{ info: { role: "assistant" }, parts: [{ type: "text", text: "ok" }] },
+					{
+						info: { role: "user" },
+						parts: [{ type: "text", text: "please fix the login bug" }],
+					},
+				],
+			});
+			const hooks = await LiveCompactionPlugin({
+				...mockCtx,
+				client: {
+					app: { log: vi.fn().mockResolvedValue(undefined) },
+					session: { messages },
+				},
+				directory: TMP_DIR,
+			} as any);
+
+			const output = { context: [] as string[], prompt: undefined as string | undefined };
+			await hooks["experimental.session.compacting"]!(
+				{ sessionID: "sess-ask" },
+				output,
+			);
+			expect(output.prompt).toContain("<latest-user-ask>");
+			expect(output.prompt).toContain("please fix the login bug");
 		});
 
 		it("does not fetch the previous summary in augment mode", async () => {

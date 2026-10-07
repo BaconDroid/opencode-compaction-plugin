@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { extractTodos, TodoPreserver } from "../src/todo-preserver.ts";
+import {
+	extractTodos,
+	renderTaskState,
+	TodoPreserver,
+} from "../src/todo-preserver.ts";
 
 describe("extractTodos()", () => {
 	it("extracts from { data: [...] }", () => {
@@ -19,6 +23,32 @@ describe("extractTodos()", () => {
 	});
 });
 
+describe("renderTaskState()", () => {
+	it("renders status markers, ids and priorities", () => {
+		const rendered = renderTaskState([
+			{ id: "t1", content: "write tests", status: "in_progress", priority: "high" },
+			{ id: "t2", content: "ship it", status: "completed" },
+			{ id: "t3", content: "later", status: "pending" },
+		]);
+		expect(rendered).toContain("- [~] write tests (id=t1, status=in_progress, priority=high)");
+		expect(rendered).toContain("- [x] ship it (id=t2, status=completed)");
+		expect(rendered).toContain("- [ ] later (id=t3, status=pending)");
+	});
+
+	it("renders cancelled as [-] and unknown status as [ ]", () => {
+		const rendered = renderTaskState([
+			{ content: "dropped", status: "cancelled" },
+			{ content: "mystery", status: "weird" },
+		]);
+		expect(rendered).toContain("- [-] dropped");
+		expect(rendered).toContain("- [ ] mystery");
+	});
+
+	it("returns (none) for an empty list", () => {
+		expect(renderTaskState([])).toBe("(none)");
+	});
+});
+
 describe("TodoPreserver", () => {
 	it("captures and takes a snapshot", () => {
 		const preserver = new TodoPreserver();
@@ -31,6 +61,15 @@ describe("TodoPreserver", () => {
 		const preserver = new TodoPreserver();
 		preserver.capture("s", []);
 		expect(preserver.take("s")).toBeUndefined();
+	});
+
+	it("peek returns without consuming", () => {
+		const preserver = new TodoPreserver();
+		preserver.capture("s", [{ content: "a", status: "pending" }]);
+		expect(preserver.peek("s")).toHaveLength(1);
+		expect(preserver.peek("s")).toHaveLength(1);
+		expect(preserver.take("s")).toHaveLength(1);
+		expect(preserver.peek("s")).toBeUndefined();
 	});
 
 	it("clear and clearAll", () => {

@@ -8,6 +8,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import type { EvictionLevel } from "./eviction.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -46,6 +47,35 @@ export interface PurgeErrorsConfig {
 	enabled?: boolean;
 	/** Number of turns after which to purge error inputs (default: 4) */
 	turns?: number;
+	/**
+	 * Purge the whole failed attempt (input + output) instead of only the input.
+	 * The error output is replaced by a compact extract (default: true)
+	 */
+	wholeAttempt?: boolean;
+	/**
+	 * Cascade the purge to work that depends on a purged call (default: true)
+	 */
+	cascade?: boolean;
+}
+
+export interface CompressConfig {
+	/** Trailing user turns protected from deterministic span selection (default: 3) */
+	protectedTurns?: number;
+	/** Keep compressed originals in memory for expand (default: true) */
+	reversible?: boolean;
+	/** Maximum number of blocks merged by a single squash (default: 8) */
+	maxBlocksPerSquash?: number;
+}
+
+export interface EvictionSettings {
+	/** Enable graduated LLM-free eviction (default: false) */
+	enabled?: boolean;
+	/** Token budget; eviction runs only above it (default: 80000) */
+	thresholdTokens?: number;
+	/** Levels to apply, in order (default: reasoning, bulk_output, intermediate, episode) */
+	levels?: EvictionLevel[];
+	/** Protect the prologue from eviction (default: true) */
+	protectPrologue?: boolean;
 }
 
 export interface TurnProtectionConfig {
@@ -55,11 +85,28 @@ export interface TurnProtectionConfig {
 	turns?: number;
 }
 
+export interface TailGuardConfig {
+	/** Enable the tail guard (default: false) */
+	enabled?: boolean;
+	/** Minimum new tool calls since the last compaction before compacting (default: 3) */
+	minNewToolCalls?: number;
+}
+
 export interface PreemptiveCompactionConfig {
 	/** Compact proactively before the context overflows (default: false) */
 	enabled?: boolean;
 	/** Fraction of the context limit that triggers compaction (default: 0.78) */
 	threshold?: number;
+	/** Absolute token ceiling for the trigger; the smaller of ratio and this wins */
+	absoluteTokenThreshold?: number;
+	/** Count cache read/write tokens in the usage (default: false) */
+	countCacheTokens?: boolean;
+	/** Minimum new tokens since the last compaction before compacting (default: 0) */
+	minTokensSinceLast?: number;
+	/** Minimum new messages since the last compaction before compacting (default: 0) */
+	minMessagesSinceLast?: number;
+	/** Do not compact until enough new tool calls accumulated since the last compaction */
+	tailGuard?: TailGuardConfig;
 	/** Minimum delay between proactive compactions, in ms (default: 60000) */
 	cooldownMs?: number;
 	/** Override the model context limit (otherwise resolved from the provider) */
@@ -73,6 +120,12 @@ export interface DegradationMonitorConfig {
 	threshold?: number;
 	/** Window after compaction during which the check runs, in ms (default: 120000) */
 	windowMs?: number;
+	/** Judge-free halt: distance below which drafts are converged (default: 0.05) */
+	convergenceThreshold?: number;
+	/** Judge-free halt: consecutive converged steps required (default: 3) */
+	convergencePatience?: number;
+	/** Judge-free halt: failsafe round cap (default: 12) */
+	maxRounds?: number;
 }
 
 export interface LiveCompactionConfig {
@@ -84,6 +137,10 @@ export interface LiveCompactionConfig {
 	dedup?: DedupConfig;
 	/** Error input purging strategy */
 	purgeErrors?: PurgeErrorsConfig;
+	/** Model-driven compress tool settings */
+	compress?: CompressConfig;
+	/** Graduated, LLM-free eviction */
+	eviction?: EvictionSettings;
 	/** Turn-based protection: protect recent tool outputs from trimming */
 	turnProtection?: TurnProtectionConfig;
 	/** Proactive compaction before the context overflows */
@@ -120,6 +177,8 @@ export const DEFAULT_CONFIG: Required<
 		| "trim"
 		| "dedup"
 		| "purgeErrors"
+		| "compress"
+		| "eviction"
 		| "turnProtection"
 		| "preemptiveCompaction"
 		| "degradationMonitor"
@@ -128,11 +187,14 @@ export const DEFAULT_CONFIG: Required<
 	trim: Required<TrimLimits>;
 	dedup: Required<DedupConfig>;
 	purgeErrors: Required<PurgeErrorsConfig>;
+	compress: Required<CompressConfig>;
+	eviction: Required<EvictionSettings>;
 	turnProtection: Required<TurnProtectionConfig>;
 	preemptiveCompaction: Required<
-		Omit<PreemptiveCompactionConfig, "contextLimit">
+		Omit<PreemptiveCompactionConfig, "contextLimit" | "absoluteTokenThreshold">
 	> & {
 		contextLimit?: number;
+		absoluteTokenThreshold?: number;
 	};
 	degradationMonitor: Required<DegradationMonitorConfig>;
 } = {
@@ -147,6 +209,19 @@ export const DEFAULT_CONFIG: Required<
 	purgeErrors: {
 		enabled: true,
 		turns: 4,
+		wholeAttempt: true,
+		cascade: true,
+	},
+	compress: {
+		protectedTurns: 3,
+		reversible: true,
+		maxBlocksPerSquash: 8,
+	},
+	eviction: {
+		enabled: false,
+		thresholdTokens: 80000,
+		levels: ["reasoning", "bulk_output", "intermediate", "episode"],
+		protectPrologue: true,
 	},
 	turnProtection: {
 		enabled: true,
@@ -155,12 +230,22 @@ export const DEFAULT_CONFIG: Required<
 	preemptiveCompaction: {
 		enabled: false,
 		threshold: 0.78,
+		countCacheTokens: false,
+		minTokensSinceLast: 0,
+		minMessagesSinceLast: 0,
+		tailGuard: {
+			enabled: false,
+			minNewToolCalls: 3,
+		},
 		cooldownMs: 60000,
 	},
 	degradationMonitor: {
 		enabled: false,
 		threshold: 4,
 		windowMs: 120000,
+		convergenceThreshold: 0.05,
+		convergencePatience: 3,
+		maxRounds: 12,
 	},
 	protectedFilePatterns: [],
 };
@@ -262,6 +347,30 @@ export function mergeConfig(user: LiveCompactionConfig) {
 		purgeErrors: {
 			enabled: user.purgeErrors?.enabled ?? DEFAULT_CONFIG.purgeErrors.enabled,
 			turns: user.purgeErrors?.turns ?? DEFAULT_CONFIG.purgeErrors.turns,
+			wholeAttempt:
+				user.purgeErrors?.wholeAttempt ??
+				DEFAULT_CONFIG.purgeErrors.wholeAttempt,
+			cascade:
+				user.purgeErrors?.cascade ?? DEFAULT_CONFIG.purgeErrors.cascade,
+		},
+		compress: {
+			protectedTurns:
+				user.compress?.protectedTurns ?? DEFAULT_CONFIG.compress.protectedTurns,
+			reversible:
+				user.compress?.reversible ?? DEFAULT_CONFIG.compress.reversible,
+			maxBlocksPerSquash:
+				user.compress?.maxBlocksPerSquash ??
+				DEFAULT_CONFIG.compress.maxBlocksPerSquash,
+		},
+		eviction: {
+			enabled: user.eviction?.enabled ?? DEFAULT_CONFIG.eviction.enabled,
+			thresholdTokens:
+				user.eviction?.thresholdTokens ??
+				DEFAULT_CONFIG.eviction.thresholdTokens,
+			levels: user.eviction?.levels ?? DEFAULT_CONFIG.eviction.levels,
+			protectPrologue:
+				user.eviction?.protectPrologue ??
+				DEFAULT_CONFIG.eviction.protectPrologue,
 		},
 		turnProtection: {
 			enabled:
@@ -275,10 +384,29 @@ export function mergeConfig(user: LiveCompactionConfig) {
 			threshold:
 				user.preemptiveCompaction?.threshold ??
 				DEFAULT_CONFIG.preemptiveCompaction.threshold,
+			countCacheTokens:
+				user.preemptiveCompaction?.countCacheTokens ??
+				DEFAULT_CONFIG.preemptiveCompaction.countCacheTokens,
+			minTokensSinceLast:
+				user.preemptiveCompaction?.minTokensSinceLast ??
+				DEFAULT_CONFIG.preemptiveCompaction.minTokensSinceLast,
+			minMessagesSinceLast:
+				user.preemptiveCompaction?.minMessagesSinceLast ??
+				DEFAULT_CONFIG.preemptiveCompaction.minMessagesSinceLast,
+			tailGuard: {
+				enabled:
+					user.preemptiveCompaction?.tailGuard?.enabled ??
+					DEFAULT_CONFIG.preemptiveCompaction.tailGuard.enabled,
+				minNewToolCalls:
+					user.preemptiveCompaction?.tailGuard?.minNewToolCalls ??
+					DEFAULT_CONFIG.preemptiveCompaction.tailGuard.minNewToolCalls,
+			},
 			cooldownMs:
 				user.preemptiveCompaction?.cooldownMs ??
 				DEFAULT_CONFIG.preemptiveCompaction.cooldownMs,
 			contextLimit: user.preemptiveCompaction?.contextLimit,
+			absoluteTokenThreshold:
+				user.preemptiveCompaction?.absoluteTokenThreshold,
 		},
 		promptMode: user.promptMode ?? DEFAULT_CONFIG.promptMode,
 		degradationMonitor: {
@@ -291,6 +419,15 @@ export function mergeConfig(user: LiveCompactionConfig) {
 			windowMs:
 				user.degradationMonitor?.windowMs ??
 				DEFAULT_CONFIG.degradationMonitor.windowMs,
+			convergenceThreshold:
+				user.degradationMonitor?.convergenceThreshold ??
+				DEFAULT_CONFIG.degradationMonitor.convergenceThreshold,
+			convergencePatience:
+				user.degradationMonitor?.convergencePatience ??
+				DEFAULT_CONFIG.degradationMonitor.convergencePatience,
+			maxRounds:
+				user.degradationMonitor?.maxRounds ??
+				DEFAULT_CONFIG.degradationMonitor.maxRounds,
 		},
 		protectedFilePatterns:
 			user.protectedFilePatterns ?? DEFAULT_CONFIG.protectedFilePatterns,

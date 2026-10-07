@@ -23,24 +23,44 @@
  *   2. npm: add "opencode-live-compaction" to `plugin` array in opencode.json
  */
 
-import { buildCompactionPrompt } from "./prompt.js";
+import {
+	buildCompactionPrompt,
+	extractLatestUserAsk,
+} from "./prompt.js";
 import { FilesTouchedTracker } from "./files-touched.js";
 import { loadConfig, type LiveCompactionConfig } from "./config.js";
-import { applyDedup, applyPurgeErrors } from "./strategies.js";
+import {
+	applyDedup,
+	applyPurgeErrors,
+	applyCascadePurge,
+} from "./strategies.js";
+import { applyEviction } from "./eviction.js";
 import { extractFilePaths, isFileProtected } from "./glob.js";
 import {
 	buildCompressToolDef,
+	buildSquashToolDef,
 	CompressionStore,
+	SquashStore,
 	applyCompressions,
+	applySquash,
 	selectCompressions,
 } from "./compress.js";
 import {
+	ExpansionSidecar,
+	ExpandStore,
+	applyExpansions,
+	buildExpandToolDef,
+	buildRecallToolDef,
+} from "./expand.js";
+import {
 	TodoPreserver,
 	extractTodos,
+	renderTaskState,
 	type TodoSnapshot,
 } from "./todo-preserver.js";
 import {
-	totalInputTokens,
+	effectiveInputTokens,
+	resolveTriggerThreshold,
 	shouldTriggerPreemptiveCompaction,
 	type CachedUsage,
 	type TokenInfo,
@@ -49,7 +69,10 @@ import {
 	DegradationMonitor,
 	countTrailingNoTextAssistant,
 } from "./degradation-monitor.js";
-import { extractPreviousSummary } from "./previous-summary.js";
+import {
+	extractPreviousSummary,
+	type SlidingState,
+} from "./previous-summary.js";
 
 // ---------------------------------------------------------------------------
 // Types — inlined from @opencode-ai/plugin to avoid requiring it as a dep.
@@ -299,10 +322,18 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 	// Per-instance state
 	const sessionTrackers = new Map<string, FilesTouchedTracker>();
 	const compressions = new CompressionStore();
+	const squashes = new SquashStore();
+	const expansions = new ExpansionSidecar();
+	const expandStore = new ExpandStore();
 	const todoPreserver = new TodoPreserver();
+	const slidingState = new Map<string, SlidingState>();
 	const preemptUsage = new Map<string, CachedUsage>();
 	const preemptInProgress = new Set<string>();
 	const preemptLast = new Map<string, number>();
+	// Counters since the last proactive compaction (deterministic gates).
+	const preemptTokensAtLast = new Map<string, number>();
+	const preemptToolCallsSince = new Map<string, number>();
+	const preemptMessagesSince = new Map<string, number>();
 	const contextLimitCache = new Map<string, number>();
 	const degradation = new DegradationMonitor();
 
@@ -417,6 +448,25 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		return undefined;
 	};
 
+	// Eligibility gate for the model-driven `compress` tool: when proactive
+	// compaction is enabled, defer a compression requested far below the
+	// compaction threshold (deterministic, no model call). Manual use without
+	// preemptive compaction enabled is never gated.
+	const isCompressEligible = async (sessionID: string): Promise<boolean> => {
+		const cfg = config.preemptiveCompaction;
+		if (!cfg?.enabled) return true;
+		const usage = preemptUsage.get(sessionID);
+		if (!usage) return true;
+		const limit = await resolveContextLimit(usage.providerID, usage.modelID);
+		if (limit === undefined) return true;
+		const effective = effectiveInputTokens(
+			usage.tokens,
+			cfg.countCacheTokens ?? false,
+		);
+		const thresholdTokens = resolveTriggerThreshold(limit, cfg);
+		return effective >= thresholdTokens * 0.5;
+	};
+
 	// Trigger proactive compaction when the reported usage nears the limit.
 	const maybePreempt = async (sessionID: string): Promise<void> => {
 		const cfg = config.preemptiveCompaction;
@@ -428,10 +478,27 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		const limit = await resolveContextLimit(usage.providerID, usage.modelID);
 		if (limit === undefined) return;
 
+		const effectiveTokens = effectiveInputTokens(
+			usage.tokens,
+			cfg.countCacheTokens ?? false,
+		);
+		const thresholdTokens = resolveTriggerThreshold(limit, cfg);
+		const baseline = preemptTokensAtLast.get(sessionID);
+
 		const trigger = shouldTriggerPreemptiveCompaction({
-			totalInputTokens: totalInputTokens(usage.tokens),
+			totalInputTokens: effectiveTokens,
 			contextLimit: limit,
 			threshold: cfg.threshold,
+			thresholdTokens,
+			minTokensSinceLast: cfg.minTokensSinceLast,
+			minMessagesSinceLast: cfg.minMessagesSinceLast,
+			tokensSinceLast:
+				baseline === undefined
+					? undefined
+					: Math.max(0, effectiveTokens - baseline),
+			messagesSinceLast: preemptMessagesSince.get(sessionID) ?? 0,
+			tailGuard: cfg.tailGuard,
+			newToolCallsSinceLast: preemptToolCallsSince.get(sessionID) ?? 0,
 			cooldownMs: cfg.cooldownMs,
 			now: Date.now(),
 			lastCompactionAt: preemptLast.get(sessionID),
@@ -444,6 +511,10 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 
 		preemptInProgress.add(sessionID);
 		preemptLast.set(sessionID, Date.now());
+		// Reset the deterministic gates for the next cycle.
+		preemptTokensAtLast.set(sessionID, effectiveTokens);
+		preemptToolCallsSince.set(sessionID, 0);
+		preemptMessagesSince.set(sessionID, 0);
 		try {
 			await summarize({
 				path: { id: sessionID },
@@ -456,7 +527,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			});
 			logger.info("preemptive compaction triggered", {
 				sessionID,
-				ratio: totalInputTokens(usage.tokens) / limit,
+				ratio: effectiveTokens / limit,
 			});
 		} catch (error) {
 			logger.info("preemptive compaction failed", { error: String(error) });
@@ -473,6 +544,12 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			const { tool, sessionID, args } = input;
 			if (!sessionID || !args) return;
 
+			// Deterministic gate: count tool calls since the last compaction.
+			preemptToolCallsSince.set(
+				sessionID,
+				(preemptToolCallsSince.get(sessionID) ?? 0) + 1,
+			);
+
 			// Track file operations
 			const tracker = getTracker(sessionID);
 			tracker.processToolCall(tool, args as Record<string, unknown>);
@@ -480,24 +557,80 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			// Capture compress tool calls
 			if (tool === "compress") {
 				const a = args as Record<string, unknown>;
+				if (typeof a.topic === "string" && typeof a.summary === "string") {
+					const start = typeof a.start === "number" ? a.start : undefined;
+					const end = typeof a.end === "number" ? a.end : undefined;
+					const scale =
+						a.scale === "granular" || a.scale === "deep"
+							? a.scale
+							: undefined;
+					const eligible = await isCompressEligible(sessionID);
+					if (!eligible) {
+						logger.info("compress deferred (usage below threshold)", {
+							sessionID,
+							topic: a.topic,
+						});
+					} else {
+						compressions.queue(sessionID, {
+							topic: a.topic,
+							start,
+							end,
+							scale,
+							summary: a.summary,
+							timestamp: Date.now(),
+							callID: input.callID,
+						});
+						logger.info("compress queued", {
+							sessionID,
+							topic: a.topic,
+							range:
+								start !== undefined && end !== undefined
+									? `${start}-${end}`
+									: "auto",
+						});
+					}
+				}
+			}
+
+			// Capture squash tool calls
+			if (tool === "squash") {
+				const a = args as Record<string, unknown>;
 				if (
+					typeof a.from === "string" &&
+					typeof a.to === "string" &&
 					typeof a.topic === "string" &&
-					typeof a.start === "number" &&
-					typeof a.end === "number" &&
 					typeof a.summary === "string"
 				) {
-					compressions.queue(sessionID, {
+					squashes.queue(sessionID, {
+						from: a.from,
+						to: a.to,
 						topic: a.topic,
-						start: a.start,
-						end: a.end,
 						summary: a.summary,
 						timestamp: Date.now(),
 						callID: input.callID,
 					});
-					logger.info("compress queued", {
+					logger.info("squash queued", {
 						sessionID,
-						topic: a.topic,
-						range: `${a.start}-${a.end}`,
+						from: a.from,
+						to: a.to,
+					});
+				}
+			}
+
+			// Capture expand / recall tool calls
+			if (tool === "expand" || tool === "recall") {
+				const a = args as Record<string, unknown>;
+				if (typeof a.block === "string") {
+					expandStore.queue(sessionID, {
+						block: a.block,
+						mode: tool === "expand" ? "sticky" : "once",
+						callID: input.callID,
+						timestamp: Date.now(),
+					});
+					logger.info("expand queued", {
+						sessionID,
+						block: a.block,
+						mode: tool,
 					});
 				}
 			}
@@ -527,6 +660,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			// In replace mode the default prompt (which carries the previous
 			// summary) is discarded, so fetch and re-inject it ourselves.
 			let previousSummary: string | undefined;
+			let latestAsk: string | undefined;
 			if (config.promptMode !== "augment") {
 				const fetchMessages = ctx.client.session?.messages;
 				if (fetchMessages) {
@@ -539,7 +673,10 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 							: (((response as { data?: unknown })?.data as
 									| unknown[]
 									| undefined) ?? []);
-						previousSummary = extractPreviousSummary(list);
+						const state = slidingState.get(sessionID) ?? {};
+						previousSummary = extractPreviousSummary(list, state);
+						latestAsk = extractLatestUserAsk(list);
+						slidingState.set(sessionID, state);
 					} catch (error) {
 						logger.info("previous summary fetch failed", {
 							error: String(error),
@@ -547,6 +684,13 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 					}
 				}
 			}
+
+			// Render the captured task state (IDs/statuses preserved).
+			const todoSnapshot = todoPreserver.peek(sessionID);
+			const taskState =
+				todoSnapshot && todoSnapshot.length > 0
+					? renderTaskState(todoSnapshot)
+					: undefined;
 
 			// Collect files-touched manifest
 			const tracker = getTracker(sessionID);
@@ -560,6 +704,8 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			const enhancedPrompt = buildCompactionPrompt({
 				filesTouched: filesManifest,
 				previousSummary,
+				taskState,
+				focus: latestAsk,
 			});
 
 			if (config.promptMode === "augment") {
@@ -599,9 +745,21 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 				);
 
 				if (applicable.length > 0) {
+					const reversible = config.compress?.reversible ?? true;
 					const replaced = applyCompressions(
 						messages as Parameters<typeof applyCompressions>[0],
 						applicable,
+						{
+							protectedTurns: config.compress?.protectedTurns ?? 3,
+							record: reversible
+								? ({ id, original }) =>
+										expansions.save(
+											sid,
+											id,
+											original as unknown[],
+										)
+								: undefined,
+						},
 					);
 					if (replaced > 0) {
 						logger.info("compress applied", {
@@ -622,6 +780,43 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 							topic: req.topic,
 						});
 					}
+				}
+			}
+
+			// 0b. Apply pending squash requests (merge contiguous blocks).
+			for (const sid of sessionTrackers.keys()) {
+				const squashRequests = squashes.drain(sid);
+				if (squashRequests.length === 0) continue;
+				const merged = applySquash(
+					messages as Parameters<typeof applySquash>[0],
+					squashRequests,
+					{ maxBlocks: config.compress?.maxBlocksPerSquash ?? 8 },
+				);
+				if (merged > 0) {
+					logger.info("squash applied", {
+						sessionID: sid,
+						blocksMerged: merged,
+					});
+				}
+			}
+
+			// 0c. Apply pending expansions (restore original messages).
+			for (const sid of sessionTrackers.keys()) {
+				const expandRequests = expandStore.drain(sid);
+				if (expandRequests.length === 0) continue;
+				const { expanded, unmatched } = applyExpansions(
+					messages as Parameters<typeof applyExpansions>[0],
+					expandRequests,
+					expansions,
+				);
+				if (expanded > 0) {
+					logger.info("expand applied", { sessionID: sid, expanded });
+				}
+				if (unmatched.length > 0) {
+					logger.info("expand unmatched", {
+						sessionID: sid,
+						blocks: unmatched,
+					});
 				}
 			}
 
@@ -675,13 +870,46 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 					messages,
 					config.purgeErrors.turns ?? 4,
 				);
+				const purgedCallIds = new Set<string>();
 				const purged = applyPurgeErrors(
 					messages as Parameters<typeof applyPurgeErrors>[0],
 					config,
 					purgeProtected,
+					purgedCallIds,
 				);
 				if (purged > 0) {
 					logger.info("error purge applied", { count: purged });
+				}
+
+				// 4b. Cascade the purge to work depending on purged calls.
+				if ((config.purgeErrors.cascade ?? true) && purgedCallIds.size > 0) {
+					const cascaded = applyCascadePurge(
+						messages as Parameters<typeof applyCascadePurge>[0],
+						purgedCallIds,
+						purgeProtected,
+					);
+					if (cascaded > 0) {
+						logger.info("cascade purge applied", { count: cascaded });
+					}
+				}
+			}
+
+			// 5. Graduated eviction (runs last; content-addressed, never user turns).
+			if (config.eviction?.enabled) {
+				const { removed, evictedIds } = applyEviction(
+					messages as Parameters<typeof applyEviction>[0],
+					{
+						enabled: true,
+						thresholdTokens: config.eviction.thresholdTokens ?? 80000,
+						levels: config.eviction.levels,
+						protectPrologue: config.eviction.protectPrologue ?? true,
+					},
+				);
+				if (removed > 0) {
+					logger.info("eviction applied", {
+						removed,
+						ids: evictedIds.length,
+					});
 				}
 			}
 		},
@@ -740,10 +968,17 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 				if (sessionID) {
 					sessionTrackers.delete(sessionID);
 					compressions.clear(sessionID);
+					squashes.clear(sessionID);
+					expansions.clear(sessionID);
+					expandStore.clear(sessionID);
 					todoPreserver.clear(sessionID);
+					slidingState.delete(sessionID);
 					preemptUsage.delete(sessionID);
 					preemptInProgress.delete(sessionID);
 					preemptLast.delete(sessionID);
+					preemptTokensAtLast.delete(sessionID);
+					preemptToolCallsSince.delete(sessionID);
+					preemptMessagesSince.delete(sessionID);
 					degradation.clear(sessionID);
 					clearAutocontinueGuard(sessionID);
 				}
@@ -772,6 +1007,11 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 						modelID: info.modelID ?? "",
 						tokens: info.tokens,
 					});
+					// Deterministic gate: count completed assistant turns.
+					preemptMessagesSince.set(
+						info.sessionID,
+						(preemptMessagesSince.get(info.sessionID) ?? 0) + 1,
+					);
 					// Check on turn end too, so text-only sessions still trigger.
 					void maybePreempt(info.sessionID);
 				}
@@ -826,10 +1066,17 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		dispose: async () => {
 			sessionTrackers.clear();
 			compressions.clearAll();
+			squashes.clearAll();
+			expansions.clearAll();
+			expandStore.clearAll();
 			todoPreserver.clearAll();
+			slidingState.clear();
 			preemptUsage.clear();
 			preemptInProgress.clear();
 			preemptLast.clear();
+			preemptTokensAtLast.clear();
+			preemptToolCallsSince.clear();
+			preemptMessagesSince.clear();
 			contextLimitCache.clear();
 			degradation.clearAll();
 			for (const timer of autocontinueGuard.values()) clearTimeout(timer);
@@ -856,7 +1103,12 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		// Compress tool definition
 		// -----------------------------------------------------------------------
 		// The `tool` hook maps a tool name to its definition.
-		tool: { compress: buildCompressToolDef() },
+		tool: {
+			compress: buildCompressToolDef(),
+			squash: buildSquashToolDef(),
+			expand: buildExpandToolDef(),
+			recall: buildRecallToolDef(),
+		},
 	};
 
 	// Wrap every hook so a thrown error is isolated (see `safe`).
