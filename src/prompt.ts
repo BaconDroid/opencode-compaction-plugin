@@ -38,7 +38,7 @@ Output exactly the Markdown structure shown inside <template> and keep the secti
 - [chronological list of what the user asked for, with exact quotes when they changed direction]
 
 ## Constraints & Preferences
-- [user constraints, preferences, specs, or "(none)"]
+- [active constraints, quoted verbatim from the user or AGENTS.md; cite the source and quote only the decisive clause — do not paste whole policy files, or "(none)"]
 
 ## Errors & Dead Ends
 - [approaches tried that failed, with error strings and why they didn't work, or "(none)"]
@@ -57,7 +57,7 @@ Output exactly the Markdown structure shown inside <template> and keep the secti
 - [blockers or "(none)"]
 
 ## Task Continuity
-- [what the agent was actively doing when compaction triggered, files open, commands pending]
+- [what the agent was actively doing when compaction triggered, files open, commands pending, and any active subagent task_ids so delegated work can be resumed instead of restarted]
 
 ## Open Issues & Questions
 - [unresolved issues, questions needing user input, or "(none)"]
@@ -74,6 +74,8 @@ Rules:
 - Keep every section, even when empty — use "(none)" as placeholder.
 - Use terse bullets, not prose paragraphs.
 - Preserve exact file paths, commands, error strings, and identifiers.
+- Quote constraints verbatim and cite their source; never invent or weaken a constraint.
+- Preserve active subagent/task identifiers (task_id) so delegated work can be resumed instead of restarted.
 - Do NOT mention the summary process or that context was compacted.
 - Respond in the same language as the conversation.
 - The "User Intent Trail" must capture chronological changes in direction with quote fidelity.

@@ -78,6 +78,12 @@ describe("buildCompactionPrompt()", () => {
 		expect(prompt).toContain("anchored summary");
 	});
 
+	it("preserves constraints verbatim and subagent task ids", () => {
+		const prompt = buildCompactionPrompt({});
+		expect(prompt).toContain("verbatim");
+		expect(prompt).toContain("task_id");
+	});
+
 	it("combines files and focus together", () => {
 		const prompt = buildCompactionPrompt({
 			filesTouched: "## Files Touched Manifest\n\n- `config.json` `W`",

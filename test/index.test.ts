@@ -1407,4 +1407,46 @@ describe("LiveCompactionPlugin", () => {
 			}
 		});
 	});
+
+	describe("todo preservation", () => {
+		it("captures todos on compaction and handles session.compacted", async () => {
+			const logSpy = vi.fn().mockResolvedValue(undefined);
+			const todo = vi
+				.fn()
+				.mockResolvedValue({ data: [{ content: "x", status: "pending" }] });
+			const hooks = await LiveCompactionPlugin({
+				...mockCtx,
+				client: { app: { log: logSpy }, session: { todo } },
+				directory: TMP_DIR,
+			} as any);
+
+			const output = { context: [], prompt: undefined };
+			await hooks["experimental.session.compacting"]!(
+				{ sessionID: "sess-todo" },
+				output,
+			);
+			expect(todo).toHaveBeenCalledWith({ path: { id: "sess-todo" } });
+			expect(output.prompt).toBeDefined();
+
+			await expect(
+				hooks.event!({
+					event: {
+						id: "e",
+						type: "session.compacted",
+						properties: { sessionID: "sess-todo" },
+					},
+				}),
+			).resolves.toBeUndefined();
+		});
+
+		it("does not throw when the todo API is unavailable", async () => {
+			const hooks = await getHooks();
+			const output = { context: [], prompt: undefined };
+			await hooks["experimental.session.compacting"]!(
+				{ sessionID: "sess-no-todo" },
+				output,
+			);
+			expect(output.prompt).toBeDefined();
+		});
+	});
 });
