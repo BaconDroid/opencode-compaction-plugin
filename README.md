@@ -299,6 +299,24 @@ docs/
 - OpenCode >= 0.1.0 (with plugin support and `experimental.session.compacting` hook)
 - The `experimental.*` hooks are marked experimental and may change in future OpenCode versions
 
+### oh-my-opencode-slim
+
+Compatible with [`oh-my-opencode-slim`](https://github.com/alvinunreal/oh-my-opencode-slim). The two plugins register overlapping hooks but do not conflict:
+
+- `experimental.session.compacting` — omo-slim only marks the session (it does not touch `output.prompt`/`output.context`), so this plugin's prompt handling is unaffected.
+- `experimental.chat.messages.transform` — omo-slim rewrites user text and image parts; this plugin trims/dedups/purges tool parts and applies compressions. Load omo-slim **before** this plugin so its in-place rewrites run before this plugin's structural compression.
+- `config` — omo-slim manages agents, MCPs and commands; this plugin only ensures the `compress` permission (and leaves a global permission string untouched).
+- No shared tool names (omo-slim: `task*`, `waitForUser`, `acpRun`, `webfetch`, `ast_grep_*`, `marketplace_*`; this plugin: `compress`).
+- omo-slim does not use `experimental.compaction.autocontinue` and does not mutate `permission`.
+
+Recommended `plugin` order in `opencode.json`:
+
+```json
+{
+  "plugin": ["oh-my-opencode-slim@latest", "github:BaconDroid/opencode-live-compaction"]
+}
+```
+
 ## License
 
 MIT
