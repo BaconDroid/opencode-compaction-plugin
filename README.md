@@ -90,7 +90,7 @@ Runs on every message batch sent to the LLM. Applies three strategies in order:
 
 ### 3. `experimental.session.compacting` — Enhanced prompt
 
-When compaction triggers (automatic or manual `/compact`), replaces the default prompt with the enhanced 11-section template:
+When compaction triggers (automatic or manual `/compact`), applies the enhanced 11-section template. By default (`promptMode: "replace"`) it replaces the default prompt; with `"augment"` it keeps OpenCode's default prompt and appends the template. In replace mode the previous compaction summary is fetched and re-injected as `<previous-summary>` so continuity is preserved across repeated compactions.
 
 1. **Brief** — Executive summary
 2. **User Intent Trail** — Chronological goals with direction changes
@@ -274,7 +274,7 @@ bun run test:coverage
 # (OpenCode loads .ts files directly via Bun)
 ```
 
-Current coverage: **95.5% statements, 96.4% functions, 97.3% lines, 87.0% branches** (225 tests).
+Current coverage: **95.4% statements, 96.6% functions, 97.2% lines, 87.0% branches** (233 tests).
 
 ## File Structure
 
@@ -290,6 +290,7 @@ src/
   todo-preserver.ts — Todo snapshot/restore around compaction
   preemptive-compaction.ts — Proactive compaction decision logic
   degradation-monitor.ts — Post-compaction degradation diagnostic
+  previous-summary.ts — Previous compaction summary extraction
 test/
   index.test.ts     — Plugin integration tests
   prompt.test.ts    — Prompt template tests
@@ -301,6 +302,7 @@ test/
   todo-preserver.test.ts — Todo preserver tests
   preemptive-compaction.test.ts — Preemptive compaction tests
   degradation-monitor.test.ts — Degradation monitor tests
+  previous-summary.test.ts — Previous summary tests
 docs/
   context-compaction-research.md — Literature catalog and implementation backlog
   code-review.md    — Direct source findings

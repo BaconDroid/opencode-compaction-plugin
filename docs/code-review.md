@@ -274,3 +274,12 @@ args }`. The compress capture via `tool.execute.after` is therefore correct.
 `src/index.ts`. The per-session autocontinue guard timers were left to expire on
 their own; they were not cleared on `session.deleted` or `dispose`.
 → Resolved: timers are cleared per session on delete and all on dispose.
+
+### F10 — Replace mode dropped the previous compaction summary
+OpenCode's default compaction prompt includes `previousSummary` (the last
+compaction's summary, `info.summary === true`). Setting `output.prompt` discards
+that default, so repeated compactions lost accumulated context; the plugin's
+prompt referenced `<previous-summary>` but never populated it.
+→ Resolved: in replace mode the plugin fetches the session messages, extracts
+the previous summary (`previous-summary.ts`) and injects it as
+`<previous-summary>`. Augment mode keeps OpenCode's own handling.

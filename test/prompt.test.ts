@@ -73,6 +73,12 @@ describe("buildCompactionPrompt()", () => {
 		expect(prompt).toContain("<previous-summary>");
 	});
 
+	it("includes the previous summary block when provided", () => {
+		const prompt = buildCompactionPrompt({ previousSummary: "old summary" });
+		expect(prompt).toContain("<previous-summary>");
+		expect(prompt).toContain("old summary");
+	});
+
 	it("mentions anchored summary behavior", () => {
 		const prompt = buildCompactionPrompt({});
 		expect(prompt).toContain("anchored summary");

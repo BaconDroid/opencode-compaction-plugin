@@ -1662,4 +1662,54 @@ describe("LiveCompactionPlugin", () => {
 			expect(logged).toContain("post-compaction degradation detected");
 		});
 	});
+
+	describe("previous summary continuity", () => {
+		it("carries the previous summary into the replace prompt", async () => {
+			const messages = vi.fn().mockResolvedValue({
+				data: [
+					{
+						info: { role: "assistant", summary: true },
+						parts: [{ type: "text", text: "PRIOR SUMMARY" }],
+					},
+				],
+			});
+			const hooks = await LiveCompactionPlugin({
+				...mockCtx,
+				client: {
+					app: { log: vi.fn().mockResolvedValue(undefined) },
+					session: { messages },
+				},
+				directory: TMP_DIR,
+			} as any);
+
+			const output = { context: [] as string[], prompt: undefined as string | undefined };
+			await hooks["experimental.session.compacting"]!(
+				{ sessionID: "sess-prev" },
+				output,
+			);
+			expect(output.prompt).toContain("<previous-summary>");
+			expect(output.prompt).toContain("PRIOR SUMMARY");
+		});
+
+		it("does not fetch the previous summary in augment mode", async () => {
+			const messages = vi.fn().mockResolvedValue({ data: [] });
+			const hooks = await LiveCompactionPlugin(
+				{
+					...mockCtx,
+					client: {
+						app: { log: vi.fn().mockResolvedValue(undefined) },
+						session: { messages },
+					},
+					directory: TMP_DIR,
+				} as any,
+				{ promptMode: "augment" } as any,
+			);
+			const output = { context: [] as string[], prompt: undefined as string | undefined };
+			await hooks["experimental.session.compacting"]!(
+				{ sessionID: "sess-aug2" },
+				output,
+			);
+			expect(messages).not.toHaveBeenCalled();
+		});
+	});
 });

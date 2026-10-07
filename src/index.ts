@@ -46,6 +46,7 @@ import {
 	DegradationMonitor,
 	countTrailingNoTextAssistant,
 } from "./degradation-monitor.js";
+import { extractPreviousSummary } from "./previous-summary.js";
 
 // ---------------------------------------------------------------------------
 // Types — inlined from @opencode-ai/plugin to avoid requiring it as a dep.
@@ -527,6 +528,30 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 				}
 			}
 
+			// In replace mode the default prompt (which carries the previous
+			// summary) is discarded, so fetch and re-inject it ourselves.
+			let previousSummary: string | undefined;
+			if (config.promptMode !== "augment") {
+				const fetchMessages = ctx.client.session?.messages;
+				if (fetchMessages) {
+					try {
+						const response = await fetchMessages({
+							path: { id: sessionID },
+						});
+						const list = Array.isArray(response)
+							? response
+							: (((response as { data?: unknown })?.data as
+									| unknown[]
+									| undefined) ?? []);
+						previousSummary = extractPreviousSummary(list);
+					} catch (error) {
+						logger.info("previous summary fetch failed", {
+							error: String(error),
+						});
+					}
+				}
+			}
+
 			// Collect files-touched manifest
 			const tracker = getTracker(sessionID);
 			const filesManifest =
@@ -550,6 +575,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			const enhancedPrompt = buildCompactionPrompt({
 				filesTouched: filesManifest,
 				focusDirective: focus,
+				previousSummary,
 			});
 
 			if (config.promptMode === "augment") {
