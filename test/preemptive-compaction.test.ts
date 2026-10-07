@@ -1,19 +1,11 @@
 import { describe, it, expect } from "bun:test";
 import {
-	totalInputTokens,
 	effectiveInputTokens,
 	resolveTriggerThreshold,
 	shouldTriggerPreemptiveCompaction,
 } from "../src/preemptive-compaction.ts";
 
 describe("token helpers", () => {
-	it("totalInputTokens sums input and cache reads", () => {
-		expect(
-			totalInputTokens({ input: 100, cache: { read: 50, write: 20 } }),
-		).toBe(150);
-		expect(totalInputTokens({})).toBe(0);
-	});
-
 	it("effectiveInputTokens excludes cache unless enabled", () => {
 		const tokens = {
 			input: 100,

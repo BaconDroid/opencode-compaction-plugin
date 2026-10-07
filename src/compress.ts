@@ -14,6 +14,7 @@
  */
 
 import { tool } from "@opencode-ai/plugin";
+import type { Message } from "./types.js";
 import {
 	blockId,
 	collectExistingBlockIds,
@@ -89,17 +90,6 @@ export class CompressionStore {
 // ---------------------------------------------------------------------------
 // Compression application
 // ---------------------------------------------------------------------------
-
-interface Message {
-	info: { role: string; id?: string; [key: string]: unknown };
-	parts: Array<{
-		type: string;
-		text?: string;
-		tool?: string;
-		callID?: string;
-		[key: string]: unknown;
-	}>;
-}
 
 /**
  * Split compression requests into those that belong to the given message array
@@ -181,10 +171,9 @@ export function applyCompressions(
 			start = Math.max(0, req.start as number);
 			end = Math.min(messages.length - 1, req.end as number);
 		} else {
-			const span = selectDeterministicSpan(
-				messages as Parameters<typeof selectDeterministicSpan>[0],
-				{ protectedTurns: opts.protectedTurns ?? 3 },
-			);
+			const span = selectDeterministicSpan(messages, {
+				protectedTurns: opts.protectedTurns ?? 3,
+			});
 			if (!span) continue;
 			start = span.start;
 			end = span.end;
@@ -294,11 +283,7 @@ export function applySquash(
 	let merged = 0;
 
 	for (const req of requests) {
-		const blocks = orderCompressBlocks(
-			parseCompressBlocks(
-				messages as Parameters<typeof parseCompressBlocks>[0],
-			),
-		);
+		const blocks = orderCompressBlocks(parseCompressBlocks(messages));
 		const fromIndex = blocks.findIndex((b) => b.label === req.from);
 		const toIndex = blocks.findIndex((b) => b.label === req.to);
 		if (fromIndex === -1 || toIndex === -1 || fromIndex >= toIndex) continue;

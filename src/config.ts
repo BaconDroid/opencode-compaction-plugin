@@ -120,12 +120,6 @@ export interface DegradationMonitorConfig {
 	threshold?: number;
 	/** Window after compaction during which the check runs, in ms (default: 120000) */
 	windowMs?: number;
-	/** Judge-free halt: distance below which drafts are converged (default: 0.05) */
-	convergenceThreshold?: number;
-	/** Judge-free halt: consecutive converged steps required (default: 3) */
-	convergencePatience?: number;
-	/** Judge-free halt: failsafe round cap (default: 12) */
-	maxRounds?: number;
 }
 
 export interface LiveCompactionConfig {
@@ -243,9 +237,6 @@ export const DEFAULT_CONFIG: Required<
 		enabled: false,
 		threshold: 4,
 		windowMs: 120000,
-		convergenceThreshold: 0.05,
-		convergencePatience: 3,
-		maxRounds: 12,
 	},
 	protectedFilePatterns: [],
 };
@@ -419,15 +410,6 @@ export function mergeConfig(user: LiveCompactionConfig) {
 			windowMs:
 				user.degradationMonitor?.windowMs ??
 				DEFAULT_CONFIG.degradationMonitor.windowMs,
-			convergenceThreshold:
-				user.degradationMonitor?.convergenceThreshold ??
-				DEFAULT_CONFIG.degradationMonitor.convergenceThreshold,
-			convergencePatience:
-				user.degradationMonitor?.convergencePatience ??
-				DEFAULT_CONFIG.degradationMonitor.convergencePatience,
-			maxRounds:
-				user.degradationMonitor?.maxRounds ??
-				DEFAULT_CONFIG.degradationMonitor.maxRounds,
 		},
 		protectedFilePatterns:
 			user.protectedFilePatterns ?? DEFAULT_CONFIG.protectedFilePatterns,

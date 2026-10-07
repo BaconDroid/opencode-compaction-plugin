@@ -35,7 +35,6 @@ OpenCode's built-in compaction produces a 7-section summary. This plugin replace
 | **Graduated eviction** | None | LLM-free `reasoning → bulk output → intermediate → episode` (never evicts `user` turns) |
 | **Task state** | "Goal" prose | `<task-state>` block with todo ids/statuses/priorities |
 | **Focus** | None | `<latest-user-ask>` block anchored to the current user request |
-| **Judge-free stop** | None | Draft-convergence detection (text distance + patience + failsafe) |
 
 ## Install
 
@@ -277,11 +276,8 @@ Precedence, low to high: **defaults → global file → plugin options → proje
     // Post-compaction diagnostic: warn when assistant messages lose text (opt-in)
     "degradationMonitor": {
         "enabled": false,
-        "threshold": 4,               // consecutive assistant messages without text
-        "windowMs": 120000,           // only checked within this window after compaction
-        "convergenceThreshold": 0.05, // judge-free stop: converged draft distance
-        "convergencePatience": 3,     // consecutive converged steps required to halt
-        "maxRounds": 12               // judge-free stop: failsafe round cap
+        "threshold": 4,          // consecutive assistant messages without text
+        "windowMs": 120000       // only checked within this window after compaction
     },
 
     // Glob patterns for files whose outputs should never be trimmed
@@ -330,7 +326,7 @@ src/
   eviction.ts       — Graduated, LLM-free eviction
   todo-preserver.ts — Todo snapshot/restore and <task-state> rendering
   preemptive-compaction.ts — Trigger threshold, gates and preemptive decision logic
-  degradation-monitor.ts — Degradation diagnostic + judge-free halting rule
+  degradation-monitor.ts — Post-compaction degradation diagnostic
   previous-summary.ts — Previous summary extraction + sliding state
 test/
   index.test.ts     — Plugin integration tests

@@ -8,24 +8,12 @@
  * block, minus the protected tail.
  */
 
+import type { Message } from "./types.js";
+
 export type Scale = "granular" | "deep";
 
-export interface BlockMessage {
-	info: {
-		role: string;
-		id?: string;
-		timestamp?: number;
-		time?: { created?: number };
-		[key: string]: unknown;
-	};
-	parts: Array<{
-		type: string;
-		text?: string;
-		tool?: string;
-		callID?: string;
-		[key: string]: unknown;
-	}>;
-}
+/** Alias kept for readability — the shared message shape. */
+export type BlockMessage = Message;
 
 export interface DeterministicSpan {
 	start: number;
@@ -110,17 +98,13 @@ export function isCompressedBlockMessage(message: BlockMessage): boolean {
 }
 
 /**
- * Durable id for a message part: `r:<callID>` for tool calls,
- * `u:<timestamp>` for user turns, `a:<messageId>:p<index>` otherwise.
+ * Durable id for a message: `r:<callID>` for tool calls, `u:<timestamp>` for
+ * user turns, `a:<messageId>` otherwise.
  */
-export function blockId(message: BlockMessage, partIndex = 0): string {
+export function blockId(message: BlockMessage): string {
 	const info = message.info ?? ({} as BlockMessage["info"]);
-	const part = message.parts?.[partIndex];
-	if (
-		part?.type === "tool" &&
-		typeof part.callID === "string" &&
-		part.callID
-	) {
+	const part = message.parts?.[0];
+	if (part?.type === "tool" && typeof part.callID === "string" && part.callID) {
 		return `r:${part.callID}`;
 	}
 	const timestamp = info.time?.created ?? info.timestamp;
@@ -128,17 +112,12 @@ export function blockId(message: BlockMessage, partIndex = 0): string {
 		return `u:${timestamp}`;
 	}
 	if (typeof info.id === "string" && info.id) {
-		return `a:${info.id}:p${partIndex}`;
+		return `a:${info.id}`;
 	}
 	if (typeof timestamp === "number") {
 		return `u:${timestamp}`;
 	}
-	return `m:${partIndex}`;
-}
-
-/** True when an id follows the durable `r:`/`u:`/`a:` scheme. */
-export function isDurableId(id: string): boolean {
-	return /^[rua]:/.test(id);
+	return "m:0";
 }
 
 /** Collect the `id="..."` attribute of every `<compressed-block>` in the list. */

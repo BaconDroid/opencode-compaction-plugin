@@ -73,6 +73,7 @@ import {
 	extractPreviousSummary,
 	type SlidingState,
 } from "./previous-summary.js";
+import type { Message, MessagePart } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Types — inlined from @opencode-ai/plugin to avoid requiring it as a dep.
@@ -114,24 +115,6 @@ type Plugin = (
 	input: PluginInput,
 	options?: Record<string, unknown>,
 ) => Promise<Hooks>;
-
-interface MessagePart {
-	type: string;
-	tool?: string;
-	callID?: string;
-	state?: {
-		status?: string;
-		output?: string;
-		input?: unknown;
-		[key: string]: unknown;
-	};
-	[key: string]: unknown;
-}
-
-interface Message {
-	info: { role: string; [key: string]: unknown };
-	parts: MessagePart[];
-}
 
 interface Hooks {
 	dispose?: () => Promise<void>;
@@ -733,93 +716,88 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		"experimental.chat.messages.transform": async (_input, output) => {
 			const messages = output.messages;
 
-			// 0. Apply pending compressions (from compress tool calls).
-			// The transform hook receives no session id, so each request is scoped
-			// by the callID of its compress tool call: a compression queued for one
+			// 0. Apply pending compression/squash/expand requests.
+			// The transform hook receives no session id, so a compression is scoped
+			// by the callID of its compress tool call: a request queued for one
 			// session is never applied to another. Non-matching requests stay queued
 			// until they expire.
 			for (const sid of sessionTrackers.keys()) {
+				// 0a. Compressions.
 				const requests = compressions.drain(sid);
-				if (requests.length === 0) continue;
-
-				const { applicable, deferred } = selectCompressions(
-					messages as Parameters<typeof selectCompressions>[0],
-					requests,
-				);
-
-				if (applicable.length > 0) {
-					const reversible = config.compress?.reversible ?? true;
-					const replaced = applyCompressions(
-						messages as Parameters<typeof applyCompressions>[0],
-						applicable,
-						{
-							protectedTurns: config.compress?.protectedTurns ?? 3,
-							record: reversible
-								? ({ id, original }) =>
-										expansions.save(
-											sid,
-											id,
-											original as unknown[],
-										)
-								: undefined,
-						},
+				if (requests.length > 0) {
+					const { applicable, deferred } = selectCompressions(
+						messages,
+						requests,
 					);
-					if (replaced > 0) {
-						logger.info("compress applied", {
-							sessionID: sid,
-							messagesReplaced: replaced,
-						});
+
+					if (applicable.length > 0) {
+						const reversible = config.compress?.reversible ?? true;
+						const replaced = applyCompressions(
+							messages,
+							applicable,
+							{
+								protectedTurns: config.compress?.protectedTurns ?? 3,
+								record: reversible
+									? ({ id, original }) =>
+											expansions.save(sid, id, original as unknown[])
+									: undefined,
+							},
+						);
+						if (replaced > 0) {
+							logger.info("compress applied", {
+								sessionID: sid,
+								messagesReplaced: replaced,
+							});
+						}
+					}
+
+					// Re-queue requests for a different conversation, unless stale.
+					const now = Date.now();
+					for (const req of deferred) {
+						if (now - req.timestamp < DEFERRED_COMPRESSION_MAX_AGE_MS) {
+							compressions.queue(sid, req);
+						} else {
+							logger.info("compress deferred request expired", {
+								sessionID: sid,
+								topic: req.topic,
+							});
+						}
 					}
 				}
 
-				// Re-queue requests for a different conversation, unless stale.
-				const now = Date.now();
-				for (const req of deferred) {
-					if (now - req.timestamp < DEFERRED_COMPRESSION_MAX_AGE_MS) {
-						compressions.queue(sid, req);
-					} else {
-						logger.info("compress deferred request expired", {
-							sessionID: sid,
-							topic: req.topic,
-						});
-					}
-				}
-			}
-
-			// 0b. Apply pending squash requests (merge contiguous blocks).
-			for (const sid of sessionTrackers.keys()) {
+				// 0b. Squash contiguous blocks.
 				const squashRequests = squashes.drain(sid);
-				if (squashRequests.length === 0) continue;
-				const merged = applySquash(
-					messages as Parameters<typeof applySquash>[0],
-					squashRequests,
-					{ maxBlocks: config.compress?.maxBlocksPerSquash ?? 8 },
-				);
-				if (merged > 0) {
-					logger.info("squash applied", {
-						sessionID: sid,
-						blocksMerged: merged,
-					});
+				if (squashRequests.length > 0) {
+					const merged = applySquash(
+						messages,
+						squashRequests,
+						{ maxBlocks: config.compress?.maxBlocksPerSquash ?? 8 },
+					);
+					if (merged > 0) {
+						logger.info("squash applied", {
+							sessionID: sid,
+							blocksMerged: merged,
+						});
+					}
 				}
-			}
 
-			// 0c. Apply pending expansions (restore original messages).
-			for (const sid of sessionTrackers.keys()) {
+				// 0c. Expand compressed blocks back to their originals.
 				const expandRequests = expandStore.drain(sid);
-				if (expandRequests.length === 0) continue;
-				const { expanded, unmatched } = applyExpansions(
-					messages as Parameters<typeof applyExpansions>[0],
-					expandRequests,
-					expansions,
-				);
-				if (expanded > 0) {
-					logger.info("expand applied", { sessionID: sid, expanded });
-				}
-				if (unmatched.length > 0) {
-					logger.info("expand unmatched", {
-						sessionID: sid,
-						blocks: unmatched,
-					});
+				if (expandRequests.length > 0) {
+					const { expanded, unmatched } = applyExpansions(
+						messages,
+						expandRequests,
+						expansions,
+					);
+					if (expanded > 0) {
+						logger.info("expand applied", { sessionID: sid, expanded });
+					}
+					if (unmatched.length > 0) {
+						logger.info("expand unmatched", {
+							sessionID: sid,
+							blocks: unmatched,
+						});
+					}
 				}
 			}
 
@@ -859,7 +837,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			// 3. Dedup repeated tool calls
 			if (config.dedup?.enabled) {
 				const deduped = applyDedup(
-					messages as Parameters<typeof applyDedup>[0],
+					messages,
 					config,
 				);
 				if (deduped > 0) {
@@ -875,7 +853,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 				);
 				const purgedCallIds = new Set<string>();
 				const purged = applyPurgeErrors(
-					messages as Parameters<typeof applyPurgeErrors>[0],
+					messages,
 					config,
 					purgeProtected,
 					purgedCallIds,
@@ -887,7 +865,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 				// 4b. Cascade the purge to work depending on purged calls.
 				if ((config.purgeErrors.cascade ?? true) && purgedCallIds.size > 0) {
 					const cascaded = applyCascadePurge(
-						messages as Parameters<typeof applyCascadePurge>[0],
+						messages,
 						purgedCallIds,
 						purgeProtected,
 					);
@@ -900,7 +878,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			// 5. Graduated eviction (runs last; content-addressed, never user turns).
 			if (config.eviction?.enabled) {
 				const { removed, evictedIds } = applyEviction(
-					messages as Parameters<typeof applyEviction>[0],
+					messages,
 					{
 						enabled: true,
 						thresholdTokens: config.eviction.thresholdTokens ?? 80000,
