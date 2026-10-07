@@ -80,6 +80,22 @@ describe("mergeConfig()", () => {
 		expect(cfg.preemptiveCompaction.contextLimit).toBe(1234);
 	});
 
+	it("defaults promptMode to replace and the degradation monitor to off", () => {
+		const cfg = mergeConfig({});
+		expect(cfg.promptMode).toBe("replace");
+		expect(cfg.degradationMonitor.enabled).toBe(false);
+	});
+
+	it("overrides promptMode and the degradation monitor", () => {
+		const cfg = mergeConfig({
+			promptMode: "augment",
+			degradationMonitor: { enabled: true, threshold: 2 },
+		});
+		expect(cfg.promptMode).toBe("augment");
+		expect(cfg.degradationMonitor.enabled).toBe(true);
+		expect(cfg.degradationMonitor.threshold).toBe(2);
+	});
+
 	it("overrides commands settings", () => {
 		const cfg = mergeConfig({ commands: { enabled: false } });
 		expect(cfg.commands.enabled).toBe(false);

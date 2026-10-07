@@ -71,6 +71,15 @@ export interface PreemptiveCompactionConfig {
 	contextLimit?: number;
 }
 
+export interface DegradationMonitorConfig {
+	/** Enable the post-compaction degradation diagnostic (default: false) */
+	enabled?: boolean;
+	/** Consecutive assistant messages without text that trigger a warning (default: 4) */
+	threshold?: number;
+	/** Window after compaction during which the check runs, in ms (default: 120000) */
+	windowMs?: number;
+}
+
 export interface LiveCompactionConfig {
 	/** Enable/disable the entire plugin (default: true) */
 	enabled?: boolean;
@@ -86,6 +95,10 @@ export interface LiveCompactionConfig {
 	turnProtection?: TurnProtectionConfig;
 	/** Proactive compaction before the context overflows */
 	preemptiveCompaction?: PreemptiveCompactionConfig;
+	/** How the compaction prompt is applied: replace the default or augment it (default: "replace") */
+	promptMode?: "replace" | "augment";
+	/** Post-compaction degradation diagnostic */
+	degradationMonitor?: DegradationMonitorConfig;
 	/** Glob patterns for files whose tool outputs should never be trimmed (default: []) */
 	protectedFilePatterns?: string[];
 	/** Enable debug logging (default: false) */
@@ -117,6 +130,7 @@ export const DEFAULT_CONFIG: Required<
 		| "commands"
 		| "turnProtection"
 		| "preemptiveCompaction"
+		| "degradationMonitor"
 	>
 > & {
 	trim: Required<TrimLimits>;
@@ -129,9 +143,11 @@ export const DEFAULT_CONFIG: Required<
 	> & {
 		contextLimit?: number;
 	};
+	degradationMonitor: Required<DegradationMonitorConfig>;
 } = {
 	enabled: true,
 	debug: false,
+	promptMode: "replace",
 	trim: { ...DEFAULT_TRIM },
 	dedup: {
 		enabled: true,
@@ -152,6 +168,11 @@ export const DEFAULT_CONFIG: Required<
 		enabled: false,
 		threshold: 0.78,
 		cooldownMs: 60000,
+	},
+	degradationMonitor: {
+		enabled: false,
+		threshold: 4,
+		windowMs: 120000,
 	},
 	protectedFilePatterns: [],
 };
@@ -273,6 +294,18 @@ export function mergeConfig(user: LiveCompactionConfig) {
 				user.preemptiveCompaction?.cooldownMs ??
 				DEFAULT_CONFIG.preemptiveCompaction.cooldownMs,
 			contextLimit: user.preemptiveCompaction?.contextLimit,
+		},
+		promptMode: user.promptMode ?? DEFAULT_CONFIG.promptMode,
+		degradationMonitor: {
+			enabled:
+				user.degradationMonitor?.enabled ??
+				DEFAULT_CONFIG.degradationMonitor.enabled,
+			threshold:
+				user.degradationMonitor?.threshold ??
+				DEFAULT_CONFIG.degradationMonitor.threshold,
+			windowMs:
+				user.degradationMonitor?.windowMs ??
+				DEFAULT_CONFIG.degradationMonitor.windowMs,
 		},
 		protectedFilePatterns:
 			user.protectedFilePatterns ?? DEFAULT_CONFIG.protectedFilePatterns,

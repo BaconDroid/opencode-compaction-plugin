@@ -1544,4 +1544,70 @@ describe("LiveCompactionPlugin", () => {
 			expect(summarize).not.toHaveBeenCalled();
 		});
 	});
+
+	describe("compaction prompt mode", () => {
+		it("augments the default prompt when promptMode is augment", async () => {
+			const hooks = await LiveCompactionPlugin(mockCtx as any, {
+				promptMode: "augment",
+			} as any);
+			const output = {
+				context: [] as string[],
+				prompt: undefined as string | undefined,
+			};
+			await hooks["experimental.session.compacting"]!(
+				{ sessionID: "sess-aug" },
+				output,
+			);
+			expect(output.prompt).toBeUndefined();
+			expect(output.context.join("\n")).toContain("<template>");
+		});
+	});
+
+	describe("degradation monitor", () => {
+		it("warns when assistant messages lose text after compaction", async () => {
+			const log = vi.fn().mockResolvedValue(undefined);
+			const messages = vi.fn().mockResolvedValue([
+				{ info: { role: "assistant" }, parts: [{ type: "tool" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "tool" }] },
+				{ info: { role: "assistant" }, parts: [{ type: "tool" }] },
+			]);
+			const hooks = await LiveCompactionPlugin(
+				{
+					...mockCtx,
+					client: { app: { log }, session: { messages } },
+					directory: TMP_DIR,
+				} as any,
+				{
+					debug: true,
+					degradationMonitor: { enabled: true, threshold: 3 },
+				} as any,
+			);
+
+			await hooks.event!({
+				event: {
+					id: "e1",
+					type: "session.compacted",
+					properties: { sessionID: "sess-deg" },
+				},
+			});
+			await hooks.event!({
+				event: {
+					id: "e2",
+					type: "message.updated",
+					properties: {
+						info: {
+							sessionID: "sess-deg",
+							role: "assistant",
+							finish: "stop",
+						},
+					},
+				},
+			});
+
+			const logged = log.mock.calls
+				.map((call) => JSON.stringify(call[0]))
+				.join("\n");
+			expect(logged).toContain("post-compaction degradation detected");
+		});
+	});
 });
