@@ -129,8 +129,7 @@ export class EmbeddingVectorIndex implements VectorIndex {
 			const cached = this.cache.get(this.key(sessionID, item.id));
 			if (!cached) continue;
 			const score = cosineSimilarity(queryVector, cached.vector);
-			// A non-positive cosine (orthogonal/opposite) is never meaningful.
-			if (Number.isFinite(score) && score > 0 && score >= this.minScore) {
+			if (Number.isFinite(score) && score >= this.minScore) {
 				scored.push({ id: item.id, score });
 			}
 		}
