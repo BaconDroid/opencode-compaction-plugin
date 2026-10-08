@@ -150,6 +150,8 @@ Restore a compressed block's original messages from the in-memory sidecar, refer
 
 `inspect` lists the compressed blocks currently held in memory (labels, topics, sizes). `search` runs a **deterministic** case-insensitive keyword search over the stored originals (no embeddings) and returns matching `[bN]` labels with a snippet; use `expand`/`recall` to restore a match. Both return their result directly and are bounded by `compress.searchMaxResults`.
 
+When the optional [semantic retrieval adapter](#optional-adapters-) is configured, `search` runs embedding-based retrieval first and falls back to the keyword search on any error or when it finds nothing.
+
 ## Protected File Patterns
 
 Files matching glob patterns are never trimmed, even if their outputs exceed the configured limits. Useful for critical context files:
@@ -205,6 +207,9 @@ Each feature below lists **what** it does, its **config** keys and how it
 | Degradation monitor | `degradationMonitor.{enabled,threshold,windowMs}` | `false`, `4`, `120000` |
 | Auto-continue | — | — |
 | Compression tools | `compress.{protectedTurns,reversible,maxBlocksPerSquash,searchMaxResults}` | `3`, `false`, `8`, `5` |
+| Semantic retrieval (optional) | `adapters.embeddings.*` | disabled |
+| Semantic constraint validation (optional) | `adapters.judge.*` | disabled |
+| Residual/perplexity scoring (optional) | `adapters.scorer.*` | disabled |
 
 ### Structured compaction prompt
 - **What** — replaces (or augments) OpenCode's default prompt with the 11-section
@@ -296,6 +301,31 @@ Each feature below lists **what** it does, its **config** keys and how it
   (browse/retrieve). See [Compression Tools](#compression-tools).
 - **Config** — `compress.{protectedTurns,reversible,maxBlocksPerSquash,searchMaxResults}`.
 - **Interactions** — applied in the transform before trimming.
+
+### Semantic retrieval (optional adapter)
+- **What** — when `adapters.embeddings` is configured, `search` ranks stored
+  blocks by embedding similarity (cosine) instead of keyword substring.
+- **Config** — `adapters.embeddings.*` (opt-in; off when absent).
+- **Interactions** — semantic hits are tried first; any error (timeout, bad
+  response) or an empty result falls back to the deterministic keyword search.
+  Never changes the transform/compaction path.
+
+### Semantic constraint validation (optional adapter)
+- **What** — after compaction, the pinned constraints are already checked by a
+  deterministic substring test. When `adapters.judge` is configured and a clause
+  looks missing, the judge is asked whether the summary preserves it semantically
+  (paraphrase allowed).
+- **Config** — `adapters.judge.*` (opt-in; off when absent).
+- **Interactions** — only runs for clauses the substring check flagged; a `YES`
+  suppresses the warning, a `NO`/unclear answer or any judge error keeps it.
+
+### Residual/perplexity scoring (optional adapter)
+- **What** — eviction normally budgets with the heuristic `estimateTokens`
+  (chars ÷ 4). When `adapters.scorer` is configured, each distinct text part is
+  scored once and its residual estimate replaces the heuristic for that text.
+- **Config** — `adapters.scorer.*` (opt-in; off when absent).
+- **Interactions** — only affects the eviction budget estimate; tool outputs and
+  unscored texts keep the heuristic; any scorer error falls back to it.
 
 ## Strategy order & interactions
 
@@ -432,6 +462,75 @@ Precedence, low to high: **defaults → global file → plugin options → proje
 }
 ```
 
+### Optional adapters 🔌
+
+The plugin is fully functional with **no adapter configured** — every ensemble
+has a deterministic internal version. Adapters are strictly **opt-in** and
+**fail-open**: they are disabled unless configured, and any error or timeout is
+logged and falls back to the internal behaviour, so a broken adapter can never
+break compaction. No dependency is added: adapters talk to an endpoint/command
+you already run.
+
+Three adapters exist today, each enabled by adding a block (there is no default
+value, so each is off unless present):
+
+- **`adapters.embeddings`** — semantic retrieval for `search` (E4).
+- **`adapters.judge`** — semantic constraint validation after compaction (E6).
+- **`adapters.scorer`** — residual/perplexity estimate for the eviction budget (E5/E9).
+
+```jsonc
+{
+    "adapters": {
+        "embeddings": {
+            "enabled": true,                 // optional (default: true when present)
+            "provider": "http",              // "http" (default) | "command" | "mcp"
+            "url": "http://localhost:11434/v1/embeddings",
+            "model": "nomic-embed-text",     // optional, forwarded to the provider
+            "timeoutMs": 10000,              // optional request timeout
+            "minScore": 0.25                 // optional minimum cosine score for a hit
+        },
+        "judge": {
+            "provider": "http",
+            "url": "http://localhost:11434/v1/chat/completions",
+            "model": "llama3.2",
+            "timeoutMs": 20000
+        },
+        "scorer": {
+            "provider": "http",
+            "url": "http://localhost:8080/score",
+            "timeoutMs": 10000,
+            "maxSamples": 200                // max distinct texts scored per transform
+        }
+    }
+}
+```
+
+**Provider `http`** — for `embeddings`, POSTs an OpenAI-style request
+(`{ "model"?, "input": ["text", …] }`) and accepts the response as a bare
+`number[][]`, `{ "embeddings": number[][] }` or OpenAI's
+`{ "data": [{ "embedding": number[] }] }`. For `judge`, POSTs a chat request
+(`{ "model"?, "messages": [{ "role": "user", "content": prompt }] }`) and
+accepts `{ "choices": [{ "message": { "content": "…" } }] }`, `{ "response" }`,
+`{ "content" }`, `{ "text" }` or `{ "answer" }`. For `scorer`, POSTs
+`{ "model"?, "text": "…" }` and accepts a bare number, a numeric string or
+`{ "score" | "value" | "tokens" | "residual" }`. This covers local servers such
+as Ollama, llama.cpp, LM Studio or vLLM.
+
+**Provider `command`** — spawns `command` and writes `{ "model"?, "input": [...] }`
+(`embeddings`), `{ "model"?, "prompt": "…" }` (`judge`) or
+`{ "model"?, "text": "…" }` (`scorer`) on stdin. It reads the same response
+shapes as the HTTP provider on stdout; for `judge`, plain text stdout is
+accepted too. The process is non-interactive (stdin is closed) and killed on
+timeout.
+
+**Provider `mcp`** — recognised but **not supported yet**; it logs a warning and
+uses the deterministic fallback. `mcp` requires SDK surface the plugin does not
+have.
+
+Security: `url` and `command` are user-supplied and are never logged; put any
+token in the URL/command/env yourself. A `command` value is executed by your
+shell — treat it like any other local configuration.
+
 ### Customizing the prompt
 
 To customize the compaction prompt, modify the `buildCompactionPrompt()` function in `src/core/prompt.ts`. The template is a plain string that you can edit to add or remove sections.
@@ -455,7 +554,7 @@ bun run test:coverage
 # (OpenCode loads .ts files directly via Bun)
 ```
 
-Current coverage: **96.3% functions, 99.1% lines** (207 tests).
+Current coverage: **96.7% functions, 99.4% lines** (251 tests).
 
 ## File Structure
 
@@ -472,6 +571,9 @@ src/
     compress.ts         — compress/squash domain + block rendering
     blocks.ts           — durable block ids + deterministic span selection
     expand.ts           — reversible sidecar + inspection/search
+    adapters.ts         — optional adapter contracts + in-memory vector index
+    judge.ts            — optional judge orchestration for constraint validation
+    scorer.ts           — optional scorer-calibrated token estimator
     strategies.ts       — dedup, error purge, cascade purge
     eviction.ts         — graduated, LLM-free eviction
     pin.ts              — constraint pinning (E6)
@@ -489,6 +591,7 @@ src/
     config-loader.ts    — JSON/JSONC file loading
   opencode/
     tools.ts            — model-driven tool definitions (SDK boundary)
+    adapters.ts         — optional adapter provider resolution (http/command)
 test/
   index.test.ts     — Plugin integration tests
   compat.test.ts    — omo-slim compatibility contract
@@ -506,6 +609,9 @@ test/
   degradation-monitor.test.ts — Degradation monitor tests
   previous-summary.test.ts — Previous summary and sliding-state tests
   pin.test.ts       — Constraint pinning tests
+  adapters.test.ts  — Optional embedding adapter contracts, providers and fallback
+  judge.test.ts     — Optional judge adapter, verdict parsing and E6 validation
+  scorer.test.ts    — Optional scorer adapter, estimator and eviction integration
 docs/
   context-compaction-research.md — Consolidated literature catalog, categories and implementation backlog
   research-prompt.md — Reusable prompt (bootstrap + sweep) to reproduce the literature sweep

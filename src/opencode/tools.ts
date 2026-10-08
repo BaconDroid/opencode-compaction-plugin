@@ -5,10 +5,20 @@
 
 import { tool } from "@opencode-ai/plugin";
 import {
+	renderHits,
 	renderInspector,
 	renderSearch,
+	semanticHits,
 	type ExpansionSidecar,
 } from "../core/expand.js";
+import type { VectorIndex } from "../core/adapters.js";
+import type { Logger } from "../types.js";
+
+/** Optional semantic retrieval backing for the `search` tool. */
+export interface SemanticSearchDeps {
+	index: VectorIndex;
+	logger: Logger;
+}
 
 /**
  * Build the `compress` tool definition: replace a range of messages with a
@@ -154,22 +164,42 @@ Use this to see which [bN] blocks exist and can be recalled or expanded.`,
 }
 
 /**
- * Build the `search` tool: deterministic keyword search over the originals of
- * the compressed blocks (no embeddings).
+ * Build the `search` tool: keyword search over the originals of the compressed
+ * blocks. When a semantic `VectorIndex` is supplied it is tried first; any error
+ * falls back to the deterministic keyword search (fail-open).
  */
 export function buildSearchToolDef(
 	sidecar: ExpansionSidecar,
 	maxResults: number,
+	semantic?: SemanticSearchDeps,
 ) {
 	return tool({
-		description: `Search the originals of the compressed blocks by keyword.
+		description: `Search the originals of the compressed blocks.
 
-Deterministic (case-insensitive substring), no embeddings. Returns matching
-[bN] labels and a snippet; use expand or recall to restore a match.`,
+By default this is a deterministic case-insensitive keyword search. When a
+semantic adapter is configured, embedding-based retrieval runs first. Returns
+matching [bN] labels and a snippet; use expand or recall to restore a match.`,
 		args: {
 			query: tool.schema.string().describe("Keyword to search for"),
 		},
 		async execute(args) {
+			if (semantic) {
+				try {
+					const hits = await semantic.index.search(args.query, maxResults);
+					if (hits.length > 0) {
+						return renderHits(
+							semanticHits(sidecar, hits),
+							args.query,
+							"semantic",
+						);
+					}
+				} catch (error) {
+					semantic.logger.info(
+						"semantic search failed; using keyword search",
+						{ error: String(error) },
+					);
+				}
+			}
 			return renderSearch(sidecar, args.query, maxResults);
 		},
 	});

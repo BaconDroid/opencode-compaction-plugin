@@ -32,7 +32,18 @@ import { FilesTouchedTracker } from "./core/files-touched.js";
 import { loadConfig } from "./config/config-loader.js";
 import type { LiveCompactionConfig } from "./config/config.js";
 import { CompressionStore, SquashStore } from "./core/compress.js";
-import { ExpansionSidecar, ExpandStore } from "./core/expand.js";
+import {
+	ExpansionSidecar,
+	ExpandStore,
+	recordText,
+} from "./core/expand.js";
+import { EmbeddingVectorIndex } from "./core/adapters.js";
+import { judgeClausesPreserved } from "./core/judge.js";
+import {
+	resolveEmbedder,
+	resolveJudge,
+	resolveScorer,
+} from "./opencode/adapters.js";
 import {
 	buildCompressToolDef,
 	buildSquashToolDef,
@@ -187,6 +198,33 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		logger,
 	);
 
+	// Optional semantic retrieval adapter (opt-in). When absent or unusable the
+	// `search` tool keeps its deterministic keyword search.
+	const embeddingCfg = config.adapters?.embeddings;
+	const embedder = resolveEmbedder(embeddingCfg, { logger });
+	const semanticIndex = embedder
+		? new EmbeddingVectorIndex(
+				embedder,
+				() =>
+					expansions.list().map((record) => ({
+						id: record.id,
+						text: recordText(record),
+					})),
+				embeddingCfg?.minScore ?? 0,
+			)
+		: undefined;
+	if (semanticIndex) {
+		logger.info("semantic search adapter enabled", {
+			provider: embeddingCfg?.provider ?? "http",
+		});
+	}
+
+	// Optional model judge (opt-in) for semantic constraint validation (E6).
+	const judge = resolveJudge(config.adapters?.judge, { logger });
+
+	// Optional residual/perplexity scorer (opt-in) for the eviction budget (E5).
+	const scorer = resolveScorer(config.adapters?.scorer, { logger });
+
 	const getTracker = (sessionID: string): FilesTouchedTracker => {
 		let tracker = sessionTrackers.get(sessionID);
 		if (!tracker) {
@@ -247,16 +285,37 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			const summary = (list as Message[]).find(
 				(message) => message.info?.summary === true,
 			);
-			const missing = missingClauses(
-				summary ? partsText(summary.parts) : "",
-				clauses,
-			);
-			if (missing.length > 0) {
-				logger.info("pinned constraints missing from summary", {
-					sessionID,
-					missing,
-				});
+			const summaryText = summary ? partsText(summary.parts) : "";
+			const missing = missingClauses(summaryText, clauses);
+			if (missing.length === 0) return;
+
+			// Optional semantic validation (E6): a paraphrase may satisfy a clause
+			// the substring check flagged. Any judge error keeps the warning.
+			if (judge) {
+				try {
+					const preserved = await judgeClausesPreserved(
+						judge,
+						summaryText,
+						missing,
+					);
+					if (preserved === true) {
+						logger.info("pinned constraints judged preserved", {
+							sessionID,
+							count: missing.length,
+						});
+						return;
+					}
+				} catch (error) {
+					logger.info("pinned semantic validation failed", {
+						error: String(error),
+					});
+				}
 			}
+
+			logger.info("pinned constraints missing from summary", {
+				sessionID,
+				missing,
+			});
 		} catch (error) {
 			logger.info("pinned integrity check failed", { error: String(error) });
 		}
@@ -442,7 +501,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		// 2000-char truncation).
 		// -----------------------------------------------------------------------
 		"experimental.chat.messages.transform": async (_input, output) => {
-			applyTransform(output.messages, {
+			await applyTransform(output.messages, {
 				config,
 				logger,
 				sessionIDs: sessionTrackers.keys(),
@@ -455,6 +514,8 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 				protectedPatterns,
 				turnProtectionEnabled,
 				protectedTurns,
+				scorer,
+				scorerMaxSamples: config.adapters?.scorer?.maxSamples,
 			});
 		},
 
@@ -603,6 +664,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			squashes.clearAll();
 			expansions.clearAll();
 			expandStore.clearAll();
+			semanticIndex?.clear();
 			todoPreserver.clearAll();
 			slidingState.clear();
 			pinnedBySession.clear();
@@ -643,6 +705,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			search: buildSearchToolDef(
 				expansions,
 				config.compress?.searchMaxResults ?? 5,
+				semanticIndex ? { index: semanticIndex, logger } : undefined,
 			),
 		},
 	};

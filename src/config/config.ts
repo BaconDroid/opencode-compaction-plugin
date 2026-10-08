@@ -119,6 +119,81 @@ export interface PreemptiveCompactionConfig {
 	contextLimit?: number;
 }
 
+/** Transport for an optional external adapter. */
+export type AdapterProvider = "http" | "command" | "mcp";
+
+/**
+ * Optional semantic embedding/retrieval adapter (E2/E3/E4). Opt-in: the feature
+ * is disabled unless this block is present. Providers talk to an existing
+ * endpoint/command; no SDK or model is bundled.
+ */
+export interface EmbeddingsAdapterConfig {
+	/** Enable the adapter (default: true when the block is present) */
+	enabled?: boolean;
+	/** Transport: `http` (default), `command`, or `mcp` (not yet supported) */
+	provider?: AdapterProvider;
+	/** Endpoint URL (required for provider "http") */
+	url?: string;
+	/** Shell command (required for provider "command"); see README for the contract */
+	command?: string;
+	/** Optional model/identifier forwarded to the provider */
+	model?: string;
+	/** Request timeout in ms (default: 10000) */
+	timeoutMs?: number;
+	/** Minimum cosine score for a semantic hit (default: 0) */
+	minScore?: number;
+}
+
+/**
+ * Optional model-judge adapter (E1/E5/E6). Opt-in: disabled unless present.
+ * The judge answers a prompt; callers build the prompt and read the verdict.
+ */
+export interface JudgeAdapterConfig {
+	/** Enable the adapter (default: true when the block is present) */
+	enabled?: boolean;
+	/** Transport: `http` (default), `command`, or `mcp` (not yet supported) */
+	provider?: AdapterProvider;
+	/** Endpoint URL (required for provider "http") */
+	url?: string;
+	/** Shell command (required for provider "command"); see README for the contract */
+	command?: string;
+	/** Optional model/identifier forwarded to the provider */
+	model?: string;
+	/** Request timeout in ms (default: 10000) */
+	timeoutMs?: number;
+}
+
+/**
+ * Optional residual/perplexity scorer adapter (E5/E9). Opt-in: disabled unless
+ * present. Refines the eviction budget estimate; absent → heuristic.
+ */
+export interface ScorerAdapterConfig {
+	/** Enable the adapter (default: true when the block is present) */
+	enabled?: boolean;
+	/** Transport: `http` (default), `command`, or `mcp` (not yet supported) */
+	provider?: AdapterProvider;
+	/** Endpoint URL (required for provider "http") */
+	url?: string;
+	/** Shell command (required for provider "command"); see README for the contract */
+	command?: string;
+	/** Optional model/identifier forwarded to the provider */
+	model?: string;
+	/** Request timeout in ms (default: 10000) */
+	timeoutMs?: number;
+	/** Maximum distinct texts scored per transform (default: 200) */
+	maxSamples?: number;
+}
+
+/** Optional external adapters (all off by default). */
+export interface AdaptersConfig {
+	/** Semantic embedding/retrieval adapter */
+	embeddings?: EmbeddingsAdapterConfig;
+	/** Model-judge adapter (semantic validation) */
+	judge?: JudgeAdapterConfig;
+	/** Residual/perplexity scorer adapter (eviction budget) */
+	scorer?: ScorerAdapterConfig;
+}
+
 export interface DegradationMonitorConfig {
 	/** Enable the post-compaction degradation diagnostic (default: false) */
 	enabled?: boolean;
@@ -151,6 +226,8 @@ export interface LiveCompactionConfig {
 	promptMode?: "replace" | "augment";
 	/** Post-compaction degradation diagnostic */
 	degradationMonitor?: DegradationMonitorConfig;
+	/** Optional external adapters (semantic retrieval, judge, scorer) */
+	adapters?: AdaptersConfig;
 	/** Glob patterns for files whose tool outputs should never be trimmed (default: []) */
 	protectedFilePatterns?: string[];
 	/** Enable debug logging (default: false) */
@@ -185,6 +262,7 @@ export const DEFAULT_CONFIG: Required<
 		| "turnProtection"
 		| "preemptiveCompaction"
 		| "degradationMonitor"
+		| "adapters"
 	>
 > & {
 	trim: Required<TrimLimits>;
@@ -201,6 +279,8 @@ export const DEFAULT_CONFIG: Required<
 		absoluteTokenThreshold?: number;
 	};
 	degradationMonitor: Required<DegradationMonitorConfig>;
+	/** Optional; absent by default (adapters are opt-in). */
+	adapters?: AdaptersConfig;
 } = {
 	enabled: true,
 	debug: false,
