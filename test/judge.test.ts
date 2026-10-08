@@ -1,7 +1,8 @@
-import { describe, it, expect, afterAll } from "bun:test";
+import { describe, it, expect, afterAll, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { makeTmpSetup } from "./helpers.ts";
 import {
 	buildIntegrityPrompt,
 	judgeClausesPreserved,
@@ -150,6 +151,11 @@ describe("E6 integration: semantic constraint validation", () => {
 	);
 	afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
+	const TMP_DIR = join(import.meta.dirname, "__tmp_judge_test");
+	const { setup, cleanup } = makeTmpSetup(TMP_DIR);
+	beforeEach(setup);
+	afterEach(cleanup);
+
 	const summaryMessages = {
 		data: [
 			{
@@ -181,8 +187,8 @@ describe("E6 integration: semantic constraint validation", () => {
 				session: { messages: async () => summaryMessages },
 			},
 			project: { id: "p", name: "p" },
-			directory: dir,
-			worktree: dir,
+			directory: TMP_DIR,
+			worktree: TMP_DIR,
 			serverUrl: new URL("http://localhost:4096"),
 		};
 		const hooks = await LiveCompactionPlugin(ctx as any, {
