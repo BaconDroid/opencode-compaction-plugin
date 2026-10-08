@@ -5,14 +5,11 @@
  * - 11-section structured summary (vs 7 built-in), replace or augment the default
  * - Previous compaction summary carried forward (<previous-summary>)
  * - Files-touched manifest with operation badges
- * - Todo list captured before compaction and restored after
  * - Deduplication of repeated tool calls
  * - Error purge (whole-attempt + cascade)
  * - Auto-continue control (skips the compaction agent and duplicates)
  * - Hook error isolation
- * - Opt-in preemptive compaction near the context limit
- * - Opt-in post-compaction degradation diagnostic
- * - Model-driven compress/expand tools
+ * - Model-driven compress/expand/inspect tools
  * - Global + project + plugin-option config
  *
  * Usage:
@@ -20,8 +17,8 @@
  *   2. npm: add "opencode-live-compaction" to `plugin` array in opencode.json
  *
  * This file is the wiring only; the logic lives in focused modules:
- *   transform.ts · preemption.ts · prompt.ts · compress.ts · expand.ts ·
- *   strategies.ts · eviction.ts · config.ts · …
+ *   transform.ts · prompt.ts · compress.ts · expand.ts · strategies.ts ·
+ *   eviction.ts · config.ts · …
  */
 
 import { buildCompactionPrompt, extractLatestUserAsk } from "./core/prompt.js";
@@ -41,21 +38,9 @@ import {
 	buildInspectToolDef,
 } from "./opencode/tools.js";
 import {
-	TodoPreserver,
-	extractTodos,
-	renderTaskState,
-	type TodoSnapshot,
-} from "./core/todo-preserver.js";
-import type { TokenInfo } from "./core/preemption.js";
-import {
-	DegradationMonitor,
-	countTrailingNoTextAssistant,
-} from "./core/degradation-monitor.js";
-import {
 	extractPreviousSummary,
 	type SlidingState,
 } from "./core/previous-summary.js";
-import { PreemptionController } from "./core/preemption.js";
 import { applyTransform } from "./core/transform.js";
 import type { Hooks, Logger, Plugin, PluginInput } from "./types.js";
 
@@ -66,9 +51,14 @@ const PLUGIN_TOOL_NAMES = [
 	"inspect",
 ] as const;
 
+/**
+ * Build the plugin logger. `info` is gated by the `debug` flag; `warn` is
+ * always emitted — a misconfigured adapter or a swallowed hook error is exactly
+ * what you want to see when something silently does nothing.
+ */
 function makeLogger(
 	client: PluginInput["client"],
-	enabled: boolean,
+	debug: boolean,
 ): Logger {
 	const log = (
 		level: "info" | "warn",
@@ -88,10 +78,10 @@ function makeLogger(
 	};
 	return {
 		info: (message, data) => {
-			if (enabled) log("info", message, data);
+			if (debug) log("info", message, data);
 		},
 		warn: (message, data) => {
-			if (enabled) log("warn", message, data);
+			log("warn", message, data);
 		},
 	};
 }
@@ -165,16 +155,8 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 	const compressions = new CompressionStore();
 	const expansions = new ExpansionSidecar();
 	const expandStore = new ExpandStore();
-	const todoPreserver = new TodoPreserver();
 	const slidingState = new Map<string, SlidingState>();
-	const degradation = new DegradationMonitor();
 	const autocontinue = new AutocontinueGuard();
-	const preemption = new PreemptionController(
-		ctx.client,
-		ctx.directory,
-		config,
-		logger,
-	);
 
 	// Optional scorer adapter (opt-in) for the eviction budget (E5). The model
 	// runner backs its opencode provider.
@@ -205,31 +187,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			}
 		}) as T;
 
-	// Restore a captured todo snapshot after compaction. The writer is an
-	// OpenCode internal module, so this is best-effort.
-	const restoreTodos = async (sessionID: string): Promise<void> => {
-		const snapshot = todoPreserver.take(sessionID);
-		if (!snapshot || snapshot.length === 0) return;
-		try {
-			// Loaded through a variable so TypeScript does not resolve the path.
-			const loader = "opencode/session/todo";
-			const mod = (await import(loader)) as {
-				Todo?: {
-					update?: (input: {
-						sessionID: string;
-						todos: TodoSnapshot[];
-					}) => Promise<void>;
-				};
-			};
-			const update = mod.Todo?.update;
-			if (typeof update !== "function") return;
-			await update({ sessionID, todos: snapshot });
-			logger.info("todos restored", { sessionID, count: snapshot.length });
-		} catch (error) {
-			logger.info("todo restore failed", { error: String(error) });
-		}
-	};
-
 	const hooks: Hooks = {
 		"tool.execute.after": async (input) => {
 			const { tool, sessionID, args } = input;
@@ -247,30 +204,23 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 				const end = typeof a.end === "number" ? a.end : undefined;
 				const scale =
 					a.scale === "granular" || a.scale === "deep" ? a.scale : undefined;
-				if (await preemption.isCompressEligible(sessionID)) {
-					compressions.queue(sessionID, {
-						topic: a.topic,
-						start,
-						end,
-						scale,
-						summary: a.summary,
-						timestamp: Date.now(),
-						callID: input.callID,
-					});
-					logger.info("compress queued", {
-						sessionID,
-						topic: a.topic,
-						range:
-							start !== undefined && end !== undefined
-								? `${start}-${end}`
-								: "auto",
-					});
-				} else {
-					logger.info("compress deferred (usage below threshold)", {
-						sessionID,
-						topic: a.topic,
-					});
-				}
+				compressions.queue(sessionID, {
+					topic: a.topic,
+					start,
+					end,
+					scale,
+					summary: a.summary,
+					timestamp: Date.now(),
+					callID: input.callID,
+				});
+				logger.info("compress queued", {
+					sessionID,
+					topic: a.topic,
+					range:
+						start !== undefined && end !== undefined
+							? `${start}-${end}`
+							: "auto",
+				});
 			}
 
 			if (tool === "expand" && typeof a.block === "string") {
@@ -287,27 +237,10 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 					mode,
 				});
 			}
-
-			// Proactive compaction check (opt-in). Fire-and-forget so a slow
-			// summarize never blocks the tool result.
-			void preemption.maybePreempt(sessionID).catch(() => {});
 		},
 
 		"experimental.session.compacting": async (input, output) => {
 			const { sessionID } = input;
-
-			// Capture the todo list so it can be restored after compaction.
-			const todoClient = ctx.client.session?.todo;
-			if (todoClient) {
-				try {
-					todoPreserver.capture(
-						sessionID,
-						extractTodos(await todoClient({ path: { id: sessionID } })),
-					);
-				} catch (error) {
-					logger.info("todo capture failed", { error: String(error) });
-				}
-			}
 
 			// In replace mode the default prompt (which carries the previous
 			// summary) is discarded, so fetch and re-inject it ourselves.
@@ -329,13 +262,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 				}
 			}
 
-			// Render the captured task state (IDs/statuses preserved).
-			const todoSnapshot = todoPreserver.peek(sessionID);
-			const taskState =
-				todoSnapshot && todoSnapshot.length > 0
-					? renderTaskState(todoSnapshot)
-					: undefined;
-
 			const tracker = getTracker(sessionID);
 			const filesManifest =
 				tracker.size > 0 ? tracker.renderManifest() : undefined;
@@ -345,7 +271,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			const enhancedPrompt = buildCompactionPrompt({
 				filesTouched: filesManifest,
 				previousSummary,
-				taskState,
 				focus: latestAsk,
 			});
 
@@ -406,99 +331,19 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			const props = event.properties as
 				| {
 						sessionID?: string;
-						info?: {
-							id?: string;
-							sessionID?: string;
-							role?: string;
-							providerID?: string;
-							modelID?: string;
-							finish?: unknown;
-							tokens?: TokenInfo;
-						};
+						info?: { id?: string; sessionID?: string };
 					}
 				| undefined;
 			const sessionID =
 				props?.sessionID ?? props?.info?.id ?? props?.info?.sessionID;
 
-			if (event.type === "session.deleted") {
-				if (sessionID) {
-					sessionTrackers.delete(sessionID);
-					compressions.clear(sessionID);
-					expansions.clear(sessionID);
-					expandStore.clear(sessionID);
-					todoPreserver.clear(sessionID);
-					slidingState.delete(sessionID);
-					preemption.clear(sessionID);
-					degradation.clear(sessionID);
-					autocontinue.clear(sessionID);
-				}
-				return;
-			}
-
-			if (event.type === "session.compacted") {
-				if (sessionID) {
-					degradation.markCompacted(sessionID, Date.now());
-					await restoreTodos(sessionID);
-				}
-				return;
-			}
-
-			if (event.type === "message.updated") {
-				const info = props?.info;
-				if (
-					info?.role === "assistant" &&
-					info.finish &&
-					info.sessionID &&
-					info.providerID &&
-					info.tokens
-				) {
-					preemption.recordUsage(
-						info.sessionID,
-						info.providerID,
-						info.modelID ?? "",
-						info.tokens,
-					);
-					// Check on turn end too, so text-only sessions still trigger.
-					void preemption.maybePreempt(info.sessionID).catch(() => {});
-				}
-
-				// Post-compaction degradation diagnostic (opt-in).
-				const cfgDeg = config.degradationMonitor;
-				if (
-					cfgDeg?.enabled &&
-					info?.role === "assistant" &&
-					info.finish &&
-					info.sessionID &&
-					degradation.shouldCheck(info.sessionID, Date.now(), cfgDeg.windowMs)
-				) {
-					const fetchMessages = ctx.client.session?.messages;
-					if (fetchMessages) {
-						try {
-							const response = await fetchMessages({
-								path: { id: info.sessionID },
-							});
-							const list = unwrapList(response);
-							const count = countTrailingNoTextAssistant(
-								list as Array<{
-									info?: { role?: string };
-									parts?: unknown;
-								}>,
-							);
-							if (count >= cfgDeg.threshold) {
-								logger.info("post-compaction degradation detected", {
-									sessionID: info.sessionID,
-									consecutiveNoText: count,
-								});
-								degradation.clear(info.sessionID);
-							}
-						} catch (error) {
-							logger.info("degradation check failed", {
-								error: String(error),
-							});
-						}
-					}
-				}
-				return;
+			if (event.type === "session.deleted" && sessionID) {
+				sessionTrackers.delete(sessionID);
+				compressions.clear(sessionID);
+				expansions.clear(sessionID);
+				expandStore.clear(sessionID);
+				slidingState.delete(sessionID);
+				autocontinue.clear(sessionID);
 			}
 		},
 
@@ -507,10 +352,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			compressions.clearAll();
 			expansions.clearAll();
 			expandStore.clearAll();
-			todoPreserver.clearAll();
 			slidingState.clear();
-			preemption.clearAll();
-			degradation.clearAll();
 			autocontinue.clearAll();
 		},
 

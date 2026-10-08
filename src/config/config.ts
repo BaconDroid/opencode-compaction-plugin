@@ -40,33 +40,12 @@ export interface CompressConfig {
 export interface EvictionSettings {
 	/** Enable graduated LLM-free eviction (default: true) */
 	enabled?: boolean;
-	/**
-	 * Token budget; eviction runs only above it (default: 200000). When
-	 * preemptive compaction is enabled with `contextLimit` and this is unset,
-	 * the budget is derived from the limit instead.
-	 */
+	/** Token budget; eviction runs only above it (default: 200000) */
 	thresholdTokens?: number;
 	/** Levels to apply, in order (default: reasoning, bulk_output, intermediate, episode) */
 	levels?: EvictionLevel[];
 	/** Protect the prologue from eviction (default: true) */
 	protectPrologue?: boolean;
-}
-
-export interface PreemptiveCompactionConfig {
-	/** Compact proactively before the context overflows (default: false) */
-	enabled?: boolean;
-	/** Fraction of the context limit that triggers compaction (default: 0.80) */
-	threshold?: number;
-	/** Absolute token ceiling for the trigger; the smaller of ratio and this wins */
-	absoluteTokenThreshold?: number;
-	/** Count cache read/write tokens in the usage (default: true) */
-	countCacheTokens?: boolean;
-	/** Minimum new tokens since the last compaction before compacting (default: 0) */
-	minTokensSinceLast?: number;
-	/** Minimum delay between proactive compactions, in ms (default: 60000) */
-	cooldownMs?: number;
-	/** Override the model context limit (otherwise resolved from the provider) */
-	contextLimit?: number;
 }
 
 /** Transport for an optional external adapter. */
@@ -107,15 +86,6 @@ export interface AdaptersConfig {
 	scorer?: ScorerAdapterConfig;
 }
 
-export interface DegradationMonitorConfig {
-	/** Enable the post-compaction degradation diagnostic (default: false) */
-	enabled?: boolean;
-	/** Consecutive assistant messages without text that trigger a warning (default: 4) */
-	threshold?: number;
-	/** Window after compaction during which the check runs, in ms (default: 120000) */
-	windowMs?: number;
-}
-
 export interface LiveCompactionConfig {
 	/** Enable/disable the entire plugin (default: true) */
 	enabled?: boolean;
@@ -127,13 +97,9 @@ export interface LiveCompactionConfig {
 	compress?: CompressConfig;
 	/** Graduated, LLM-free eviction */
 	eviction?: EvictionSettings;
-	/** Proactive compaction before the context overflows */
-	preemptiveCompaction?: PreemptiveCompactionConfig;
 	/** How the compaction prompt is applied: replace the default or augment it (default: "replace") */
 	promptMode?: "replace" | "augment";
-	/** Post-compaction degradation diagnostic */
-	degradationMonitor?: DegradationMonitorConfig;
-	/** Optional external adapters (semantic retrieval, scorer) */
+	/** Optional external adapters (scorer) */
 	adapters?: AdaptersConfig;
 	/** Enable debug logging (default: false) */
 	debug?: boolean;
@@ -144,26 +110,13 @@ export interface LiveCompactionConfig {
 export const DEFAULT_CONFIG: Required<
 	Omit<
 		LiveCompactionConfig,
-		| "dedup"
-		| "purgeErrors"
-		| "compress"
-		| "eviction"
-		| "preemptiveCompaction"
-		| "degradationMonitor"
-		| "adapters"
+		"dedup" | "purgeErrors" | "compress" | "eviction" | "adapters"
 	>
 > & {
 	dedup: Required<DedupConfig>;
 	purgeErrors: Required<PurgeErrorsConfig>;
 	compress: Required<CompressConfig>;
 	eviction: Required<EvictionSettings>;
-	preemptiveCompaction: Required<
-		Omit<PreemptiveCompactionConfig, "contextLimit" | "absoluteTokenThreshold">
-	> & {
-		contextLimit?: number;
-		absoluteTokenThreshold?: number;
-	};
-	degradationMonitor: Required<DegradationMonitorConfig>;
 	/** Optional; absent by default (adapters are opt-in). */
 	adapters?: AdaptersConfig;
 } = {
@@ -189,18 +142,6 @@ export const DEFAULT_CONFIG: Required<
 		thresholdTokens: 200000,
 		levels: ["reasoning", "bulk_output", "intermediate", "episode"],
 		protectPrologue: true,
-	},
-	preemptiveCompaction: {
-		enabled: false,
-		threshold: 0.8,
-		countCacheTokens: true,
-		minTokensSinceLast: 0,
-		cooldownMs: 60000,
-	},
-	degradationMonitor: {
-		enabled: false,
-		threshold: 4,
-		windowMs: 120000,
 	},
 };
 
@@ -262,8 +203,6 @@ function normalizeConfig(cfg: ResolvedConfig): ResolvedConfig {
 		"compress",
 		"eviction",
 		"purgeErrors",
-		"preemptiveCompaction",
-		"degradationMonitor",
 	] as const) {
 		if (!isPlainObject(cfg[key])) {
 			(cfg as Record<string, unknown>)[key] = structuredClone(
@@ -300,18 +239,6 @@ function normalizeConfig(cfg: ResolvedConfig): ResolvedConfig {
 		cfg.eviction.protectPrologue,
 		DEFAULT_CONFIG.eviction.protectPrologue,
 	);
-	cfg.preemptiveCompaction.enabled = booleanOr(
-		cfg.preemptiveCompaction.enabled,
-		DEFAULT_CONFIG.preemptiveCompaction.enabled,
-	);
-	cfg.preemptiveCompaction.countCacheTokens = booleanOr(
-		cfg.preemptiveCompaction.countCacheTokens,
-		DEFAULT_CONFIG.preemptiveCompaction.countCacheTokens,
-	);
-	cfg.degradationMonitor.enabled = booleanOr(
-		cfg.degradationMonitor.enabled,
-		DEFAULT_CONFIG.degradationMonitor.enabled,
-	);
 
 	// Integers / enumeration.
 	cfg.compress.protectedTurns = Math.floor(
@@ -344,28 +271,6 @@ function normalizeConfig(cfg: ResolvedConfig): ResolvedConfig {
 	);
 	cfg.purgeErrors.turns = Math.floor(
 		nonNegative(cfg.purgeErrors.turns, DEFAULT_CONFIG.purgeErrors.turns),
-	);
-	cfg.preemptiveCompaction.cooldownMs = nonNegative(
-		cfg.preemptiveCompaction.cooldownMs,
-		DEFAULT_CONFIG.preemptiveCompaction.cooldownMs,
-	);
-	cfg.preemptiveCompaction.minTokensSinceLast = nonNegative(
-		cfg.preemptiveCompaction.minTokensSinceLast,
-		DEFAULT_CONFIG.preemptiveCompaction.minTokensSinceLast,
-	);
-	const threshold = cfg.preemptiveCompaction.threshold;
-	if (typeof threshold !== "number" || !(threshold > 0 && threshold <= 1)) {
-		cfg.preemptiveCompaction.threshold =
-			DEFAULT_CONFIG.preemptiveCompaction.threshold;
-	}
-	const degThreshold = cfg.degradationMonitor.threshold;
-	if (typeof degThreshold !== "number" || !(degThreshold > 0)) {
-		cfg.degradationMonitor.threshold =
-			DEFAULT_CONFIG.degradationMonitor.threshold;
-	}
-	cfg.degradationMonitor.windowMs = nonNegative(
-		cfg.degradationMonitor.windowMs,
-		DEFAULT_CONFIG.degradationMonitor.windowMs,
 	);
 
 	// Adapter numerics: drop invalid optional values so the provider default
@@ -401,38 +306,14 @@ function normalizeConfig(cfg: ResolvedConfig): ResolvedConfig {
  * Merge user config over defaults. Deep-merges nested objects. The defaults are
  * cloned so a caller cannot mutate the shared `DEFAULT_CONFIG` through the
  * result, and the merged result is normalized defensively.
- *
- * When preemptive compaction is enabled with an explicit `contextLimit` and the
- * user did not pin `eviction.thresholdTokens`, the eviction budget is derived
- * from that limit (`min(contextLimit × threshold, absoluteTokenThreshold)`), so
- * eviction triggers as early as the preemption would. Without a configured
- * `contextLimit` the provider-resolved limit is not available synchronously, so
- * the fixed default is kept.
  */
 export function mergeConfig(user: LiveCompactionConfig): ResolvedConfig {
-	const merged = normalizeConfig(
+	return normalizeConfig(
 		deepMerge(
 			structuredClone(DEFAULT_CONFIG) as LiveCompactionConfig,
 			user,
 		) as ResolvedConfig,
 	);
-
-	const pre = merged.preemptiveCompaction;
-	if (
-		pre.enabled === true &&
-		typeof pre.contextLimit === "number" &&
-		pre.contextLimit > 0 &&
-		user.eviction?.thresholdTokens === undefined
-	) {
-		let linked = Math.floor(pre.contextLimit * pre.threshold);
-		const absolute = pre.absoluteTokenThreshold;
-		if (typeof absolute === "number" && absolute > 0) {
-			linked = Math.min(linked, absolute);
-		}
-		merged.eviction.thresholdTokens = linked;
-	}
-
-	return merged;
 }
 
 /** The fully-resolved configuration (defaults merged with user config). */

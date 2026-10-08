@@ -54,13 +54,7 @@ export interface PluginInput {
 			}) => Promise<unknown>;
 		};
 		session?: {
-			todo?: (input: { path: { id: string } }) => Promise<unknown>;
 			messages?: (input: { path: { id: string } }) => Promise<unknown>;
-			summarize?: (input: {
-				path: { id: string };
-				body: { providerID: string; modelID: string; auto?: boolean };
-				query: { directory: string };
-			}) => Promise<unknown>;
 			create?: (input: {
 				body?: { parentID?: string; title?: string };
 				query?: { directory?: string };

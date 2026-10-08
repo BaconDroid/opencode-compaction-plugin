@@ -740,27 +740,8 @@ describe("LiveCompactionPlugin", () => {
 			expect(own).toHaveLength(3);
 		});
 
-		it("defers a compression requested far below the compaction threshold", async () => {
-			const list = mock().mockResolvedValue({
-				data: {
-					all: [
-						{ id: "prov", models: { "model-x": { limit: { context: 1000 } } } },
-					],
-				},
-			});
-			const hooks = await LiveCompactionPlugin(
-				{
-					...mockCtx,
-					client: {
-						app: { log: logMock() },
-						provider: { list },
-					},
-					directory: TMP_DIR,
-				} as any,
-				{ preemptiveCompaction: { enabled: true } } as any,
-			);
-
-			await emit(hooks, "message.updated", { info: { sessionID: "sess-low", role: "assistant", providerID: "prov", modelID: "model-x", finish: "stop", tokens: { input: 100 }, }, });
+		it("applies a queued compression", async () => {
+			const hooks = await LiveCompactionPlugin(mockCtx as any, {});
 
 			await afterTool(hooks, "compress", "sess-low", "c-low", { topic: "T", start: 0, end: 1, summary: "S" });
 
@@ -774,50 +755,6 @@ describe("LiveCompactionPlugin", () => {
 							type: "tool",
 							tool: "compress",
 							callID: "c-low",
-							state: { output: "ok" },
-						},
-					],
-				},
-			];
-			await transform(hooks, msgs);
-			// Not eligible: the compression is not applied.
-			expect(msgs).toHaveLength(3);
-		});
-
-		it("allows a compression near the compaction threshold", async () => {
-			const list = mock().mockResolvedValue({
-				data: {
-					all: [
-						{ id: "prov", models: { "model-x": { limit: { context: 1000 } } } },
-					],
-				},
-			});
-			const hooks = await LiveCompactionPlugin(
-				{
-					...mockCtx,
-					client: {
-						app: { log: logMock() },
-						provider: { list },
-					},
-					directory: TMP_DIR,
-				} as any,
-				{ preemptiveCompaction: { enabled: true } } as any,
-			);
-
-			await emit(hooks, "message.updated", { info: { sessionID: "sess-high", role: "assistant", providerID: "prov", modelID: "model-x", finish: "stop", tokens: { input: 900 }, }, });
-
-			await afterTool(hooks, "compress", "sess-high", "c-high", { topic: "T", start: 0, end: 1, summary: "S" });
-
-			const msgs = [
-				{ info: { role: "user" }, parts: [{ type: "text", text: "x" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "y" }] },
-				{
-					info: { role: "assistant" },
-					parts: [
-						{
-							type: "tool",
-							tool: "compress",
-							callID: "c-high",
 							state: { output: "ok" },
 						},
 					],
@@ -959,149 +896,6 @@ describe("LiveCompactionPlugin", () => {
 		});
 	});
 
-	describe("todo preservation", () => {
-		it("captures todos on compaction and handles session.compacted", async () => {
-			const logSpy = mock().mockResolvedValue(undefined);
-			const todo = mock().mockResolvedValue({
-				data: [{ content: "x", status: "pending" }],
-			});
-			const hooks = await LiveCompactionPlugin({
-				...mockCtx,
-				client: { app: { log: logSpy }, session: { todo } },
-				directory: TMP_DIR,
-			} as any);
-
-			const output = { context: [], prompt: undefined };
-			await compact(hooks, "sess-todo", output);
-			expect(todo).toHaveBeenCalledWith({ path: { id: "sess-todo" } });
-			expect(output.prompt).toBeDefined();
-
-			await expect(
-				hooks.event!({
-					event: {
-						id: "e",
-						type: "session.compacted",
-						properties: { sessionID: "sess-todo" },
-					},
-				}),
-			).resolves.toBeUndefined();
-		});
-
-		it("renders the captured todos as task-state in the prompt", async () => {
-			const todo = mock().mockResolvedValue({
-				data: [
-					{
-						id: "t1",
-						content: "write tests",
-						status: "in_progress",
-						priority: "high",
-					},
-				],
-			});
-			const hooks = await LiveCompactionPlugin({
-				...mockCtx,
-				client: { app: { log: logMock() }, session: { todo } },
-				directory: TMP_DIR,
-			} as any);
-
-			const output = { context: [], prompt: undefined };
-			await compact(hooks, "sess-task", output);
-			expect(output.prompt).toContain("<task-state>");
-			expect(output.prompt).toContain("- [~] write tests");
-			expect(output.prompt).toContain("status=in_progress");
-		});
-
-		it("does not throw when the todo API is unavailable", async () => {
-			const hooks = await getHooks();
-			const output = { context: [], prompt: undefined };
-			await compact(hooks, "sess-no-todo", output);
-			expect(output.prompt).toBeDefined();
-		});
-	});
-
-	describe("preemptive compaction", () => {
-		it("triggers summarize near the context limit", async () => {
-			const summarize = mock().mockResolvedValue(undefined);
-			const list = mock().mockResolvedValue({
-				data: {
-					all: [
-						{ id: "prov", models: { "model-x": { limit: { context: 1000 } } } },
-					],
-				},
-			});
-			const hooks = await LiveCompactionPlugin(
-				{
-					...mockCtx,
-					client: {
-						app: { log: logMock() },
-						session: { summarize },
-						provider: { list },
-					},
-					directory: TMP_DIR,
-				} as any,
-				{ preemptiveCompaction: { enabled: true } } as any,
-			);
-
-			await emit(hooks, "message.updated", { info: { id: "m1", sessionID: "sess-preempt", role: "assistant", providerID: "prov", modelID: "model-x", finish: "stop", tokens: { input: 900, cache: { read: 0, write: 0 } }, }, });
-
-			await afterTool(hooks, "read", "sess-preempt", "c1", { filePath: "a.ts" });
-
-			expect(summarize).toHaveBeenCalledWith({
-				path: { id: "sess-preempt" },
-				body: { providerID: "prov", modelID: "model-x", auto: true },
-				query: { directory: TMP_DIR },
-			});
-		});
-
-		it("triggers on turn end without a tool call", async () => {
-			const summarize = mock().mockResolvedValue(undefined);
-			const list = mock().mockResolvedValue({
-				data: {
-					all: [
-						{ id: "prov", models: { "model-x": { limit: { context: 1000 } } } },
-					],
-				},
-			});
-			const hooks = await LiveCompactionPlugin(
-				{
-					...mockCtx,
-					client: {
-						app: { log: logMock() },
-						session: { summarize },
-						provider: { list },
-					},
-					directory: TMP_DIR,
-				} as any,
-				{ preemptiveCompaction: { enabled: true } } as any,
-			);
-
-			await emit(hooks, "message.updated", { info: { sessionID: "sess-turn", role: "assistant", providerID: "prov", modelID: "model-x", finish: "stop", tokens: { input: 900 }, }, });
-
-			expect(summarize).toHaveBeenCalledWith({
-				path: { id: "sess-turn" },
-				body: { providerID: "prov", modelID: "model-x", auto: true },
-				query: { directory: TMP_DIR },
-			});
-		});
-
-		it("does not trigger when disabled", async () => {
-			const summarize = mock().mockResolvedValue(undefined);
-			const hooks = await LiveCompactionPlugin({
-				...mockCtx,
-				client: {
-					app: { log: logMock() },
-					session: { summarize },
-					provider: { list: mock() },
-				},
-				directory: TMP_DIR,
-			} as any);
-
-			await emit(hooks, "message.updated", { info: { sessionID: "sess-off", role: "assistant", providerID: "prov", modelID: "model-x", finish: "stop", tokens: { input: 999_999 }, }, });
-			await afterTool(hooks, "read", "sess-off", "c", { filePath: "a.ts" });
-			expect(summarize).not.toHaveBeenCalled();
-		});
-	});
-
 	describe("compaction prompt mode", () => {
 		it("augments the default prompt when promptMode is augment", async () => {
 			const hooks = await LiveCompactionPlugin(mockCtx as any, {
@@ -1114,38 +908,6 @@ describe("LiveCompactionPlugin", () => {
 			await compact(hooks, "sess-aug", output);
 			expect(output.prompt).toBeUndefined();
 			expect(output.context.join("\n")).toContain("<template>");
-		});
-	});
-
-	describe("degradation monitor", () => {
-		it("warns when assistant messages lose text after compaction", async () => {
-			const log = mock().mockResolvedValue(undefined);
-			const messages = mock().mockResolvedValue({
-				data: [
-					{ info: { role: "assistant" }, parts: [{ type: "tool" }] },
-					{ info: { role: "assistant" }, parts: [{ type: "tool" }] },
-					{ info: { role: "assistant" }, parts: [{ type: "tool" }] },
-				],
-			});
-			const hooks = await LiveCompactionPlugin(
-				{
-					...mockCtx,
-					client: { app: { log }, session: { messages } },
-					directory: TMP_DIR,
-				} as any,
-				{
-					debug: true,
-					degradationMonitor: { enabled: true, threshold: 3 },
-				} as any,
-			);
-
-			await emit(hooks, "session.compacted", { sessionID: "sess-deg" });
-			await emit(hooks, "message.updated", { info: { sessionID: "sess-deg", role: "assistant", finish: "stop", }, });
-
-			const logged = log.mock.calls
-				.map((call) => JSON.stringify(call[0]))
-				.join("\n");
-			expect(logged).toContain("post-compaction degradation detected");
 		});
 	});
 
@@ -1290,22 +1052,25 @@ describe("LiveCompactionPlugin", () => {
 			return logs;
 		};
 
-		it("stays silent when debug is off", async () => {
+		it("warns about a misconfigured adapter even when debug is off", async () => {
 			const logs = await makeHooks(false);
-			expect(
-				logs.some((entry) =>
-					entry.message.includes("mcp provider is not supported"),
-				),
-			).toBe(false);
-		});
-
-		it("warns about a misconfigured adapter when debug is on", async () => {
-			const logs = await makeHooks(true);
 			expect(
 				logs.some(
 					(entry) =>
 						entry.level === "warn" &&
 						entry.message.includes("mcp provider is not supported"),
+				),
+			).toBe(true);
+			// Info stays gated by debug.
+			expect(logs.some((entry) => entry.level === "info")).toBe(false);
+		});
+
+		it("emits info logs when debug is on", async () => {
+			const logs = await makeHooks(true);
+			expect(
+				logs.some(
+					(entry) =>
+						entry.level === "info" && entry.message === "initialized",
 				),
 			).toBe(true);
 		});

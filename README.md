@@ -1,6 +1,6 @@
 # opencode-live-compaction
 
-Enhanced context compaction plugin for [OpenCode](https://opencode.ai) — structured summaries with files-touched manifests, task-state continuity, deterministic triggering, multi-scale folding, reversible compression, deduplication, error purging, and graduated eviction.
+Enhanced context compaction plugin for [OpenCode](https://opencode.ai) — structured summaries with files-touched manifests, deterministic triggering, multi-scale folding, reversible compression, deduplication, error purging, and graduated eviction.
 
 ## What it does
 
@@ -20,17 +20,11 @@ OpenCode's built-in compaction produces a 7-section summary. This plugin replace
 | **Errored tool calls** | Kept forever | Whole failed attempt purged after N turns (input + output, compact error extract); cascades to dependent calls |
 | **Manual compaction** | `/compact` (built-in) | left to OpenCode (the plugin does not override it) |
 | **Auto-continue** | Always on | Skipped for the compaction agent and duplicate triggers |
-| **Proactive compaction** | Only at the context limit | Optional **preemptive** compaction near the limit (opt-in) |
 | **Prompt application** | Replaces the default | Configurable: `replace` (default) or `augment` (keep the default prompt) |
-| **Post-compaction health** | None | Opt-in diagnostic for assistant messages without text |
-| **Todo list** | Not managed | **Captured before compaction and restored after** (best-effort) |
 | **Compress tool** | None | Model-driven **compress** tool (deterministic span selection — no indices needed) |
 | **Block folding** | None | Stable `[bN]` block labels for compressed ranges |
 | **Reversible compression** | None | **expand** (sticky or one-shot) restores the original messages from an in-memory sidecar |
-| **Trigger threshold** | Fixed | Hybrid `min(contextLimit × ratio, absolute)`; cache tokens counted by default |
-| **Deterministic gate** | None | Optional minimum new tokens since the last compaction |
 | **Graduated eviction** | None | LLM-free `reasoning → bulk output → intermediate → episode`, oldest first (never evicts `user` turns) |
-| **Task state** | "Goal" prose | `<task-state>` block with todo ids/statuses/priorities |
 | **Focus** | None | `<latest-user-ask>` block anchored to the current user request |
 
 ## Install
@@ -101,7 +95,7 @@ Runs on every message batch sent to the LLM. Applies the following strategies in
 
 ### 3. `experimental.session.compacting` — Enhanced prompt
 
-When compaction triggers (automatic or manual `/compact`), applies the enhanced 11-section template. By default (`promptMode: "replace"`) it replaces the default prompt; with `"augment"` it keeps OpenCode's default prompt and appends the template. In replace mode the previous compaction summary is fetched and re-injected as `<previous-summary>` so continuity is preserved across repeated compactions (a sliding state avoids re-emitting the same summary). The prompt also carries `<task-state>` (captured todos with ids/statuses/priorities), `<latest-user-ask>` (the current user request), and status markers (`[DONE]`, `[IN PROGRESS]`, `[TODO]`, `[BLOCKED]`, `[FAILED]`, `[UNVERIFIED]`).
+When compaction triggers (automatic or manual `/compact`), applies the enhanced 11-section template. By default (`promptMode: "replace"`) it replaces the default prompt; with `"augment"` it keeps OpenCode's default prompt and appends the template. In replace mode the previous compaction summary is fetched and re-injected as `<previous-summary>` so continuity is preserved across repeated compactions (a sliding state avoids re-emitting the same summary). The prompt also carries `<latest-user-ask>` (the current user request) and status markers (`[DONE]`, `[IN PROGRESS]`, `[TODO]`, `[BLOCKED]`, `[FAILED]`, `[UNVERIFIED]`).
 
 1. **Brief** — Executive summary
 2. **User Intent Trail** — Chronological goals with direction changes
@@ -159,22 +153,19 @@ Each feature below lists **what** it does, its **config** keys and how it
 |---|---|---|
 | Structured prompt | `promptMode` | `replace` |
 | Previous-summary continuity | — | — |
-| Task state (todos) | — | — |
 | Latest user ask | — | — |
 | Files-touched manifest | — | — |
 | Deduplication | `dedup.{enabled,protectedTools}` | `true`, `[]` |
 | Error purge | `purgeErrors.{enabled,turns,wholeAttempt,cascade}` | `true`, `4`, `true`, `true` |
 | Graduated eviction | `eviction.{enabled,thresholdTokens,levels,protectPrologue}` | `true`, `200000`, reasoning/bulk_output/intermediate/episode, `true` |
-| Preemptive compaction | `preemptiveCompaction.*` | disabled |
-| Degradation monitor | `degradationMonitor.{enabled,threshold,windowMs}` | `false`, `4`, `120000` |
 | Auto-continue | — | — |
 | Compression tools | `compress.{protectedTurns,reversible}` | `3`, `false` |
 | Residual/perplexity scoring (optional) | `adapters.scorer.*` | disabled |
 
 ### Structured compaction prompt
 - **What** — replaces (or augments) OpenCode's default prompt with the 11-section
-  template and carries the continuity blocks `<previous-summary>`,
-  `<task-state>` and `<latest-user-ask>`.
+  template and carries the continuity blocks `<previous-summary>` and
+  `<latest-user-ask>`.
 - **Config** — `promptMode` (`"replace"` default, or `"augment"`).
 - **Interactions** — in `replace` mode the session messages are fetched to populate
   `<previous-summary>`/`<latest-user-ask>`; `augment` keeps OpenCode's prompt and
@@ -184,11 +175,6 @@ Each feature below lists **what** it does, its **config** keys and how it
 - **What** — re-injects the last compaction summary as `<previous-summary>`; a
   sliding state avoids re-emitting the same summary on repeated compactions.
 - **Config** — none (tied to `promptMode: "replace"`).
-
-### Task state (todos)
-- **What** — captures the todo list before compaction, restores it after
-  (best-effort) and renders `<task-state>` with ids/statuses/priorities.
-- **Config** — none.
 
 ### Latest user ask
 - **What** — anchors the summary with `<latest-user-ask>` (the current user request).
@@ -218,21 +204,7 @@ Each feature below lists **what** it does, its **config** keys and how it
 - **What** — LLM-free eviction (`reasoning → bulk output → intermediate → episode`)
   once the estimated budget is exceeded.
 - **Config** — `eviction.{enabled,thresholdTokens,levels,protectPrologue}`.
-- **Interactions** — runs last; never evicts user turns or the prologue. With
-  preemptive compaction enabled and a `contextLimit` set, an unset
-  `thresholdTokens` is derived from the limit
-  (`min(contextLimit × threshold, absoluteTokenThreshold)`).
-
-### Preemptive compaction
-- **What** — calls `session.summarize` before the context is full.
-- **Config** — `preemptiveCompaction.{enabled,threshold,absoluteTokenThreshold,countCacheTokens,minTokensSinceLast,cooldownMs,contextLimit}`.
-- **Interactions** — threshold is `min(contextLimit × threshold, absoluteTokenThreshold)`;
-  the optional `minTokensSinceLast` gate composes (AND) with the cooldown; the
-  same usage signal gates the `compress` tool (below 50% of the threshold defers it).
-
-### Degradation monitor
-- **What** — post-compaction diagnostic: warns when assistant messages stop producing text.
-- **Config** — `degradationMonitor.{enabled,threshold,windowMs}`.
+- **Interactions** — runs last; never evicts user turns or the prologue.
 
 ### Auto-continue
 - **What** — enables the synthetic continue turn after compaction, except for the
@@ -305,7 +277,7 @@ Precedence, low to high: **defaults → global file → plugin options → proje
     // Enable/disable the entire plugin
     "enabled": true,
 
-    // Enable debug logging: gates BOTH info and warn logs (logs to OpenCode's app log)
+    // Debug logging: gates info logs; warn logs are always emitted (OpenCode's app log)
     "debug": false,
 
     // Deduplication: remove duplicate tool calls (same tool + same args)
@@ -331,35 +303,14 @@ Precedence, low to high: **defaults → global file → plugin options → proje
     // Graduated, LLM-free eviction
     "eviction": {
         "enabled": true,
-        // Runs only above this estimated budget. If preemptiveCompaction is
-        // enabled with a contextLimit and this is unset, it is derived from the
-        // limit: min(contextLimit × threshold, absoluteTokenThreshold).
-        "thresholdTokens": 200000,
+        "thresholdTokens": 200000,  // Runs only above this estimated budget
         "levels": ["reasoning", "bulk_output", "intermediate", "episode"],
         "protectPrologue": true     // Never evict the first message
     },
 
-    // Proactive compaction before the context overflows (opt-in)
-    "preemptiveCompaction": {
-        "enabled": false,             // enable to compact before the context is full
-        "threshold": 0.80,            // fraction of the context limit that triggers it
-        // "absoluteTokenThreshold": 330000,  // optional ceiling; unset by default
-        "countCacheTokens": true,     // count cache read/write tokens (matches OpenCode's context size)
-        "minTokensSinceLast": 0,      // gate: minimum new tokens since the last compaction
-        "cooldownMs": 60000,          // minimum delay between proactive compactions
-        // "contextLimit": 200000,    // optional override; unset by default (resolved from the provider)
-    },
-
     // How the compaction prompt is applied: "replace" (default) or "augment"
     // ("augment" keeps OpenCode's default prompt and appends these instructions)
-    "promptMode": "replace",
-
-    // Post-compaction diagnostic: warn when assistant messages lose text (opt-in)
-    "degradationMonitor": {
-        "enabled": false,
-        "threshold": 4,          // consecutive assistant messages without text
-        "windowMs": 120000       // only checked within this window after compaction
-    }
+    "promptMode": "replace"
 }
 ```
 
@@ -438,7 +389,7 @@ bun run test:coverage
 # (OpenCode loads .ts files directly via Bun)
 ```
 
-Current coverage: **95.3% functions, 99.3% lines** (247 tests).
+Current coverage: **95.4% functions, 98.6% lines** (209 tests).
 
 ## File Structure
 
@@ -462,10 +413,7 @@ src/
     messages.ts         — message-part helpers
     prompt.ts           — compaction prompt template (11 sections)
     previous-summary.ts — previous summary extraction + sliding state
-    todo-preserver.ts   — todo snapshot/restore + <task-state>
     files-touched.ts    — file operation tracker + manifest
-    degradation-monitor.ts — post-compaction degradation diagnostic
-    preemption.ts       — trigger logic + preemption controller
     store.ts            — per-session keyed queue shared by the compression stores
   config/
     config.ts           — config types, defaults and merge
@@ -485,9 +433,6 @@ test/
   blocks.test.ts    — Block id and span selection tests
   expand.test.ts    — Reversible expand tests
   eviction.test.ts  — Graduated eviction tests
-  todo-preserver.test.ts — Todo preserver and task-state tests
-  preemption.test.ts — Trigger, token gate and preemptive tests
-  degradation-monitor.test.ts — Degradation monitor tests
   previous-summary.test.ts — Previous summary and sliding-state tests
   scorer.test.ts    — Optional scorer adapter, estimator and eviction integration
   model.test.ts     — Optional opencode-model runner (host/default model, fail-open)

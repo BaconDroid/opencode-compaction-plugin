@@ -63,21 +63,17 @@ describe("buildCompactionPrompt()", () => {
 	it("injects the optional blocks only when provided", () => {
 		const bare = buildCompactionPrompt({});
 		expect(bare).not.toContain("## Files Touched");
-		expect(bare).not.toContain("<task-state>\n");
 		expect(bare).not.toContain("<latest-user-ask>\n");
 
 		const full = buildCompactionPrompt({
 			filesTouched: "## Files Touched Manifest\n\n- `src/app.ts` `R` `E`",
 			previousSummary: "prior summary",
-			taskState: "- [~] write tests (id=t1, status=in_progress)",
 			focus: "fix the login bug",
 		});
 		expect(full).toContain("## Files Touched Manifest");
 		expect(full).toContain("- `src/app.ts` `R` `E`");
 		expect(full).toContain("<previous-summary>");
 		expect(full).toContain("prior summary");
-		expect(full).toContain("<task-state>");
-		expect(full).toContain("- [~] write tests");
 		expect(full).toContain("<latest-user-ask>");
 		expect(full).toContain("fix the login bug");
 	});

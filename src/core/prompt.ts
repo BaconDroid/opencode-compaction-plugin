@@ -35,7 +35,6 @@ function stripTags(text: string, tag: string): string {
 export function buildCompactionPrompt(input: {
 	filesTouched?: string;
 	previousSummary?: string;
-	taskState?: string;
 	focus?: string;
 }): string {
 	const filesBlock = input.filesTouched
@@ -44,10 +43,6 @@ export function buildCompactionPrompt(input: {
 
 	const previousBlock = input.previousSummary
 		? `\n\n<previous-summary>\n${stripTags(input.previousSummary, "previous-summary")}\n</previous-summary>`
-		: "";
-
-	const taskStateBlock = input.taskState
-		? `\n\n<task-state>\n${stripTags(input.taskState, "task-state")}\n</task-state>`
 		: "";
 
 	const focusBlock = input.focus
@@ -60,8 +55,6 @@ Summarize ONLY the conversation history you are given. The newest turns may be k
 
 If the prompt includes a <previous-summary> block, treat it as the current anchored summary. Update it with the new history by preserving still-true details, removing stale details, and merging in new facts.
 ${previousBlock}
-If the prompt includes a <task-state> block, treat it as the authoritative task list at the moment of compaction: preserve task IDs, statuses and priorities exactly.
-${taskStateBlock}
 If the prompt includes a <latest-user-ask> block, treat it as the current focus the user is waiting on; keep the summary oriented toward it.
 ${focusBlock}
 
