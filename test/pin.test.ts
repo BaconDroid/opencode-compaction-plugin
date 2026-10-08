@@ -32,6 +32,12 @@ describe("collectPinnedClauses()", () => {
 		expect(collectPinnedClauses(messages, ["never"], 1)).toEqual([
 			"NEVER force push",
 		]);
+		// A non-positive bound means no clauses (not one).
+		expect(collectPinnedClauses(messages, ["never"], 0)).toEqual([]);
+		// Non-string patterns are ignored rather than throwing.
+		expect(
+			collectPinnedClauses(messages, [1 as unknown as string, "never"], 10),
+		).toEqual(["NEVER force push"]);
 	});
 });
 

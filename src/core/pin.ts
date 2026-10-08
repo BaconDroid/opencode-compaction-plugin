@@ -10,7 +10,10 @@ import { partsText } from "./messages.js";
 import type { Message } from "../types.js";
 
 function needlesFor(patterns: string[]): string[] {
-	return patterns.map((pattern) => pattern.trim().toLowerCase()).filter(Boolean);
+	return patterns
+		.filter((pattern): pattern is string => typeof pattern === "string")
+		.map((pattern) => pattern.trim().toLowerCase())
+		.filter(Boolean);
 }
 
 /** True when a message's text matches any pinning pattern. */
@@ -32,6 +35,7 @@ export function collectPinnedClauses(
 	patterns: string[],
 	maxClauses = 20,
 ): string[] {
+	if (maxClauses <= 0) return [];
 	const needles = needlesFor(patterns);
 	if (needles.length === 0) return [];
 	const clauses: string[] = [];
