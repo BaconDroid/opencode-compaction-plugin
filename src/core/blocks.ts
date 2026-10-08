@@ -43,7 +43,8 @@ export interface CompressBlock {
 }
 
 function readAttr(attrs: string, name: string): string | undefined {
-	const match = new RegExp(`${name}="([^"]*)"`).exec(attrs);
+	// Anchor the attribute name so `id` does not match `data-id`.
+	const match = new RegExp(`(?:^|\\s)${name}="([^"]*)"`).exec(attrs);
 	return match?.[1];
 }
 
@@ -122,11 +123,6 @@ export function blockId(message: BlockMessage): string {
 	return "m:0";
 }
 
-/** Ids of every `<compressed-block>` in the list. */
-export function collectExistingBlockIds(messages: BlockMessage[]): Set<string> {
-	return new Set(parseCompressBlocks(messages).map((block) => block.id));
-}
-
 /**
  * Index of the earliest message in the protected tail: the Nth user turn from
  * the end (and everything after it). Returns `messages.length` when no tail is
@@ -150,16 +146,17 @@ export function selectDeterministicSpan(
 	opts: SelectSpanOptions = {},
 ): DeterministicSpan | undefined {
 	const protectedTurns = opts.protectedTurns ?? 3;
+	const tailStart = protectedTailStart(messages, protectedTurns);
 
+	// Only blocks before the protected tail anchor the span: a block inside the
+	// tail must not shadow the compressible messages before it.
 	let newestBlockIndex = -1;
-	for (let i = 0; i < messages.length; i++) {
+	for (let i = 0; i < tailStart; i++) {
 		if (isCompressedBlockMessage(messages[i])) newestBlockIndex = i;
 	}
 
-	const tailStart = protectedTailStart(messages, protectedTurns);
-
 	const eligible: number[] = [];
-	for (let i = newestBlockIndex + 1; i < messages.length && i < tailStart; i++) {
+	for (let i = newestBlockIndex + 1; i < tailStart; i++) {
 		if (isCompressedBlockMessage(messages[i])) continue;
 		eligible.push(i);
 	}
