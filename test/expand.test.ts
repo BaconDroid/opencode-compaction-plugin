@@ -63,6 +63,15 @@ describe("ExpansionSidecar", () => {
 		// Without a session id every record is returned (backward compatible).
 		expect(sidecar.search("login", 5)).toHaveLength(2);
 	});
+
+	it("returns nothing for a known session with no records", () => {
+		const sidecar = new ExpansionSidecar();
+		sidecar.save("a", "id-a", [textMsg("user", "alpha login")], {
+			label: "b0",
+		});
+		expect(sidecar.listForSession("empty")).toEqual([]);
+		expect(sidecar.search("login", 5, "empty")).toEqual([]);
+	});
 });
 
 describe("ExpandStore", () => {

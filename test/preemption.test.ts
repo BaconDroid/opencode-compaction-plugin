@@ -275,4 +275,32 @@ describe("PreemptionController", () => {
 		await controller.isCompressEligible("s");
 		expect(listCalls).toBe(1);
 	});
+
+	it("re-checks a negative lookup after its TTL", async () => {
+		let listCalls = 0;
+		const controller = makeController(
+			{},
+			{
+				provider: {
+					list: async () => {
+						listCalls++;
+						return { data: { all: [] } };
+					},
+				},
+			},
+		);
+		controller.recordUsage("s", "prov", "model-x", { input: 900 });
+		await controller.maybePreempt("s");
+		await controller.maybePreempt("s");
+		expect(listCalls).toBe(1);
+
+		const realNow = Date.now;
+		Date.now = () => realNow() + 61_000;
+		try {
+			await controller.maybePreempt("s");
+		} finally {
+			Date.now = realNow;
+		}
+		expect(listCalls).toBe(2);
+	});
 });

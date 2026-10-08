@@ -9,6 +9,9 @@ import type { ResolvedConfig } from "../config/config.js";
 import type { Logger } from "../types.js";
 import type { PluginInput } from "../types.js";
 
+/** How long a negative context-limit lookup is trusted before re-checking. */
+const NEGATIVE_CONTEXT_LIMIT_TTL_MS = 60_000;
+
 // ---------------------------------------------------------------------------
 // Pure trigger logic (testable without a client)
 // ---------------------------------------------------------------------------
@@ -148,7 +151,12 @@ export class PreemptionController {
 	// Sessions that compacted and are waiting for the next usage report to set
 	// the post-compaction token baseline.
 	private pendingBaseline = new Set<string>();
-	private contextLimitCache = new Map<string, number | null>();
+	// `limit: null` marks a model absent from the catalog; such a negative
+	// result is re-checked after a TTL so a late/updated catalog can recover.
+	private contextLimitCache = new Map<
+		string,
+		{ limit: number | null; at: number }
+	>();
 
 	constructor(
 		private readonly client: PluginInput["client"],
@@ -332,7 +340,16 @@ export class PreemptionController {
 
 		const key = `${providerID}/${modelID}`;
 		const cached = this.contextLimitCache.get(key);
-		if (cached !== undefined) return cached ?? undefined;
+		if (cached !== undefined) {
+			// Positive results are stable; negative ones expire so a catalog that
+			// gains the model later is picked up.
+			if (
+				cached.limit !== null ||
+				Date.now() - cached.at < NEGATIVE_CONTEXT_LIMIT_TTL_MS
+			) {
+				return cached.limit ?? undefined;
+			}
+		}
 
 		const list = this.client.provider?.list;
 		if (!list) return undefined;
@@ -355,12 +372,12 @@ export class PreemptionController {
 				modelID
 			]?.limit?.context;
 			if (typeof limit === "number" && limit > 0) {
-				this.contextLimitCache.set(key, limit);
+				this.contextLimitCache.set(key, { limit, at: Date.now() });
 				return limit;
 			}
 			// The catalog was fetched but has no such model: cache the negative
-			// result so the hot path does not refetch it on every turn.
-			this.contextLimitCache.set(key, null);
+			// result (with a TTL) so the hot path does not refetch every turn.
+			this.contextLimitCache.set(key, { limit: null, at: Date.now() });
 		} catch (error) {
 			// Transient failure: do not cache, so a later call can retry.
 			this.logger.info("context limit resolution failed", {
