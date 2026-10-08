@@ -30,6 +30,16 @@ export function partInput(part: MessagePart): unknown {
 	return (part as Record<string, unknown>).args ?? part.state?.input;
 }
 
+/**
+ * Overwrite a tool part's input wherever it is stored (`args` and/or
+ * `state.input`), keeping {@link partInput} consistent after a purge.
+ */
+export function setPartInput(part: MessagePart, value: unknown): void {
+	const raw = part as Record<string, unknown>;
+	if (raw.args !== undefined) raw.args = value;
+	if (part.state) part.state.input = value;
+}
+
 /** Loosely-typed message used by the backward scanners. */
 export interface MessageLike {
 	info?: { role?: string; summary?: boolean; id?: string };

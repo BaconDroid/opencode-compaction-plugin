@@ -204,6 +204,47 @@ describe("applyPurgeErrors()", () => {
 		expect(applyPurgeErrors(protectedMsgs as never, cfg, new Set([0]))).toBe(0);
 		expect(protectedMsgs[0].parts[0].state.input).toBe("x".repeat(200));
 	});
+
+	it("purges the input wherever it is stored (args and state.input)", () => {
+		const cfg = mergeConfig({});
+		const msgs = [
+			{
+				info: { role: "assistant" },
+				parts: [
+					{
+						type: "tool",
+						tool: "bash",
+						callID: "c",
+						args: { command: "x".repeat(200) },
+						state: {
+							status: "error",
+							output: "fail",
+							input: { command: "x".repeat(200) },
+						},
+					},
+				],
+			},
+		];
+		expect(applyPurgeErrors(msgs as never, cfg)).toBe(1);
+		expect((msgs[0].parts[0] as { args: { purged: string } }).args.purged).toContain(
+			"chars",
+		);
+		expect(
+			(msgs[0].parts[0].state.input as { purged: string }).purged,
+		).toContain("chars");
+	});
+
+	it("re-reports already-purged call ids so a later cascade can run", () => {
+		const cfg = mergeConfig({});
+		const msgs = errored({ output: "fail", input: "x".repeat(200) });
+		const first = new Set<string>();
+		applyPurgeErrors(msgs as never, cfg, undefined, first);
+		expect(first.has("call-err")).toBe(true);
+
+		const second = new Set<string>();
+		expect(applyPurgeErrors(msgs as never, cfg, undefined, second)).toBe(0);
+		expect(second.has("call-err")).toBe(true);
+	});
 });
 
 describe("applyCascadePurge()", () => {
@@ -234,5 +275,16 @@ describe("applyCascadePurge()", () => {
 		const msgs = [call("callA", { command: "run A" }), call("callB", { command: "use callA" })];
 		expect(applyCascadePurge(msgs as never, new Set(["callA"]), new Set([1]))).toBe(0);
 		expect((msgs[1].parts[0].state.input as { purged?: string }).purged).toBeUndefined();
+	});
+
+	it("does not cascade onto calls that only share a callID prefix", () => {
+		const msgs = [
+			call("abc", { command: "run" }),
+			call("abcdef", { command: "use abcdef" }),
+		];
+		expect(applyCascadePurge(msgs as never, new Set(["abc"]))).toBe(0);
+		expect(
+			(msgs[1].parts[0].state.input as { purged?: string }).purged,
+		).toBeUndefined();
 	});
 });

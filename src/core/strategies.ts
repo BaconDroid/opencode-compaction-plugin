@@ -8,7 +8,7 @@
  */
 
 import type { LiveCompactionConfig } from "../config/config.js";
-import { partInput } from "./messages.js";
+import { partInput, setPartInput } from "./messages.js";
 import type { Message, MessagePart } from "../types.js";
 
 // ---------------------------------------------------------------------------
@@ -128,6 +128,15 @@ export function findErroredParts(
 	return errored;
 }
 
+/** True when an input is the marker left by a previous purge. */
+function isPurgedInput(input: unknown): boolean {
+	return (
+		!!input &&
+		typeof input === "object" &&
+		typeof (input as { purged?: unknown }).purged === "string"
+	);
+}
+
 /** Compact marker replacing a purged failed attempt's output. */
 function errorExtract(part: MessagePart, output: unknown): string {
 	const head =
@@ -162,15 +171,26 @@ export function applyPurgeErrors(
 		const part = messages[msgIdx].parts[partIdx];
 		const state = part.state;
 		if (!state) continue;
-		const input = state.input;
+		const input = partInput(part);
 		if (input === undefined || input === null) continue;
+
+		// Already purged in an earlier pass: re-report the call so the cascade can
+		// still reach its dependents once their protection expires.
+		if (isPurgedInput(input)) {
+			if (purgedCallIds && typeof part.callID === "string") {
+				purgedCallIds.add(part.callID);
+			}
+			continue;
+		}
 
 		// Real tool parts carry `state.input` as an object; a string is kept for
 		// compatibility with older payloads.
 		const inputLen =
 			typeof input === "string" ? input.length : JSON.stringify(input).length;
 		if (inputLen > 100) {
-			state.input = { purged: `${inputLen} chars of errored input removed` };
+			setPartInput(part, {
+				purged: `${inputLen} chars of errored input removed`,
+			});
 			if (wholeAttempt) {
 				state.output = errorExtract(part, state.output);
 			}
@@ -189,6 +209,27 @@ function serializeInput(part: MessagePart): string {
 	const raw = partInput(part);
 	if (raw === undefined || raw === null) return "";
 	return typeof raw === "string" ? raw : JSON.stringify(raw);
+}
+
+const ID_CHAR = /[A-Za-z0-9_-]/;
+
+/**
+ * True when `text` references `id` as a whole token, not as a substring of a
+ * longer id (so purging `abc` does not drag in work that only mentioned
+ * `abcdef`).
+ */
+function referencesCall(text: string, id: string): boolean {
+	if (!id) return false;
+	let from = 0;
+	while (from <= text.length) {
+		const index = text.indexOf(id, from);
+		if (index === -1) return false;
+		const before = index > 0 ? text[index - 1] : "";
+		const after = text[index + id.length] ?? "";
+		if (!ID_CHAR.test(before) && !ID_CHAR.test(after)) return true;
+		from = index + 1;
+	}
+	return false;
 }
 
 /**
@@ -226,7 +267,7 @@ export function applyCascadePurge(
 		if (!inputText) continue;
 		for (const other of partsByCall.keys()) {
 			if (other === call) continue;
-			if (inputText.includes(other)) {
+			if (referencesCall(inputText, other)) {
 				// `call` depends on `other`: record `call` as a dependent of `other`.
 				let deps = reverseDeps.get(other);
 				if (!deps) {
@@ -271,10 +312,9 @@ export function applyCascadePurge(
 			if (protectedIndices?.has(pos.msgIdx)) continue;
 
 			const part = messages[pos.msgIdx].parts[pos.partIdx];
+			setPartInput(part, { purged: "cascade: depends on purged work" });
 			if (part.state) {
-				part.state.input = { purged: "cascade: depends on purged work" };
-				part.state.output =
-					"[purged cascade: depends on purged work]";
+				part.state.output = "[purged cascade: depends on purged work]";
 			}
 			purgedNow.add(call);
 			purged++;
