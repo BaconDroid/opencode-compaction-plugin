@@ -63,6 +63,7 @@ export function applyPendingRequests(
 	// originating conversation so one session's queue is never applied to
 	// another session's messages. Invariant across sessions: compute once.
 	const present = presentCallIds(messages);
+	const reversible = config.compress?.reversible ?? true;
 
 	for (const sid of deps.sessionIDs) {
 		// Compressions.
@@ -71,7 +72,6 @@ export function applyPendingRequests(
 			const { applicable, deferred } = selectCompressions(messages, requests);
 
 			if (applicable.length > 0) {
-				const reversible = config.compress?.reversible ?? true;
 				const replaced = applyCompressions(messages, applicable, {
 					protectedTurns: config.compress?.protectedTurns ?? 3,
 					record: reversible
@@ -112,6 +112,18 @@ export function applyPendingRequests(
 			);
 			const merged = applySquash(messages, applicable, {
 				maxBlocks: config.compress?.maxBlocksPerSquash ?? 8,
+				record: reversible
+					? ({ id, label, topic, constituentIds }) => {
+							// Combine the constituents' originals so expanding the merged
+							// block restores the whole history, not just the first block.
+							const originals = constituentIds.flatMap(
+								(blockId) => expansions.get(blockId)?.original ?? [],
+							);
+							if (originals.length > 0) {
+								expansions.save(sid, id, originals, { label, topic });
+							}
+						}
+					: undefined,
 			});
 			if (merged > 0) {
 				logger.info("squash applied", { sessionID: sid, blocksMerged: merged });

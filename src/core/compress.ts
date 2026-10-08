@@ -238,6 +238,16 @@ export class SquashStore extends KeyedQueue<SquashRequest> {}
 export interface ApplySquashOptions {
 	/** Maximum number of blocks merged by a single squash (default: 8). */
 	maxBlocks?: number;
+	/**
+	 * Called before the merge, with the durable id of the merged block and the
+	 * ids of its constituents (for combining reversible sidecar records).
+	 */
+	record?: (info: {
+		id: string;
+		label: string;
+		topic: string;
+		constituentIds: string[];
+	}) => void;
 }
 
 /**
@@ -276,6 +286,13 @@ export function applySquash(
 		const role = prevRole === "user" ? "assistant" : "user";
 		const label = selected[0].label as string;
 		const id = selected[0].id;
+
+		opts.record?.({
+			id,
+			label,
+			topic: req.topic,
+			constituentIds: selected.map((block) => block.id),
+		});
 
 		const summaryMessage: Message = {
 			info: { role },
