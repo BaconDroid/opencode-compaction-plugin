@@ -48,6 +48,21 @@ describe("ExpansionSidecar", () => {
 		sidecar.clearAll();
 		expect(sidecar.size).toBe(0);
 	});
+
+	it("scopes list and search to a session", () => {
+		const sidecar = new ExpansionSidecar();
+		sidecar.save("a", "id-a", [textMsg("user", "alpha login")], {
+			label: "b0",
+		});
+		sidecar.save("b", "id-b", [textMsg("user", "beta login")], {
+			label: "b0",
+		});
+		expect(sidecar.listForSession("a").map((r) => r.id)).toEqual(["id-a"]);
+		expect(sidecar.search("login", 5, "a").map((h) => h.id)).toEqual(["id-a"]);
+		expect(sidecar.search("login", 5, "b").map((h) => h.id)).toEqual(["id-b"]);
+		// Without a session id every record is returned (backward compatible).
+		expect(sidecar.search("login", 5)).toHaveLength(2);
+	});
 });
 
 describe("ExpandStore", () => {
@@ -179,5 +194,28 @@ describe("expand/recall/inspect/search tool definitions", () => {
 		expect(await search.execute({ query: "world" }, {} as any)).toContain(
 			"[b0]",
 		);
+	});
+
+	it("scopes inspect/search by the tool context session", async () => {
+		const sidecar = new ExpansionSidecar();
+		sidecar.save("a", "id-a", [textMsg("user", "hello alpha")], {
+			label: "b0",
+		});
+		sidecar.save("b", "id-b", [textMsg("user", "hello beta")], {
+			label: "b0",
+		});
+
+		const inspect = buildInspectToolDef(sidecar);
+		const report = await inspect.execute({}, { sessionID: "a" } as any);
+		expect(report).toContain("id-a");
+		expect(report).not.toContain("id-b");
+
+		const search = buildSearchToolDef(sidecar, 5);
+		const hits = await search.execute(
+			{ query: "hello" },
+			{ sessionID: "b" } as any,
+		);
+		expect(hits).toContain("hello beta");
+		expect(hits).not.toContain("hello alpha");
 	});
 });

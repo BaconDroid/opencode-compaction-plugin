@@ -207,8 +207,8 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 	const semanticIndex = embedder
 		? new EmbeddingVectorIndex(
 				embedder,
-				() =>
-					expansions.list().map((record) => ({
+				(sessionID) =>
+					expansions.listForSession(sessionID).map((record) => ({
 						id: record.id,
 						text: recordText(record),
 					})),
