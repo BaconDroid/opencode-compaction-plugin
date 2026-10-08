@@ -198,7 +198,7 @@ matching [bN] labels and a snippet; use expand or recall to restore a match.`,
 						return renderHits(enriched, args.query, "semantic");
 					}
 				} catch (error) {
-					semantic.logger.info(
+					semantic.logger.warn(
 						"semantic search failed; using keyword search",
 						{ error: String(error) },
 					);

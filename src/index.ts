@@ -92,20 +92,27 @@ function makeLogger(
 	client: PluginInput["client"],
 	enabled: boolean,
 ): Logger {
+	const log = (
+		level: "info" | "warn",
+		message: string,
+		data?: unknown,
+	): void => {
+		// Fire-and-forget; swallow a rejecting log write so it cannot surface as
+		// an unhandled rejection.
+		void client.app.log({
+			body: {
+				service: "live-compaction",
+				level,
+				message,
+				extra: data as Record<string, unknown> | undefined,
+			},
+		}).catch(() => {});
+	};
 	return {
-		info: (message: string, data?: unknown) => {
-			if (!enabled) return;
-			// Fire-and-forget; swallow a rejecting log write so it cannot
-			// surface as an unhandled rejection.
-			void client.app.log({
-				body: {
-					service: "live-compaction",
-					level: "info",
-					message,
-					extra: data as Record<string, unknown> | undefined,
-				},
-			}).catch(() => {});
+		info: (message, data) => {
+			if (enabled) log("info", message, data);
 		},
+		warn: (message, data) => log("warn", message, data),
 	};
 }
 
@@ -243,7 +250,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			try {
 				return await fn(...args);
 			} catch (error) {
-				logger.info(`hook error: ${name}`, { error: String(error) });
+				logger.warn(`hook error: ${name}`, { error: String(error) });
 				return undefined;
 			}
 		}) as T;
@@ -310,7 +317,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 						return;
 					}
 				} catch (error) {
-					logger.info("pinned semantic validation failed", {
+					logger.warn("pinned semantic validation failed", {
 						error: String(error),
 					});
 				}
@@ -580,6 +587,9 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 					squashes.clear(sessionID);
 					expansions.clear(sessionID);
 					expandStore.clear(sessionID);
+					// Drop cached embeddings so a deleted session's vectors do not
+					// linger for the plugin's lifetime.
+					semanticIndex?.clear();
 					todoPreserver.clear(sessionID);
 					slidingState.delete(sessionID);
 					pinnedBySession.delete(sessionID);

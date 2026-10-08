@@ -5,10 +5,10 @@ import type { Logger } from "../src/types.ts";
 /** A `Logger` that records every message it is given, for assertions. */
 export function recordingLogger(): { logger: Logger; messages: string[] } {
 	const messages: string[] = [];
-	return {
-		messages,
-		logger: { info: (message) => messages.push(message) },
+	const push = (message: string): void => {
+		messages.push(message);
 	};
+	return { messages, logger: { info: push, warn: push } };
 }
 
 /**

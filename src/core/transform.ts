@@ -125,7 +125,7 @@ export async function applyTransform(
 					deps.scorerMaxSamples,
 				);
 			} catch (error) {
-				logger.info("scorer adapter failed; using heuristic estimate", {
+				logger.warn("scorer adapter failed; using heuristic estimate", {
 					error: String(error),
 				});
 			}

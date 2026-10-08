@@ -292,7 +292,7 @@ function resolveAdapter(
 
 	if (provider === "http") {
 		if (!cfg.url) {
-			deps.logger.info(
+			deps.logger.warn(
 				`adapters.${kind}: http provider requires \`url\`; adapter disabled`,
 			);
 			return undefined;
@@ -306,7 +306,7 @@ function resolveAdapter(
 
 	if (provider === "command") {
 		if (!cfg.command) {
-			deps.logger.info(
+			deps.logger.warn(
 				`adapters.${kind}: command provider requires \`command\`; adapter disabled`,
 			);
 			return undefined;
@@ -315,13 +315,13 @@ function resolveAdapter(
 	}
 
 	if (provider === "mcp") {
-		deps.logger.info(
+		deps.logger.warn(
 			`adapters.${kind}: mcp provider is not supported; fallback in use`,
 		);
 		return undefined;
 	}
 
-	deps.logger.info(
+	deps.logger.warn(
 		`adapters.${kind}: unknown provider "${String(provider)}"; adapter disabled`,
 	);
 	return undefined;
