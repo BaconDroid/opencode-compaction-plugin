@@ -1,9 +1,9 @@
 /**
  * Provider implementations for the optional external adapters (the SDK/OS
- * boundary). This module turns config into concrete `Embedder`/`Judge`/`Scorer`
+ * boundary). This module turns config into concrete `Embedder`/`Scorer`
  * objects; the pure contracts live in `../core/adapters.ts`.
  *
- * All three families share one transport abstraction: an `http` POST or a
+ * Both families share one transport abstraction: an `http` POST or a
  * spawned `command` that reads a JSON payload on stdin. No dependency is added
  * (platform `fetch` + `node:child_process`). Resolution never throws — when a
  * provider is unusable (missing field, unsupported transport) `undefined` is
@@ -15,11 +15,10 @@
  */
 
 import { spawn } from "node:child_process";
-import type { Embedder, Judge, Scorer } from "../core/adapters.js";
+import type { Embedder, Scorer } from "../core/adapters.js";
 import type {
 	AdapterTransportConfig,
 	EmbeddingsAdapterConfig,
-	JudgeAdapterConfig,
 	ScorerAdapterConfig,
 } from "../config/config.js";
 import type { Logger } from "../types.js";
@@ -86,28 +85,6 @@ function extractRows(payload: unknown): unknown[] | undefined {
 		}
 	}
 	return undefined;
-}
-
-/**
- * Normalise the common judge response shapes into text. Accepts a bare string,
- * Ollama's `{ response }`, `{ content }`/`{ text }`/`{ answer }` or the OpenAI
- * `{ choices: [{ message: { content } }] }`.
- */
-export function parseJudgeResponse(payload: unknown): string {
-	if (typeof payload === "string") return payload;
-	if (payload && typeof payload === "object") {
-		const obj = payload as Record<string, unknown>;
-		for (const key of ["response", "content", "text", "answer"]) {
-			if (typeof obj[key] === "string") return obj[key] as string;
-		}
-		if (Array.isArray(obj.choices)) {
-			const first = obj.choices[0] as Record<string, unknown> | undefined;
-			const message = first?.message as Record<string, unknown> | undefined;
-			if (typeof message?.content === "string") return message.content;
-			if (typeof first?.text === "string") return first.text;
-		}
-	}
-	throw new Error("judge response has no text");
 }
 
 /**
@@ -270,19 +247,6 @@ function buildEmbedder({ transport, model }: ResolvedAdapter): Embedder {
 	};
 }
 
-function buildJudge({ transport, model }: ResolvedAdapter): Judge {
-	return {
-		async ask(prompt) {
-			const message = { role: "user", content: prompt };
-			const payload = await transport.send(
-				model ? { model, messages: [message] } : { messages: [message] },
-				"judge",
-			);
-			return parseJudgeResponse(payload);
-		},
-	};
-}
-
 function buildScorer({ transport, model }: ResolvedAdapter): Scorer {
 	return {
 		async score(text) {
@@ -353,18 +317,6 @@ export function resolveEmbedder(
 ): Embedder | undefined {
 	const resolved = resolveAdapter(cfg, deps, "embeddings");
 	return resolved ? buildEmbedder(resolved) : undefined;
-}
-
-/**
- * Resolve a `Judge` from config, or `undefined` when the adapter is off or
- * unusable. Never throws.
- */
-export function resolveJudge(
-	cfg: JudgeAdapterConfig | undefined,
-	deps: AdapterResolutionDeps,
-): Judge | undefined {
-	const resolved = resolveAdapter(cfg, deps, "judge");
-	return resolved ? buildJudge(resolved) : undefined;
 }
 
 /**

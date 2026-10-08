@@ -9,27 +9,6 @@ import type { EvictionLevel } from "../core/eviction.js";
 // Types
 // ---------------------------------------------------------------------------
 
-export interface TrimLimits {
-	/** Max chars for bash/shell outputs (default: 600) */
-	bash?: number;
-	/** Max chars for write confirmations (default: 100) */
-	write?: number;
-	/** Max chars for edit confirmations (default: 100) */
-	edit?: number;
-	/** Max chars for delete confirmations (default: 50) */
-	delete?: number;
-	/** Max chars for file reads (default: 300) */
-	read?: number;
-	/** Max chars for file listings (default: 200) */
-	glob?: number;
-	/** Max chars for search results (default: 400) */
-	grep?: number;
-	/** Max chars for directory listings (default: 200) */
-	list?: number;
-	/** Default max chars for unlisted tools (default: 500) */
-	default?: number;
-}
-
 export interface DedupConfig {
 	/** Enable deduplication of repeated tool calls (default: true) */
 	enabled?: boolean;
@@ -48,7 +27,7 @@ export interface PurgeErrorsConfig {
 	 */
 	wholeAttempt?: boolean;
 	/**
-	 * Cascade the purge to work that depends on a purged call (default: false)
+	 * Cascade the purge to work that depends on a purged call (default: true)
 	 */
 	cascade?: boolean;
 }
@@ -62,37 +41,21 @@ export interface CompressConfig {
 	searchMaxResults?: number;
 }
 
-export interface PinningConfig {
-	/** Enable constraint pinning (default: true; inert until patterns are set) */
-	enabled?: boolean;
-	/** Case-insensitive substrings that mark a message/line as a pinned constraint */
-	patterns?: string[];
-	/** Maximum pinned clauses re-injected into the prompt (default: 20) */
-	maxClauses?: number;
-}
-
 export interface EvictionSettings {
 	/** Enable graduated LLM-free eviction (default: true) */
 	enabled?: boolean;
-	/** Token budget; eviction runs only above it (default: 80000) */
+	/** Token budget; eviction runs only above it (default: 200000) */
 	thresholdTokens?: number;
-	/** Levels to apply, in order (default: reasoning, intermediate, episode) */
+	/** Levels to apply, in order (default: reasoning, bulk_output, intermediate, episode) */
 	levels?: EvictionLevel[];
 	/** Protect the prologue from eviction (default: true) */
 	protectPrologue?: boolean;
 }
 
-export interface TurnProtectionConfig {
-	/** Enable turn-based protection (default: true) */
-	enabled?: boolean;
-	/** Number of recent turns whose tool outputs are protected from trimming (default: 4) */
-	turns?: number;
-}
-
 export interface PreemptiveCompactionConfig {
 	/** Compact proactively before the context overflows (default: false) */
 	enabled?: boolean;
-	/** Fraction of the context limit that triggers compaction (default: 0.78) */
+	/** Fraction of the context limit that triggers compaction (default: 0.80) */
 	threshold?: number;
 	/** Absolute token ceiling for the trigger; the smaller of ratio and this wins */
 	absoluteTokenThreshold?: number;
@@ -138,12 +101,6 @@ export interface EmbeddingsAdapterConfig extends AdapterTransportConfig {
 }
 
 /**
- * Optional model-judge adapter (E1/E5/E6). The judge answers a prompt; callers
- * build the prompt and read the verdict.
- */
-export interface JudgeAdapterConfig extends AdapterTransportConfig {}
-
-/**
  * Optional residual/perplexity scorer adapter (E5/E9). Refines the eviction
  * budget estimate; absent → heuristic.
  */
@@ -156,8 +113,6 @@ export interface ScorerAdapterConfig extends AdapterTransportConfig {
 export interface AdaptersConfig {
 	/** Semantic embedding/retrieval adapter */
 	embeddings?: EmbeddingsAdapterConfig;
-	/** Model-judge adapter (semantic validation) */
-	judge?: JudgeAdapterConfig;
 	/** Residual/perplexity scorer adapter (eviction budget) */
 	scorer?: ScorerAdapterConfig;
 }
@@ -174,8 +129,6 @@ export interface DegradationMonitorConfig {
 export interface LiveCompactionConfig {
 	/** Enable/disable the entire plugin (default: true) */
 	enabled?: boolean;
-	/** Tool output trim limits by tool name */
-	trim?: TrimLimits;
 	/** Deduplication strategy */
 	dedup?: DedupConfig;
 	/** Error input purging strategy */
@@ -184,20 +137,14 @@ export interface LiveCompactionConfig {
 	compress?: CompressConfig;
 	/** Graduated, LLM-free eviction */
 	eviction?: EvictionSettings;
-	/** Constraint pinning (E6): keep matched constraints through compaction */
-	pinning?: PinningConfig;
-	/** Turn-based protection: protect recent tool outputs from trimming */
-	turnProtection?: TurnProtectionConfig;
 	/** Proactive compaction before the context overflows */
 	preemptiveCompaction?: PreemptiveCompactionConfig;
 	/** How the compaction prompt is applied: replace the default or augment it (default: "replace") */
 	promptMode?: "replace" | "augment";
 	/** Post-compaction degradation diagnostic */
 	degradationMonitor?: DegradationMonitorConfig;
-	/** Optional external adapters (semantic retrieval, judge, scorer) */
+	/** Optional external adapters (semantic retrieval, scorer) */
 	adapters?: AdaptersConfig;
-	/** Glob patterns for files whose tool outputs should never be trimmed (default: []) */
-	protectedFilePatterns?: string[];
 	/** Enable debug logging (default: false) */
 	debug?: boolean;
 }
@@ -206,40 +153,22 @@ export interface LiveCompactionConfig {
 // Defaults
 // ---------------------------------------------------------------------------
 
-export const DEFAULT_TRIM: Required<TrimLimits> = {
-	bash: 600,
-	write: 100,
-	edit: 100,
-	delete: 50,
-	read: 300,
-	glob: 200,
-	grep: 400,
-	list: 200,
-	default: 500,
-};
-
 export const DEFAULT_CONFIG: Required<
 	Omit<
 		LiveCompactionConfig,
-		| "trim"
 		| "dedup"
 		| "purgeErrors"
 		| "compress"
 		| "eviction"
-		| "pinning"
-		| "turnProtection"
 		| "preemptiveCompaction"
 		| "degradationMonitor"
 		| "adapters"
 	>
 > & {
-	trim: Required<TrimLimits>;
 	dedup: Required<DedupConfig>;
 	purgeErrors: Required<PurgeErrorsConfig>;
 	compress: Required<CompressConfig>;
 	eviction: Required<EvictionSettings>;
-	pinning: Required<PinningConfig>;
-	turnProtection: Required<TurnProtectionConfig>;
 	preemptiveCompaction: Required<
 		Omit<PreemptiveCompactionConfig, "contextLimit" | "absoluteTokenThreshold">
 	> & {
@@ -253,7 +182,6 @@ export const DEFAULT_CONFIG: Required<
 	enabled: true,
 	debug: false,
 	promptMode: "replace",
-	trim: { ...DEFAULT_TRIM },
 	dedup: {
 		enabled: true,
 		protectedTools: [],
@@ -262,7 +190,7 @@ export const DEFAULT_CONFIG: Required<
 		enabled: true,
 		turns: 4,
 		wholeAttempt: true,
-		cascade: false,
+		cascade: true,
 	},
 	compress: {
 		protectedTurns: 3,
@@ -271,22 +199,13 @@ export const DEFAULT_CONFIG: Required<
 	},
 	eviction: {
 		enabled: true,
-		thresholdTokens: 80000,
-		levels: ["reasoning", "intermediate", "episode"],
+		thresholdTokens: 200000,
+		levels: ["reasoning", "bulk_output", "intermediate", "episode"],
 		protectPrologue: true,
-	},
-	pinning: {
-		enabled: true,
-		patterns: [],
-		maxClauses: 20,
-	},
-	turnProtection: {
-		enabled: true,
-		turns: 4,
 	},
 	preemptiveCompaction: {
 		enabled: false,
-		threshold: 0.78,
+		threshold: 0.8,
 		countCacheTokens: true,
 		minTokensSinceLast: 0,
 		cooldownMs: 60000,
@@ -296,7 +215,6 @@ export const DEFAULT_CONFIG: Required<
 		threshold: 4,
 		windowMs: 120000,
 	},
-	protectedFilePatterns: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -330,6 +248,7 @@ export function deepMerge(
 
 const EVICTION_LEVELS: EvictionLevel[] = [
 	"reasoning",
+	"bulk_output",
 	"intermediate",
 	"episode",
 ];
@@ -350,7 +269,6 @@ function normalizeConfig(cfg: ResolvedConfig): ResolvedConfig {
 	// the default section instead, matching the previous tolerant behavior.
 	for (const key of [
 		"dedup",
-		"pinning",
 		"eviction",
 		"purgeErrors",
 		"preemptiveCompaction",
@@ -365,10 +283,6 @@ function normalizeConfig(cfg: ResolvedConfig): ResolvedConfig {
 
 	cfg.dedup.protectedTools = Array.isArray(cfg.dedup.protectedTools)
 		? cfg.dedup.protectedTools.filter((t) => typeof t === "string")
-		: [];
-
-	cfg.pinning.patterns = Array.isArray(cfg.pinning.patterns)
-		? cfg.pinning.patterns.filter((p) => typeof p === "string")
 		: [];
 
 	// Preserve an explicit empty array (a way to disable eviction via levels).
@@ -416,7 +330,7 @@ function normalizeConfig(cfg: ResolvedConfig): ResolvedConfig {
 	if (isPlainObject(cfg.adapters)) {
 		cfg.adapters = structuredClone(cfg.adapters);
 		const adapters = cfg.adapters as Record<string, unknown>;
-		for (const key of ["embeddings", "judge", "scorer"]) {
+		for (const key of ["embeddings", "scorer"]) {
 			const adapter = adapters[key];
 			if (!isPlainObject(adapter)) continue;
 			for (const field of ["timeoutMs", "maxSamples"] as const) {

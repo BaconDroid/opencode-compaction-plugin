@@ -331,31 +331,10 @@ describe("LiveCompactionPlugin", () => {
 	});
 
 	// ---------------------------------------------------------------------------
-	// experimental.chat.messages.transform (trim + dedup + purge)
+	// experimental.chat.messages.transform (dedup + purge + eviction)
 	// ---------------------------------------------------------------------------
 
 	describe("experimental.chat.messages.transform", () => {
-		it("trims long bash tool outputs", async () => {
-			const hooks = await getHooks();
-			const longOutput = "x".repeat(5000);
-			// Build messages with the tool call outside the protected turn window (4 turns)
-			// Tool at index 0, followed by 5 user turns to push it out of the window
-			const messages = [
-				{
-					info: { role: "assistant" },
-					parts: [
-						{ type: "tool", tool: "bash", state: { output: longOutput } },
-					],
-				},
-				...userTurns(5),
-			];
-			await transform(hooks, messages);
-			expect((messages[0].parts[0] as any).state.output.length).toBeLessThan(
-				1000,
-			);
-			expect((messages[0].parts[0] as any).state.output).toContain("[trimmed");
-		});
-
 		it("preserves short tool outputs", async () => {
 			const hooks = await getHooks();
 			const shortOutput = "File edited successfully";
@@ -373,47 +352,6 @@ describe("LiveCompactionPlugin", () => {
 			];
 			await transform(hooks, messages);
 			expect(messages[0].parts[0].state.output).toBe(shortOutput);
-		});
-
-		it("trims read outputs to 300 chars", async () => {
-			const hooks = await getHooks();
-			const fileContent = "line\n".repeat(200); // ~1200 chars
-			// Tool at index 0, followed by 5 user turns to push it out of window
-			const messages = [
-				{
-					info: { role: "assistant" },
-					parts: [
-						{ type: "tool", tool: "read", state: { output: fileContent } },
-					],
-				},
-				...userTurns(5),
-			];
-			await transform(hooks, messages);
-			expect((messages[0].parts[0] as any).state.output.length).toBeLessThan(
-				400,
-			);
-		});
-
-		it("does not re-trim an already trimmed output", async () => {
-			const hooks = await getHooks();
-			const longOutput = "x".repeat(5000);
-			const messages = [
-				{
-					info: { role: "assistant" },
-					parts: [
-						{ type: "tool", tool: "bash", state: { output: longOutput } },
-					],
-				},
-				...userTurns(5),
-			];
-
-			await transform(hooks, messages);
-			const firstPass = (messages[0].parts[0] as any).state.output;
-			expect(firstPass).toContain("[trimmed");
-
-			// Second pass must be a no-op on the already trimmed output.
-			await transform(hooks, messages);
-			expect((messages[0].parts[0] as any).state.output).toBe(firstPass);
 		});
 
 		it("handles malformed messages without throwing or modifying them", async () => {
@@ -474,8 +412,8 @@ describe("LiveCompactionPlugin", () => {
 					},
 				],
 			});
-			// Index 0 has no `parts`; trim used to throw here, which (via the
-			// safe wrapper) skipped dedup/purge/eviction for the whole batch.
+			// Index 0 has no `parts`; a stage must tolerate it and still run the
+			// rest (dedup/purge/eviction) for the whole batch.
 			const messages = [
 				{ info: { role: "assistant" } },
 				tool("v1"),
@@ -484,30 +422,6 @@ describe("LiveCompactionPlugin", () => {
 			];
 			await transform(hooks, messages);
 			expect(messages[1].parts[0].state.output).toContain("deduped");
-		});
-
-		it("keeps dedup markers intact across passes with a small trim limit", async () => {
-			const hooks = await getHooks();
-			const tool = (output: string) => ({
-				info: { role: "assistant" },
-				parts: [
-					{
-						type: "tool",
-						tool: "delete",
-						args: { filePath: "a.ts" },
-						state: { output },
-					},
-				],
-			});
-			// `delete` trim limit (50) is smaller than the dedup marker length, so
-			// trimming the marker would break dedup idempotency. The messages are
-			// pushed out of the turn window so trimming actually runs.
-			const messages = [tool("removed"), tool("removed"), ...userTurns(5)];
-			await transform(hooks, messages);
-			const marker = messages[0].parts[0].state.output as string;
-			expect(marker).toContain("deduped");
-			await transform(hooks, messages);
-			expect(messages[0].parts[0].state.output).toBe(marker);
 		});
 
 		it("purges large inputs from errored tools outside the recent window", async () => {
@@ -713,267 +627,6 @@ describe("LiveCompactionPlugin", () => {
 			await (hooks as any).config(opencodeConfig);
 			expect((opencodeConfig.permission as any).compress).toBe("ask");
 			expect((opencodeConfig.permission as any).expand).toBe("allow");
-		});
-	});
-
-	// ---------------------------------------------------------------------------
-	// Protected file patterns
-	// ---------------------------------------------------------------------------
-
-	describe("protected file patterns", () => {
-		it("does not trim outputs from protected files", async () => {
-			// Create a config with protected patterns
-			const dotDir = join(TMP_DIR, ".opencode");
-			if (!existsSync(dotDir)) mkdirSync(dotDir, { recursive: true });
-			writeFileSync(
-				join(dotDir, "live-compaction.json"),
-				JSON.stringify({ protectedFilePatterns: ["AGENTS.md"] }),
-			);
-			const hooks = await LiveCompactionPlugin({
-				...mockCtx,
-				directory: TMP_DIR,
-			} as any);
-
-			const longContent = "x".repeat(2000);
-			const messages = [
-				{
-					info: { role: "assistant" },
-					parts: [
-						{
-							type: "tool",
-							tool: "read",
-							args: { filePath: "AGENTS.md" },
-							state: { output: longContent },
-						},
-					],
-				},
-				// Push the tool out of the turn-protection window so trimming
-				// actually runs (otherwise the test is vacuous).
-				...userTurns(5),
-			];
-			await transform(hooks, messages);
-			// Should NOT be trimmed because AGENTS.md is protected
-			expect(messages[0].parts[0].state.output).toBe(longContent);
-		});
-
-		it("trims outputs from non-protected files", async () => {
-			const dotDir = join(TMP_DIR, ".opencode");
-			if (!existsSync(dotDir)) mkdirSync(dotDir, { recursive: true });
-			writeFileSync(
-				join(dotDir, "live-compaction.json"),
-				JSON.stringify({ protectedFilePatterns: ["AGENTS.md"] }),
-			);
-			const hooks = await LiveCompactionPlugin({
-				...mockCtx,
-				directory: TMP_DIR,
-			} as any);
-
-			const longContent = "x".repeat(2000);
-			// Tool at index 0, followed by 5 user turns to push it out of window
-			const messages = [
-				{
-					info: { role: "assistant" },
-					parts: [
-						{
-							type: "tool",
-							tool: "read",
-							args: { filePath: "src/other.ts" },
-							state: { output: longContent },
-						},
-					],
-				},
-				...userTurns(5),
-			];
-			await transform(hooks, messages);
-			// SHOULD be trimmed (not in protected patterns + outside turn window)
-			expect((messages[0].parts[0] as any).state.output.length).toBeLessThan(
-				500,
-			);
-		});
-
-		it("supports glob patterns for protected files", async () => {
-			const dotDir = join(TMP_DIR, ".opencode");
-			if (!existsSync(dotDir)) mkdirSync(dotDir, { recursive: true });
-			writeFileSync(
-				join(dotDir, "live-compaction.json"),
-				JSON.stringify({ protectedFilePatterns: ["**/*.config.ts"] }),
-			);
-			const hooks = await LiveCompactionPlugin({
-				...mockCtx,
-				directory: TMP_DIR,
-			} as any);
-
-			const longContent = "x".repeat(2000);
-			const messages = [
-				{
-					info: { role: "assistant" },
-					parts: [
-						{
-							type: "tool",
-							tool: "read",
-							args: { filePath: "src/build.config.ts" },
-							state: { output: longContent },
-						},
-					],
-				},
-				...userTurns(5),
-			];
-			await transform(hooks, messages);
-			expect(messages[0].parts[0].state.output).toBe(longContent);
-		});
-
-		it("detects protected files passed via state.input", async () => {
-			const dotDir = join(TMP_DIR, ".opencode");
-			if (!existsSync(dotDir)) mkdirSync(dotDir, { recursive: true });
-			writeFileSync(
-				join(dotDir, "live-compaction.json"),
-				JSON.stringify({ protectedFilePatterns: ["AGENTS.md"] }),
-			);
-			const hooks = await LiveCompactionPlugin({
-				...mockCtx,
-				directory: TMP_DIR,
-			} as any);
-
-			const longContent = "x".repeat(2000);
-			// Tool at index 0, pushed out of the turn window by 5 user turns.
-			const messages = [
-				{
-					info: { role: "assistant" },
-					parts: [
-						{
-							type: "tool",
-							tool: "read",
-							state: {
-								output: longContent,
-								input: JSON.stringify({ filePath: "AGENTS.md" }),
-							},
-						},
-					],
-				},
-				...userTurns(5),
-			];
-			await transform(hooks, messages);
-			expect(messages[0].parts[0].state.output).toBe(longContent);
-		});
-	});
-
-	// ---------------------------------------------------------------------------
-	// Turn protection
-	// ---------------------------------------------------------------------------
-
-	describe("turn protection", () => {
-		it("does not trim tool outputs in recent turns", async () => {
-			const hooks = await getHooks();
-
-			// Simulate a conversation: user -> assistant (tool) -> user -> assistant (tool)
-			const longContent = "x".repeat(2000);
-			const messages = [
-				{
-					info: { role: "user" },
-					parts: [{ type: "text", text: "read the file" }],
-				},
-				{
-					info: { role: "assistant" },
-					parts: [
-						{
-							type: "tool",
-							tool: "read",
-							state: { output: longContent },
-						},
-					],
-				},
-				{
-					info: { role: "user" },
-					parts: [{ type: "text", text: "now edit it" }],
-				},
-				{
-					info: { role: "assistant" },
-					parts: [
-						{
-							type: "tool",
-							tool: "edit",
-							state: { output: longContent },
-						},
-					],
-				},
-			];
-			await transform(hooks, messages);
-
-			// Both tool outputs should be protected (within last 4 turns)
-			expect((messages[1].parts[0] as any).state.output).toBe(longContent);
-			expect((messages[3].parts[0] as any).state.output).toBe(longContent);
-		});
-
-		it("trims tool outputs outside the protected turn window", async () => {
-			const hooks = await getHooks();
-
-			// Create a longer conversation that exceeds the turn window
-			const longContent = "x".repeat(2000);
-			const messages = [
-				// Old turn (should be trimmed)
-				{
-					info: { role: "user" },
-					parts: [{ type: "text", text: "old request" }],
-				},
-				{
-					info: { role: "assistant" },
-					parts: [
-						{ type: "tool", tool: "read", state: { output: longContent } },
-					],
-				},
-				// Turn 2
-				{
-					info: { role: "user" },
-					parts: [{ type: "text", text: "request 2" }],
-				},
-				{
-					info: { role: "assistant" },
-					parts: [
-						{ type: "tool", tool: "bash", state: { output: longContent } },
-					],
-				},
-				// Turn 3
-				{
-					info: { role: "user" },
-					parts: [{ type: "text", text: "request 3" }],
-				},
-				{
-					info: { role: "assistant" },
-					parts: [
-						{ type: "tool", tool: "read", state: { output: longContent } },
-					],
-				},
-				// Turn 4
-				{
-					info: { role: "user" },
-					parts: [{ type: "text", text: "request 4" }],
-				},
-				{
-					info: { role: "assistant" },
-					parts: [
-						{ type: "tool", tool: "read", state: { output: longContent } },
-					],
-				},
-				// Turn 5 (recent, protected)
-				{
-					info: { role: "user" },
-					parts: [{ type: "text", text: "request 5" }],
-				},
-				{
-					info: { role: "assistant" },
-					parts: [
-						{ type: "tool", tool: "read", state: { output: longContent } },
-					],
-				},
-			];
-			await transform(hooks, messages);
-
-			// Old tool output (index 1) should be trimmed
-			expect((messages[1].parts[0] as any).state.output.length).toBeLessThan(
-				500,
-			);
-			// Recent tool outputs should be protected
-			expect((messages[9].parts[0] as any).state.output).toBe(longContent);
 		});
 	});
 
@@ -1654,99 +1307,8 @@ describe("LiveCompactionPlugin", () => {
 		});
 	});
 
-	describe("constraint pinning (E6)", () => {
-		it("injects pinned constraints into the prompt", async () => {
-			const messages = mock().mockResolvedValue({
-				data: [
-					{
-						info: { role: "user" },
-						parts: [{ type: "text", text: "NEVER force push to main" }],
-					},
-				],
-			});
-			const hooks = await LiveCompactionPlugin(
-				{
-					...mockCtx,
-					client: {
-						app: { log: logMock() },
-						session: { messages },
-					},
-					directory: TMP_DIR,
-				} as any,
-				{ pinning: { patterns: ["never force push"] } } as any,
-			);
-			const output = { context: [] as string[], prompt: undefined as string | undefined };
-			await compact(hooks, "sess-pin", output);
-			expect(output.prompt).toContain("<pinned-constraints>");
-			expect(output.prompt).toContain("NEVER force push to main");
-		});
-
-		it("does not trim pinned messages", async () => {
-			const hooks = await LiveCompactionPlugin(mockCtx as any, {
-				pinning: { patterns: ["never force push"] },
-			} as any);
-			const longOutput = "x".repeat(5000);
-			const messages = [
-				{
-					info: { role: "assistant" },
-					parts: [
-						{ type: "text", text: "NEVER force push" },
-						{ type: "tool", tool: "bash", state: { output: longOutput } },
-					],
-				},
-				...userTurns(5),
-			];
-			await transform(hooks, messages);
-			expect((messages[0].parts[1] as any).state.output).toBe(longOutput);
-		});
-
-		it("validates pinned clauses against the newest summary", async () => {
-			const logs: string[] = [];
-			const messages = mock().mockResolvedValue({
-				data: [
-					{
-						info: { role: "user" },
-						parts: [{ type: "text", text: "NEVER force push to main" }],
-					},
-					{
-						info: { role: "assistant", summary: true, id: "s1" },
-						parts: [{ type: "text", text: "old summary without it" }],
-					},
-					{
-						info: { role: "assistant", summary: true, id: "s2" },
-						parts: [
-							{
-								type: "text",
-								text: "new summary: NEVER force push to main",
-							},
-						],
-					},
-				],
-			});
-			const hooks = await LiveCompactionPlugin(
-				{
-					...mockCtx,
-					client: {
-						app: {
-							log: (input: { body: { message: string } }) => {
-								logs.push(input.body.message);
-								return Promise.resolve();
-							},
-						},
-						session: { messages },
-					},
-					directory: TMP_DIR,
-				} as any,
-				{ debug: true, pinning: { patterns: ["never force push"] } } as any,
-			);
-			await compact(hooks, "sess-newest", { context: [] });
-			await emit(hooks, "session.compacted", { sessionID: "sess-newest" });
-			expect(logs).not.toContain("pinned constraints missing from summary");
-		});
-	});
-
 	describe("adapter diagnostics", () => {
-		it("warns about a misconfigured adapter even when debug is off", async () => {
+		const makeHooks = async (debug: boolean) => {
 			const logs: Array<{ level: string; message: string }> = [];
 			await LiveCompactionPlugin(
 				{
@@ -1763,8 +1325,25 @@ describe("LiveCompactionPlugin", () => {
 					},
 					directory: TMP_DIR,
 				} as any,
-				{ adapters: { embeddings: { provider: "mcp" } } } as any,
+				{
+					debug,
+					adapters: { embeddings: { provider: "mcp" } },
+				} as any,
 			);
+			return logs;
+		};
+
+		it("stays silent when debug is off", async () => {
+			const logs = await makeHooks(false);
+			expect(
+				logs.some((entry) =>
+					entry.message.includes("mcp provider is not supported"),
+				),
+			).toBe(false);
+		});
+
+		it("warns about a misconfigured adapter when debug is on", async () => {
+			const logs = await makeHooks(true);
 			expect(
 				logs.some(
 					(entry) =>

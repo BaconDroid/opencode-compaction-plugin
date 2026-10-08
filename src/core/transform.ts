@@ -1,12 +1,10 @@
 /**
  * The `experimental.chat.messages.transform` pipeline: applies the queued
- * compress/expand requests, then trimming, dedup, error purge and (opt-in)
- * graduated eviction — before OpenCode's own truncation.
+ * compress/expand requests, then dedup, error purge and (opt-in) graduated
+ * eviction — before OpenCode's own truncation.
  */
 
 import { getRecentTurnIndices } from "./messages.js";
-import { isPinnedMessage } from "./pin.js";
-import { hasProtectedFilePath, trimToolOutput } from "./trim.js";
 import {
 	applyCascadePurge,
 	applyDedup,
@@ -19,11 +17,6 @@ import type { Scorer } from "./adapters.js";
 import type { Message } from "../types.js";
 
 export interface TransformDeps extends RequestDeps {
-	trimMap: Record<string, number>;
-	defaultTrim: number;
-	protectedPatterns: string[];
-	turnProtectionEnabled: boolean;
-	protectedTurns: number;
 	/** Optional residual/perplexity scorer (E5); absent → heuristic estimate. */
 	scorer?: Scorer;
 	/** Max distinct texts scored per transform when `scorer` is set. */
@@ -39,60 +32,16 @@ export async function applyTransform(
 
 	const { config, logger } = deps;
 
-	// 1. Compute turn-protected and pinned indices.
-	const recentIndices = deps.turnProtectionEnabled
-		? getRecentTurnIndices(messages, deps.protectedTurns)
-		: new Set<number>();
-
-	const pinningPatterns =
-		config.pinning?.enabled === false
-			? []
-			: (config.pinning?.patterns ?? []);
-	const pinnedIndices = new Set<number>();
-	if (pinningPatterns.length > 0) {
-		for (let i = 0; i < messages.length; i++) {
-			if (isPinnedMessage(messages[i], pinningPatterns)) pinnedIndices.add(i);
-		}
-	}
-
-	// 2. Trim tool outputs with protection checks.
-	for (let mi = 0; mi < messages.length; mi++) {
-		if (recentIndices.has(mi) || pinnedIndices.has(mi)) continue;
-		for (const part of messages[mi].parts ?? []) {
-			if (
-				part.type !== "tool" ||
-				!part.state ||
-				typeof part.state.output !== "string" ||
-				!part.tool
-			) {
-				continue;
-			}
-			if (hasProtectedFilePath(part, deps.protectedPatterns)) continue;
-			part.state.output = trimToolOutput(
-				part.tool,
-				part.state.output,
-				deps.trimMap,
-				deps.defaultTrim,
-			);
-		}
-	}
-
-	// 3. Dedup repeated tool calls.
+	// 1. Dedup repeated tool calls.
 	if (config.dedup?.enabled) {
-		const deduped = applyDedup(messages, config, pinnedIndices);
+		const deduped = applyDedup(messages, config);
 		if (deduped > 0) logger.info("dedup applied", { count: deduped });
 	}
 
-	// 4. Purge errored tool inputs (older than purgeErrors.turns).
+	// 2. Purge errored tool inputs (older than purgeErrors.turns).
 	if (config.purgeErrors?.enabled) {
 		const purgeTurns = config.purgeErrors.turns ?? 4;
-		// Reuse the recent-turn set when the windows coincide (default: both 4);
-		// trim/dedup do not change the message count, so it is still valid.
-		const purgeProtected =
-			deps.turnProtectionEnabled && purgeTurns === deps.protectedTurns
-				? new Set(recentIndices)
-				: getRecentTurnIndices(messages, purgeTurns);
-		for (const index of pinnedIndices) purgeProtected.add(index);
+		const purgeProtected = getRecentTurnIndices(messages, purgeTurns);
 		const purgedCallIds = new Set<string>();
 		const purged = applyPurgeErrors(
 			messages,
@@ -102,8 +51,8 @@ export async function applyTransform(
 		);
 		if (purged > 0) logger.info("error purge applied", { count: purged });
 
-		// 4b. Cascade the purge to work depending on purged calls.
-		if ((config.purgeErrors.cascade ?? false) && purgedCallIds.size > 0) {
+		// 2b. Cascade the purge to work depending on purged calls.
+		if ((config.purgeErrors.cascade ?? true) && purgedCallIds.size > 0) {
 			const cascaded = applyCascadePurge(
 				messages,
 				purgedCallIds,
@@ -115,7 +64,7 @@ export async function applyTransform(
 		}
 	}
 
-	// 5. Graduated eviction (runs last; content-addressed, never user turns).
+	// 3. Graduated eviction (runs last; content-addressed, never user turns).
 	if (config.eviction?.enabled) {
 		// Optional scorer adapter (E5): calibrate the budget estimate. Any error
 		// falls back to the heuristic `estimateTokens` (fail-open).
@@ -135,10 +84,9 @@ export async function applyTransform(
 		}
 		const { removed, evictedIds } = applyEviction(messages, {
 			enabled: true,
-			thresholdTokens: config.eviction.thresholdTokens ?? 80000,
+			thresholdTokens: config.eviction.thresholdTokens ?? 200000,
 			levels: config.eviction.levels,
 			protectPrologue: config.eviction.protectPrologue ?? true,
-			protectedIndices: pinnedIndices,
 			estimate: scorerEstimator,
 			resolveText: scorerEstimator?.resolveText,
 		});

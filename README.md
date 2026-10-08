@@ -1,6 +1,6 @@
 # opencode-live-compaction
 
-Enhanced context compaction plugin for [OpenCode](https://opencode.ai) — structured summaries with files-touched manifests, task-state continuity, deterministic triggering, multi-scale folding, reversible compression, tool output trimming, deduplication, error purging, graduated eviction, protected file patterns, and turn protection.
+Enhanced context compaction plugin for [OpenCode](https://opencode.ai) — structured summaries with files-touched manifests, task-state continuity, deterministic triggering, multi-scale folding, reversible compression, deduplication, error purging, and graduated eviction.
 
 ## What it does
 
@@ -16,12 +16,9 @@ OpenCode's built-in compaction produces a 7-section summary. This plugin replace
 | **Task continuity** | Not captured | **Exact moment** where work stopped |
 | **Files touched** | "Relevant Files" section | **Operation-badge manifest** (`R`=read, `E`=edit, `W`=write, `D`=delete) from structured file tools |
 | **Prompt** | Hardcoded | Replaced via plugin hook (customizable) |
-| **Tool output size** | Unmanaged | **Configurable per-tool trim limits** |
 | **Duplicate tool calls** | Kept as-is | **Deduplicated** (keeps only latest) |
 | **Errored tool calls** | Kept forever | Whole failed attempt purged after N turns (input + output, compact error extract); cascades to dependent calls |
 | **Manual compaction** | `/compact` (built-in) | left to OpenCode (the plugin does not override it) |
-| **Protected files** | None | **Glob patterns** (`AGENTS.md`, `**/*.config.ts`) never trimmed |
-| **Recent turn protection** | None | **Last N turns** protected from trimming (default: 4) |
 | **Auto-continue** | Always on | Skipped for the compaction agent and duplicate triggers |
 | **Proactive compaction** | Only at the context limit | Optional **preemptive** compaction near the limit (opt-in) |
 | **Prompt application** | Replaces the default | Configurable: `replace` (default) or `augment` (keep the default prompt) |
@@ -32,9 +29,8 @@ OpenCode's built-in compaction produces a 7-section summary. This plugin replace
 | **Reversible compression** | None | **expand** (sticky or one-shot) restores the original messages from an in-memory sidecar |
 | **Trigger threshold** | Fixed | Hybrid `min(contextLimit × ratio, absolute)`; cache tokens counted by default |
 | **Deterministic gate** | None | Optional minimum new tokens since the last compaction |
-| **Graduated eviction** | None | LLM-free `reasoning → intermediate → episode`, oldest first (never evicts `user` turns) |
+| **Graduated eviction** | None | LLM-free `reasoning → bulk output → intermediate → episode`, oldest first (never evicts `user` turns) |
 | **Task state** | "Goal" prose | `<task-state>` block with todo ids/statuses/priorities |
-| **Constraint pinning** | None | Opt-in patterns whose clauses survive trim/dedup/purge/eviction and are re-injected verbatim (`<pinned-constraints>`) |
 | **Focus** | None | `<latest-user-ask>` block anchored to the current user request |
 
 ## Install
@@ -99,12 +95,9 @@ Runs on every message batch sent to the LLM. Applies the following strategies in
 
 1. **Pending compressions** — Applies queued `compress` calls (deterministic span selection) as `<compressed-block>` messages with stable `[bN]` labels.
 2. **Expand** — Restores a block's original messages from the in-memory sidecar (`mode: "sticky"` keeps it expanded, `mode: "once"` restores it for one transform).
-3. **Tool output trimming** — Truncates long tool outputs (bash, read, grep, etc.) to configurable limits. Keeps the *end* of the output (usually has the result/error).
-4. **Deduplication** — When the same tool is called with the same args multiple times, only the latest output is kept. Earlier duplicates are replaced with a short marker.
-5. **Error purge** — Purges the whole failed attempt (input + output, with a compact error extract) from errored tool calls older than N turns; the opt-in `cascade` (default off) extends the purge to calls that depend on a purged call.
-6. **Graduated eviction** — LLM-free eviction (`reasoning → intermediate → episode`) once the estimated budget is exceeded; user turns are never evicted.
-
-Messages matching `pinning.patterns` are **pinned**: they are skipped by trimming, dedup, purge and eviction, and their clauses are re-injected into the compaction prompt as `<pinned-constraints>`.
+3. **Deduplication** — When the same tool is called with the same args multiple times, only the latest output is kept. Earlier duplicates are replaced with a short marker.
+4. **Error purge** — Purges the whole failed attempt (input + output, with a compact error extract) from errored tool calls older than N turns; `cascade` (on by default) extends the purge to calls that depend on a purged call.
+5. **Graduated eviction** — LLM-free eviction (`reasoning → bulk output → intermediate → episode`) once the estimated budget is exceeded; user turns are never evicted.
 
 ### 3. `experimental.session.compacting` — Enhanced prompt
 
@@ -157,36 +150,6 @@ Restores a compressed block's original messages from the in-memory sidecar, refe
 
 When the optional [semantic retrieval adapter](#optional-adapters-) is configured, `search` runs embedding-based retrieval first and falls back to the keyword search on any error or when it finds nothing.
 
-## Protected File Patterns
-
-Files matching glob patterns are never trimmed, even if their outputs exceed the configured limits. Useful for critical context files:
-
-```jsonc
-{
-    "protectedFilePatterns": [
-        "AGENTS.md",
-        "**/*.config.ts",
-        ".env*",
-        "**/schema.prisma"
-    ]
-}
-```
-
-Supports: `*` (any except `/`), `**` (any including `/`), `?` (single char).
-
-## Turn Protection
-
-Tool outputs from recent conversation turns are protected from trimming. The last N user turns (default: 4) are never trimmed, ensuring recently-read files stay in context:
-
-```jsonc
-{
-    "turnProtection": {
-        "enabled": true,
-        "turns": 4
-    }
-}
-```
-
 ## Feature reference
 
 Each feature below lists **what** it does, its **config** keys and how it
@@ -201,29 +164,24 @@ Each feature below lists **what** it does, its **config** keys and how it
 | Task state (todos) | — | — |
 | Latest user ask | — | — |
 | Files-touched manifest | — | — |
-| Tool-output trimming | `trim.*` | see Default Configuration |
-| Turn protection | `turnProtection.{enabled,turns}` | `true`, `4` |
-| Protected files | `protectedFilePatterns` | `[]` |
 | Deduplication | `dedup.{enabled,protectedTools}` | `true`, `[]` |
-| Error purge | `purgeErrors.{enabled,turns,wholeAttempt,cascade}` | `true`, `4`, `true`, `false` |
-| Graduated eviction | `eviction.{enabled,thresholdTokens,levels,protectPrologue}` | `true`, `80000`, reasoning/intermediate/episode, `true` |
-| Constraint pinning | `pinning.{enabled,patterns,maxClauses}` | `true`, `[]`, `20` |
+| Error purge | `purgeErrors.{enabled,turns,wholeAttempt,cascade}` | `true`, `4`, `true`, `true` |
+| Graduated eviction | `eviction.{enabled,thresholdTokens,levels,protectPrologue}` | `true`, `200000`, reasoning/bulk_output/intermediate/episode, `true` |
 | Preemptive compaction | `preemptiveCompaction.*` | disabled |
 | Degradation monitor | `degradationMonitor.{enabled,threshold,windowMs}` | `false`, `4`, `120000` |
 | Auto-continue | — | — |
 | Compression tools | `compress.{protectedTurns,reversible,searchMaxResults}` | `3`, `false`, `5` |
 | Semantic retrieval (optional) | `adapters.embeddings.*` | disabled |
-| Semantic constraint validation (optional) | `adapters.judge.*` | disabled |
 | Residual/perplexity scoring (optional) | `adapters.scorer.*` | disabled |
 
 ### Structured compaction prompt
 - **What** — replaces (or augments) OpenCode's default prompt with the 11-section
   template and carries the continuity blocks `<previous-summary>`,
-  `<task-state>`, `<latest-user-ask>` and `<pinned-constraints>`.
+  `<task-state>` and `<latest-user-ask>`.
 - **Config** — `promptMode` (`"replace"` default, or `"augment"`).
 - **Interactions** — in `replace` mode the session messages are fetched to populate
-  the blocks; `augment` keeps OpenCode's prompt and only fetches when
-  `pinning.patterns` is set.
+  `<previous-summary>`/`<latest-user-ask>`; `augment` keeps OpenCode's prompt and
+  does not fetch them.
 
 ### Previous-summary continuity
 - **What** — re-injects the last compaction summary as `<previous-summary>`; a
@@ -246,50 +204,24 @@ Each feature below lists **what** it does, its **config** keys and how it
 - **Interactions** — shell commands (`bash`) are not parsed; files touched only
   through a shell are not listed (the extraction heuristics were fragile).
 
-### Tool-output trimming
-- **What** — truncates long tool outputs to per-tool limits, keeping the tail.
-- **Config** — `trim.*` (per-tool limits + `default`).
-- **Interactions** — skipped for protected files, recent turns and pinned messages;
-  idempotent (an already-trimmed output is not re-trimmed).
-
-### Turn protection
-- **What** — never trims tool outputs from the last N user turns.
-- **Config** — `turnProtection.{enabled,turns}`.
-- **Interactions** — overrides trimming only; error purge uses its own
-  `purgeErrors.turns` window.
-
-### Protected file patterns
-- **What** — never trims outputs from files matching glob patterns.
-- **Config** — `protectedFilePatterns` (globs).
-- **Interactions** — trimming only.
-
 ### Deduplication
 - **What** — keeps only the latest of repeated `(tool + args)` calls.
 - **Config** — `dedup.{enabled,protectedTools}`.
-- **Interactions** — skipped for pinned messages; runs before error purge.
+- **Interactions** — runs before error purge; runs before eviction.
 
 ### Error purge
 - **What** — purges the whole failed attempt after N turns (`wholeAttempt`: input
-  + output + compact error extract); the opt-in `cascade` (default off) extends
-  the purge to dependent calls.
+  + output + compact error extract); `cascade` (on by default) extends the purge
+  to dependent calls.
 - **Config** — `purgeErrors.{enabled,turns,wholeAttempt,cascade}`.
 - **Interactions** — errored calls within the last `purgeErrors.turns` user turns
-  and pinned messages are never purged; `cascade` only fires for calls actually
-  purged.
+  are never purged; `cascade` only fires for calls actually purged.
 
 ### Graduated eviction
-- **What** — LLM-free eviction (`reasoning → intermediate → episode`) once the
-  estimated budget is exceeded. `bulk_output` remains available in `levels` but
-  is off by default (redundant with `trim`).
+- **What** — LLM-free eviction (`reasoning → bulk output → intermediate → episode`)
+  once the estimated budget is exceeded.
 - **Config** — `eviction.{enabled,thresholdTokens,levels,protectPrologue}`.
-- **Interactions** — runs last; never evicts user turns, the prologue or pinned messages.
-
-### Constraint pinning
-- **What** — clauses matching `pinning.patterns` survive compaction and are
-  re-injected verbatim as `<pinned-constraints>`; a deterministic integrity check
-  warns when a clause is missing from the produced summary.
-- **Config** — `pinning.{enabled,patterns,maxClauses}`.
-- **Interactions** — overrides trimming, dedup, purge and eviction for matched messages.
+- **Interactions** — runs last; never evicts user turns or the prologue.
 
 ### Preemptive compaction
 - **What** — calls `session.summarize` before the context is full.
@@ -311,7 +243,7 @@ Each feature below lists **what** it does, its **config** keys and how it
 - **What** — `compress` (fold), `expand` (restore), `inspect`/`search`
   (browse/retrieve). See [Compression Tools](#compression-tools).
 - **Config** — `compress.{protectedTurns,reversible,searchMaxResults}`.
-- **Interactions** — applied in the transform before trimming.
+- **Interactions** — applied in the transform before dedup/purge/eviction.
 
 ### Semantic retrieval (optional adapter)
 - **What** — when `adapters.embeddings` is configured, `search` ranks stored
@@ -320,15 +252,6 @@ Each feature below lists **what** it does, its **config** keys and how it
 - **Interactions** — semantic hits are tried first; any error (timeout, bad
   response) or an empty result falls back to the deterministic keyword search.
   Never changes the transform/compaction path.
-
-### Semantic constraint validation (optional adapter)
-- **What** — after compaction, the pinned constraints are already checked by a
-  deterministic substring test. When `adapters.judge` is configured and a clause
-  looks missing, the judge is asked whether the summary preserves it semantically
-  (paraphrase allowed).
-- **Config** — `adapters.judge.*` (opt-in; off when absent).
-- **Interactions** — only runs for clauses the substring check flagged; a `YES`
-  suppresses the warning, a `NO`/unclear answer or any judge error keeps it.
 
 ### Residual/perplexity scoring (optional adapter)
 - **What** — eviction normally budgets with the heuristic `estimateTokens`
@@ -344,16 +267,14 @@ The `messages.transform` pipeline runs in a fixed order (see
 [How it works](#2-experimentalchatmessagestransform--context-optimization)):
 
 ```
-compress → expand → trim → dedup → purge (+cascade) → eviction
+compress → expand → dedup → purge (+cascade) → eviction
 ```
 
 Override rules:
 
-- **Pinned messages** (`pinning.patterns`) are skipped by **all** of trim, dedup,
-  purge and eviction.
-- **Protected files** (`protectedFilePatterns`) affect **trimming** only; **recent
-  turns** (`turnProtection`) affect trimming, while purge uses `purgeErrors.turns`.
-- The protect mechanisms are independent and compose — a message is skipped if any applies.
+- **Deduplication** keeps the latest of repeated `(tool + args)` calls; **error
+  purge** then removes failed attempts older than `purgeErrors.turns` user turns.
+- **Eviction** runs last and never touches user turns or the prologue.
 
 ## Configuration
 
@@ -371,7 +292,7 @@ You can also configure the plugin inline through the `opencode.json` plugin entr
 ```json
 {
   "plugin": [
-    ["github:BaconDroid/opencode-live-compaction", { "trim": { "bash": 1000 } }]
+    ["github:BaconDroid/opencode-live-compaction", { "purgeErrors": { "turns": 6 } }]
   ]
 }
 ```
@@ -385,21 +306,8 @@ Precedence, low to high: **defaults → global file → plugin options → proje
     // Enable/disable the entire plugin
     "enabled": true,
 
-    // Enable debug logging (logs to OpenCode's app log)
+    // Enable debug logging: gates BOTH info and warn logs (logs to OpenCode's app log)
     "debug": false,
-
-    // Tool output trim limits (max chars to keep per tool type)
-    "trim": {
-        "bash": 600,     // Shell outputs (logs, test runs)
-        "write": 100,    // File write confirmations
-        "edit": 100,     // Edit confirmations
-        "delete": 50,    // Delete confirmations
-        "read": 300,     // File reads
-        "glob": 200,     // File listings
-        "grep": 400,     // Search results
-        "list": 200,     // Directory listings
-        "default": 500   // Any unlisted tool
-    },
 
     // Deduplication: remove duplicate tool calls (same tool + same args)
     "dedup": {
@@ -412,7 +320,7 @@ Precedence, low to high: **defaults → global file → plugin options → proje
         "enabled": true,
         "turns": 4,             // Purge errored calls older than N user turns
         "wholeAttempt": true,   // Also replace the output with a compact error extract
-        "cascade": false        // Opt-in: cascade the purge to calls depending on a purged call
+        "cascade": true         // Cascade the purge to calls depending on a purged call
     },
 
     // Model-driven compression tools
@@ -425,28 +333,15 @@ Precedence, low to high: **defaults → global file → plugin options → proje
     // Graduated, LLM-free eviction
     "eviction": {
         "enabled": true,
-        "thresholdTokens": 80000,   // Eviction runs only above this estimated budget
-        "levels": ["reasoning", "intermediate", "episode"],   // "bulk_output" is opt-in (redundant with trim)
+        "thresholdTokens": 200000,  // Eviction runs only above this estimated budget
+        "levels": ["reasoning", "bulk_output", "intermediate", "episode"],
         "protectPrologue": true     // Never evict the first message
-    },
-
-    // Constraint pinning (E6): matched clauses survive compaction and are re-injected
-    "pinning": {
-        "enabled": true,
-        "patterns": [],             // Case-insensitive substrings, e.g. ["NEVER", "AGENTS.md"]
-        "maxClauses": 20            // Max pinned clauses re-injected into the prompt
-    },
-
-    // Turn protection: protect recent tool outputs from trimming
-    "turnProtection": {
-        "enabled": true,
-        "turns": 4   // Number of recent user turns to protect
     },
 
     // Proactive compaction before the context overflows (opt-in)
     "preemptiveCompaction": {
         "enabled": false,             // enable to compact before the context is full
-        "threshold": 0.78,            // fraction of the context limit that triggers it
+        "threshold": 0.80,            // fraction of the context limit that triggers it
         // "absoluteTokenThreshold": 330000,  // optional ceiling; unset by default
         "countCacheTokens": true,     // count cache read/write tokens (matches OpenCode's context size)
         "minTokensSinceLast": 0,      // gate: minimum new tokens since the last compaction
@@ -463,10 +358,7 @@ Precedence, low to high: **defaults → global file → plugin options → proje
         "enabled": false,
         "threshold": 4,          // consecutive assistant messages without text
         "windowMs": 120000       // only checked within this window after compaction
-    },
-
-    // Glob patterns for files whose outputs should never be trimmed
-    "protectedFilePatterns": []
+    }
 }
 ```
 
@@ -479,11 +371,10 @@ logged and falls back to the internal behaviour, so a broken adapter can never
 break compaction. No dependency is added: adapters talk to an endpoint/command
 you already run.
 
-Three adapters exist today, each enabled by adding a block (there is no default
+Two adapters exist today, each enabled by adding a block (there is no default
 value, so each is off unless present):
 
 - **`adapters.embeddings`** — semantic retrieval for `search` (E4).
-- **`adapters.judge`** — semantic constraint validation after compaction (E6).
 - **`adapters.scorer`** — residual/perplexity estimate for the eviction budget (E5/E9).
 
 ```jsonc
@@ -496,12 +387,6 @@ value, so each is off unless present):
             "model": "nomic-embed-text",     // optional, forwarded to the provider
             "timeoutMs": 10000,              // optional request timeout
             "minScore": 0.25                 // optional minimum cosine score for a hit
-        },
-        "judge": {
-            "provider": "http",
-            "url": "http://localhost:11434/v1/chat/completions",
-            "model": "llama3.2",
-            "timeoutMs": 20000
         },
         "scorer": {
             "provider": "http",
@@ -516,20 +401,15 @@ value, so each is off unless present):
 **Provider `http`** — for `embeddings`, POSTs an OpenAI-style request
 (`{ "model"?, "input": ["text", …] }`) and accepts the response as a bare
 `number[][]`, `{ "embeddings": number[][] }` or OpenAI's
-`{ "data": [{ "embedding": number[] }] }`. For `judge`, POSTs a chat request
-(`{ "model"?, "messages": [{ "role": "user", "content": prompt }] }`) and
-accepts `{ "choices": [{ "message": { "content": "…" } }] }`, `{ "response" }`,
-`{ "content" }`, `{ "text" }` or `{ "answer" }`. For `scorer`, POSTs
+`{ "data": [{ "embedding": number[] }] }`. For `scorer`, POSTs
 `{ "model"?, "text": "…" }` and accepts a bare number, a numeric string or
 `{ "score" | "value" | "tokens" | "residual" }`. This covers local servers such
 as Ollama, llama.cpp, LM Studio or vLLM.
 
 **Provider `command`** — spawns `command` and writes `{ "model"?, "input": [...] }`
-(`embeddings`), `{ "model"?, "messages": [{ "role": "user", "content": "…" }] }`
-(`judge`, same shape as HTTP) or `{ "model"?, "text": "…" }` (`scorer`) on stdin.
-It reads the same response shapes as the HTTP provider on stdout; for `judge`,
-plain text stdout is accepted too. The process is non-interactive (stdin is
-closed) and killed on timeout.
+(`embeddings`) or `{ "model"?, "text": "…" }` (`scorer`) on stdin. It reads the
+same response shapes as the HTTP provider on stdout. The process is
+non-interactive (stdin is closed) and killed on timeout.
 
 **Provider `mcp`** — recognised but **not supported yet**; it logs a warning and
 uses the deterministic fallback. `mcp` requires SDK surface the plugin does not
@@ -562,7 +442,7 @@ bun run test:coverage
 # (OpenCode loads .ts files directly via Bun)
 ```
 
-Current coverage: **96.6% functions, 99.5% lines** (323 tests).
+Current coverage: **94.9% functions, 99.4% lines** (271 tests).
 
 ## File Structure
 
@@ -580,12 +460,9 @@ src/
     blocks.ts           — durable block ids + deterministic span selection
     expand.ts           — reversible sidecar + inspection/search
     adapters.ts         — optional adapter contracts + in-memory vector index
-    judge.ts            — optional judge orchestration for constraint validation
     scorer.ts           — optional scorer-calibrated token estimator
     strategies.ts       — dedup, error purge, cascade purge
     eviction.ts         — graduated, LLM-free eviction
-    pin.ts              — constraint pinning (E6)
-    trim.ts             — tool-output trimming + protected files
     messages.ts         — message-part helpers
     prompt.ts           — compaction prompt template (11 sections)
     previous-summary.ts — previous summary extraction + sliding state
@@ -593,7 +470,6 @@ src/
     files-touched.ts    — file operation tracker + manifest
     degradation-monitor.ts — post-compaction degradation diagnostic
     preemption.ts       — trigger logic + preemption controller
-    glob.ts             — glob matcher for protected files
     store.ts            — per-session keyed queue shared by the compression stores
   config/
     config.ts           — config types, defaults and merge
@@ -608,7 +484,6 @@ test/
   files-touched.test.ts — File tracker tests
   config.test.ts    — Config loading tests
   strategies.test.ts — Strategy unit tests
-  glob.test.ts      — Glob matcher tests
   compress.test.ts  — Compress tests
   blocks.test.ts    — Block id and span selection tests
   expand.test.ts    — Reversible expand tests
@@ -617,11 +492,8 @@ test/
   preemption.test.ts — Trigger, token gate and preemptive tests
   degradation-monitor.test.ts — Degradation monitor tests
   previous-summary.test.ts — Previous summary and sliding-state tests
-  pin.test.ts       — Constraint pinning tests
   adapters.test.ts  — Optional embedding adapter contracts, providers and fallback
-  judge.test.ts     — Optional judge adapter, verdict parsing and E6 validation
   scorer.test.ts    — Optional scorer adapter, estimator and eviction integration
-  trim.test.ts      — Tool-output trimming tests
   messages.test.ts  — Message helper tests
   requests.test.ts  — Queued request scoping tests
   helpers.ts        — Shared test setup + recording logger
@@ -637,7 +509,7 @@ test/
 Compatible with [`oh-my-opencode-slim`](https://github.com/alvinunreal/oh-my-opencode-slim). The two plugins register overlapping hooks but do not conflict:
 
 - `experimental.session.compacting` — omo-slim only marks the session (it does not touch `output.prompt`/`output.context`), so this plugin's prompt handling is unaffected.
-- `experimental.chat.messages.transform` — omo-slim rewrites user text and image parts; this plugin trims/dedups/purges tool parts and applies compressions. Load omo-slim **before** this plugin so its in-place rewrites run before this plugin's structural compression.
+- `experimental.chat.messages.transform` — omo-slim rewrites user text and image parts; this plugin dedups/purges tool parts and applies compressions. Load omo-slim **before** this plugin so its in-place rewrites run before this plugin's structural compression.
 - `config` — omo-slim manages agents, MCPs and commands; this plugin only ensures permissions for its own tools (`compress`, `expand`, `inspect`, `search`) and leaves a global permission string untouched.
 - No shared tool names (omo-slim: `task*`, `waitForUser`, `acpRun`, `webfetch`, `ast_grep_*`, `marketplace_*`; this plugin: `compress`, `expand`, `inspect`, `search`).
 - omo-slim does not use `experimental.compaction.autocontinue` and does not mutate `permission`.

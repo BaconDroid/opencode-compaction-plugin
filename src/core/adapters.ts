@@ -27,14 +27,6 @@ export interface VectorIndex {
 }
 
 /**
- * Optional model judge: returns the model's answer to a prompt. The caller owns
- * the prompt and the interpretation; the provider only transports it.
- */
-export interface Judge {
-	ask(prompt: string): Promise<string>;
-}
-
-/**
  * Optional residual/perplexity scorer: returns an estimated residual token
  * count for a text (higher = more load-bearing). Used to refine the eviction
  * budget estimate; absent → the heuristic `estimateTokens`.

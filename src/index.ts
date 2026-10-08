@@ -6,11 +6,8 @@
  * - Previous compaction summary carried forward (<previous-summary>)
  * - Files-touched manifest with operation badges
  * - Todo list captured before compaction and restored after
- * - Tool output trimming (configurable per-tool limits)
- * - Protected file patterns (never trim matching files)
- * - Turn protection (protect recent tool outputs from trimming)
  * - Deduplication of repeated tool calls
- * - Error purge (+ opt-in whole-attempt and cascade)
+ * - Error purge (whole-attempt + cascade)
  * - Auto-continue control (skips the compaction agent and duplicates)
  * - Hook error isolation
  * - Opt-in preemptive compaction near the context limit
@@ -23,8 +20,8 @@
  *   2. npm: add "opencode-live-compaction" to `plugin` array in opencode.json
  *
  * This file is the wiring only; the logic lives in focused modules:
- *   transform.ts · preemption.ts · trim.ts · autocontinue.ts · prompt.ts ·
- *   compress.ts · expand.ts · strategies.ts · eviction.ts · config.ts · …
+ *   transform.ts · preemption.ts · prompt.ts · compress.ts · expand.ts ·
+ *   strategies.ts · eviction.ts · config.ts · …
  */
 
 import { buildCompactionPrompt, extractLatestUserAsk } from "./core/prompt.js";
@@ -38,12 +35,7 @@ import {
 	recordText,
 } from "./core/expand.js";
 import { EmbeddingVectorIndex } from "./core/adapters.js";
-import { judgeClausesPreserved } from "./core/judge.js";
-import {
-	resolveEmbedder,
-	resolveJudge,
-	resolveScorer,
-} from "./opencode/adapters.js";
+import { resolveEmbedder, resolveScorer } from "./opencode/adapters.js";
 import {
 	buildCompressToolDef,
 	buildExpandToolDef,
@@ -65,16 +57,9 @@ import {
 	extractPreviousSummary,
 	type SlidingState,
 } from "./core/previous-summary.js";
-import { buildTrimMap } from "./core/trim.js";
 import { PreemptionController } from "./core/preemption.js";
 import { applyTransform } from "./core/transform.js";
-import {
-	collectPinnedClauses,
-	missingClauses,
-	renderPinned,
-} from "./core/pin.js";
-import { lastMessageWhere, partsText } from "./core/messages.js";
-import type { Hooks, Logger, Message, Plugin, PluginInput } from "./types.js";
+import type { Hooks, Logger, Plugin, PluginInput } from "./types.js";
 
 /** Model-driven tools registered by this plugin (used for permission wiring). */
 const PLUGIN_TOOL_NAMES = [
@@ -108,7 +93,9 @@ function makeLogger(
 		info: (message, data) => {
 			if (enabled) log("info", message, data);
 		},
-		warn: (message, data) => log("warn", message, data),
+		warn: (message, data) => {
+			if (enabled) log("warn", message, data);
+		},
 	};
 }
 
@@ -171,18 +158,9 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		return {};
 	}
 
-	// Build trim limits map once.
-	const trimMap = buildTrimMap(config);
-	const defaultTrim = config.trim?.default ?? 500;
-	const protectedPatterns = config.protectedFilePatterns ?? [];
-	const turnProtectionEnabled = config.turnProtection?.enabled ?? true;
-	const protectedTurns = config.turnProtection?.turns ?? 4;
-
 	logger.info("initialized", {
 		dedup: config.dedup?.enabled,
 		purgeErrors: config.purgeErrors?.enabled,
-		protectedPatterns: protectedPatterns.length,
-		turnProtection: turnProtectionEnabled ? protectedTurns : "off",
 	});
 
 	// Per-instance state.
@@ -192,7 +170,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 	const expandStore = new ExpandStore();
 	const todoPreserver = new TodoPreserver();
 	const slidingState = new Map<string, SlidingState>();
-	const pinnedBySession = new Map<string, string[]>();
 	const degradation = new DegradationMonitor();
 	const autocontinue = new AutocontinueGuard();
 	const preemption = new PreemptionController(
@@ -222,9 +199,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			provider: embeddingCfg?.provider ?? "http",
 		});
 	}
-
-	// Optional model judge (opt-in) for semantic constraint validation (E6).
-	const judge = resolveJudge(config.adapters?.judge, { logger });
 
 	// Optional residual/perplexity scorer (opt-in) for the eviction budget (E5).
 	const scorer = resolveScorer(config.adapters?.scorer, { logger });
@@ -272,58 +246,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			logger.info("todos restored", { sessionID, count: snapshot.length });
 		} catch (error) {
 			logger.info("todo restore failed", { error: String(error) });
-		}
-	};
-
-	// Deterministic integrity check: after compaction, verify the pinned clauses
-	// survived into the summary. Logs a warning for any missing clause.
-	const verifyPinnedIntegrity = async (sessionID: string): Promise<void> => {
-		const clauses = pinnedBySession.get(sessionID);
-		pinnedBySession.delete(sessionID);
-		if (!clauses || clauses.length === 0) return;
-		const fetchMessages = ctx.client.session?.messages;
-		if (!fetchMessages) return;
-		try {
-			const response = await fetchMessages({ path: { id: sessionID } });
-			const list = unwrapList(response);
-			// Validate against the newest summary: older ones can still be present.
-			const summary = lastMessageWhere(
-				list,
-				(message) => message.info?.summary === true,
-			);
-			const summaryText = summary ? partsText(summary.message.parts) : "";
-			const missing = missingClauses(summaryText, clauses);
-			if (missing.length === 0) return;
-
-			// Optional semantic validation (E6): a paraphrase may satisfy a clause
-			// the substring check flagged. Any judge error keeps the warning.
-			if (judge) {
-				try {
-					const preserved = await judgeClausesPreserved(
-						judge,
-						summaryText,
-						missing,
-					);
-					if (preserved === true) {
-						logger.info("pinned constraints judged preserved", {
-							sessionID,
-							count: missing.length,
-						});
-						return;
-					}
-				} catch (error) {
-					logger.warn("pinned semantic validation failed", {
-						error: String(error),
-					});
-				}
-			}
-
-			logger.info("pinned constraints missing from summary", {
-				sessionID,
-				missing,
-			});
-		} catch (error) {
-			logger.info("pinned integrity check failed", { error: String(error) });
 		}
 	};
 
@@ -413,40 +335,24 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			}
 
 			// In replace mode the default prompt (which carries the previous
-			// summary) is discarded, so fetch and re-inject it ourselves. Pinned
-			// constraints also need the messages, in either mode.
-			const pinnedPatterns =
-				config.pinning?.enabled === false ? [] : (config.pinning?.patterns ?? []);
+			// summary) is discarded, so fetch and re-inject it ourselves.
 			const wantSummary = config.promptMode !== "augment";
-			const wantPinned = pinnedPatterns.length > 0;
 
 			let previousSummary: string | undefined;
 			let latestAsk: string | undefined;
-			let pinnedClauses: string[] = [];
 			const fetchMessages = ctx.client.session?.messages;
-			if (fetchMessages && (wantSummary || wantPinned)) {
+			if (fetchMessages && wantSummary) {
 				try {
 					const response = await fetchMessages({ path: { id: sessionID } });
 					const list = unwrapList(response);
-					if (wantSummary) {
-						const state = slidingState.get(sessionID) ?? {};
-						previousSummary = extractPreviousSummary(list, state);
-						latestAsk = extractLatestUserAsk(list);
-						slidingState.set(sessionID, state);
-					}
-					if (wantPinned) {
-						pinnedClauses = collectPinnedClauses(
-							list as Message[],
-							pinnedPatterns,
-							config.pinning?.maxClauses ?? 20,
-						);
-					}
+					const state = slidingState.get(sessionID) ?? {};
+					previousSummary = extractPreviousSummary(list, state);
+					latestAsk = extractLatestUserAsk(list);
+					slidingState.set(sessionID, state);
 				} catch (error) {
 					logger.info("message fetch failed", { error: String(error) });
 				}
 			}
-			if (pinnedClauses.length > 0) pinnedBySession.set(sessionID, pinnedClauses);
-			else pinnedBySession.delete(sessionID);
 
 			// Render the captured task state (IDs/statuses preserved).
 			const todoSnapshot = todoPreserver.peek(sessionID);
@@ -466,7 +372,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 				previousSummary,
 				taskState,
 				focus: latestAsk,
-				pinned: renderPinned(pinnedClauses),
 			});
 
 			if (config.promptMode === "augment") {
@@ -485,7 +390,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		},
 
 		// -----------------------------------------------------------------------
-		// Compress + trim + dedup + purge + eviction (runs before OpenCode's own
+		// Compress + dedup + purge + eviction (runs before OpenCode's own
 		// 2000-char truncation).
 		// -----------------------------------------------------------------------
 		"experimental.chat.messages.transform": async (_input, output) => {
@@ -495,11 +400,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 				compressions,
 				expansions,
 				expandStore,
-				trimMap,
-				defaultTrim,
-				protectedPatterns,
-				turnProtectionEnabled,
-				protectedTurns,
 				scorer,
 				scorerMaxSamples: config.adapters?.scorer?.maxSamples,
 			});
@@ -565,7 +465,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 					semanticIndex?.clearSession(sessionID);
 					todoPreserver.clear(sessionID);
 					slidingState.delete(sessionID);
-					pinnedBySession.delete(sessionID);
 					preemption.clear(sessionID);
 					degradation.clear(sessionID);
 					autocontinue.clear(sessionID);
@@ -576,7 +475,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			if (event.type === "session.compacted") {
 				if (sessionID) {
 					degradation.markCompacted(sessionID, Date.now());
-					await verifyPinnedIntegrity(sessionID);
 					await restoreTodos(sessionID);
 				}
 				return;
@@ -652,7 +550,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			semanticIndex?.clear();
 			todoPreserver.clearAll();
 			slidingState.clear();
-			pinnedBySession.clear();
 			preemption.clearAll();
 			degradation.clearAll();
 			autocontinue.clearAll();

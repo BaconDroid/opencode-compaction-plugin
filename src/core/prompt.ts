@@ -37,7 +37,6 @@ export function buildCompactionPrompt(input: {
 	previousSummary?: string;
 	taskState?: string;
 	focus?: string;
-	pinned?: string;
 }): string {
 	const filesBlock = input.filesTouched
 		? `\n\n${input.filesTouched}`
@@ -55,10 +54,6 @@ export function buildCompactionPrompt(input: {
 		? `\n\n<latest-user-ask>\n${stripTags(input.focus, "latest-user-ask")}\n</latest-user-ask>`
 		: "";
 
-	const pinnedBlock = input.pinned
-		? `\n\n<pinned-constraints>\n${stripTags(input.pinned, "pinned-constraints")}\n</pinned-constraints>`
-		: "";
-
 	return `You are an anchored context summarization assistant for coding sessions.
 
 Summarize ONLY the conversation history you are given. The newest turns may be kept verbatim outside your summary, so focus on the older context that still matters for continuing the work.
@@ -69,8 +64,6 @@ If the prompt includes a <task-state> block, treat it as the authoritative task 
 ${taskStateBlock}
 If the prompt includes a <latest-user-ask> block, treat it as the current focus the user is waiting on; keep the summary oriented toward it.
 ${focusBlock}
-If the prompt includes a <pinned-constraints> block, copy every clause into the "Constraints & Preferences" section verbatim — never drop, weaken or paraphrase a pinned constraint.
-${pinnedBlock}
 
 Output exactly the Markdown structure shown inside <template> and keep the section order unchanged. Do not include the <template> tags in your response.
 

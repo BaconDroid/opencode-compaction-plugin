@@ -1,10 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { loadConfig } from "../src/config/config-loader.ts";
-import {
-	mergeConfig,
-	DEFAULT_CONFIG,
-	DEFAULT_TRIM,
-} from "../src/config/config.ts";
+import { mergeConfig, DEFAULT_CONFIG } from "../src/config/config.ts";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { makeTmpSetup } from "./helpers.ts";
@@ -18,13 +14,12 @@ describe("mergeConfig()", () => {
 		expect(cfg.enabled).toBe(true);
 		expect(cfg.debug).toBe(false);
 		expect(cfg.promptMode).toBe("replace");
-		expect(cfg.trim.bash).toBe(600);
 		expect(cfg.dedup).toEqual({ enabled: true, protectedTools: [] });
 		expect(cfg.purgeErrors).toMatchObject({
 			enabled: true,
 			turns: 4,
 			wholeAttempt: true,
-			cascade: false,
+			cascade: true,
 		});
 		expect(cfg.compress).toEqual({
 			protectedTurns: 3,
@@ -33,22 +28,18 @@ describe("mergeConfig()", () => {
 		});
 		expect(cfg.eviction).toMatchObject({
 			enabled: true,
-			thresholdTokens: 80000,
+			thresholdTokens: 200000,
 			protectPrologue: true,
 		});
 		expect(cfg.eviction.levels).toEqual([
 			"reasoning",
+			"bulk_output",
 			"intermediate",
 			"episode",
 		]);
-		expect(cfg.pinning).toEqual({
-			enabled: true,
-			patterns: [],
-			maxClauses: 20,
-		});
 		expect(cfg.preemptiveCompaction).toMatchObject({
 			enabled: false,
-			threshold: 0.78,
+			threshold: 0.8,
 			countCacheTokens: true,
 			minTokensSinceLast: 0,
 			cooldownMs: 60000,
@@ -59,6 +50,11 @@ describe("mergeConfig()", () => {
 			threshold: 4,
 			windowMs: 120000,
 		});
+		expect(cfg.adapters).toBeUndefined();
+		expect(cfg).not.toHaveProperty("trim");
+		expect(cfg).not.toHaveProperty("pinning");
+		expect(cfg).not.toHaveProperty("turnProtection");
+		expect(cfg).not.toHaveProperty("protectedFilePatterns");
 	});
 
 	it("keeps defaults when an override value is undefined", () => {
@@ -71,7 +67,7 @@ describe("mergeConfig()", () => {
 		a.dedup.protectedTools.push("x");
 		a.eviction.levels.push("episode");
 		expect(mergeConfig({}).dedup.protectedTools).toEqual([]);
-		expect(mergeConfig({}).eviction.levels).toHaveLength(3);
+		expect(mergeConfig({}).eviction.levels).toHaveLength(4);
 	});
 
 	it("normalizes destructive or malformed values", () => {
@@ -122,8 +118,8 @@ describe("mergeConfig()", () => {
 			degradationMonitor: "x",
 		} as any);
 		expect(cfg.dedup.enabled).toBe(true);
-		expect(cfg.eviction.levels).toHaveLength(3);
-		expect(cfg.preemptiveCompaction.threshold).toBe(0.78);
+		expect(cfg.eviction.levels).toHaveLength(4);
+		expect(cfg.preemptiveCompaction.threshold).toBe(0.8);
 		expect(cfg.degradationMonitor.threshold).toBe(4);
 	});
 
@@ -136,6 +132,7 @@ describe("mergeConfig()", () => {
 		const cfg = mergeConfig({ eviction: { levels: ["bogus"] } } as any);
 		expect(cfg.eviction.levels).toEqual([
 			"reasoning",
+			"bulk_output",
 			"intermediate",
 			"episode",
 		]);
@@ -144,10 +141,8 @@ describe("mergeConfig()", () => {
 	it("coerces non-array list config to empty and drops non-strings", () => {
 		const cfg = mergeConfig({
 			dedup: { protectedTools: "bash" },
-			pinning: { patterns: [1, "keep", null] },
 		} as any);
 		expect(cfg.dedup.protectedTools).toEqual([]);
-		expect(cfg.pinning.patterns).toEqual(["keep"]);
 	});
 
 	it("overrides top-level and strategy settings", () => {
@@ -155,22 +150,18 @@ describe("mergeConfig()", () => {
 			enabled: false,
 			debug: true,
 			promptMode: "augment",
-			trim: { bash: 1000, read: 500 },
 			dedup: { enabled: false, protectedTools: ["bash"] },
-			purgeErrors: { enabled: false, turns: 8, wholeAttempt: true, cascade: true },
+			purgeErrors: { enabled: false, turns: 8, wholeAttempt: true, cascade: false },
 		});
 		expect(cfg.enabled).toBe(false);
 		expect(cfg.debug).toBe(true);
 		expect(cfg.promptMode).toBe("augment");
-		expect(cfg.trim.bash).toBe(1000);
-		expect(cfg.trim.read).toBe(500);
-		expect(cfg.trim.write).toBe(100); // untouched default
 		expect(cfg.dedup).toEqual({ enabled: false, protectedTools: ["bash"] });
 		expect(cfg.purgeErrors).toMatchObject({
 			enabled: false,
 			turns: 8,
 			wholeAttempt: true,
-			cascade: true,
+			cascade: false,
 		});
 	});
 
@@ -179,7 +170,6 @@ describe("mergeConfig()", () => {
 		const cfg = mergeConfig({
 			adapters: {
 				embeddings: { provider: "http", url: "http://e", minScore: 0.3 },
-				judge: { provider: "command", command: "judge-cmd" },
 				scorer: { provider: "http", url: "http://s", maxSamples: 10 },
 			},
 		});
@@ -187,7 +177,6 @@ describe("mergeConfig()", () => {
 			url: "http://e",
 			minScore: 0.3,
 		});
-		expect(cfg.adapters?.judge?.command).toBe("judge-cmd");
 		expect(cfg.adapters?.scorer).toMatchObject({
 			url: "http://s",
 			maxSamples: 10,
@@ -333,39 +322,35 @@ describe("loadConfig()", () => {
 		mkdirSync(join(TMP_DIR, "xdg", "opencode"), { recursive: true });
 		writeFileSync(
 			join(TMP_DIR, "xdg", "opencode", "live-compaction.json"),
-			JSON.stringify({ trim: { bash: 111, read: 222 } }),
+			JSON.stringify({ purgeErrors: { turns: 11 } }),
 		);
-		expect(loadConfig(TMP_DIR).trim.bash).toBe(111);
+		expect(loadConfig(TMP_DIR).purgeErrors.turns).toBe(11);
 		expect(
-			loadConfig(TMP_DIR, undefined, { trim: { bash: 777 } }).trim.bash,
-		).toBe(777);
+			loadConfig(TMP_DIR, undefined, { purgeErrors: { turns: 77 } }).purgeErrors
+				.turns,
+		).toBe(77);
 		writeFileSync(
 			join(TMP_DIR, ".opencode", "live-compaction.json"),
-			JSON.stringify({ trim: { bash: 999 } }),
+			JSON.stringify({ purgeErrors: { turns: 99 } }),
 		);
-		const cfg = loadConfig(TMP_DIR, undefined, { trim: { bash: 777 } });
-		expect(cfg.trim.bash).toBe(999);
-		expect(cfg.trim.read).toBe(222);
+		const cfg = loadConfig(TMP_DIR, undefined, { purgeErrors: { turns: 77 } });
+		expect(cfg.purgeErrors.turns).toBe(99);
 	});
 });
 
 describe("DEFAULT_CONFIG", () => {
-	it("exposes the expected fields and trim tools", () => {
-		for (const key of ["enabled", "debug", "trim", "dedup", "purgeErrors"]) {
+	it("exposes the expected fields and no removed sections", () => {
+		for (const key of [
+			"enabled",
+			"debug",
+			"dedup",
+			"purgeErrors",
+			"eviction",
+			"preemptiveCompaction",
+		]) {
 			expect(DEFAULT_CONFIG).toHaveProperty(key);
 		}
-		for (const tool of [
-			"bash",
-			"write",
-			"edit",
-			"delete",
-			"read",
-			"glob",
-			"grep",
-			"list",
-			"default",
-		]) {
-			expect(DEFAULT_TRIM).toHaveProperty(tool);
-		}
+		expect(DEFAULT_CONFIG).not.toHaveProperty("trim");
+		expect(DEFAULT_CONFIG).not.toHaveProperty("pinning");
 	});
 });
