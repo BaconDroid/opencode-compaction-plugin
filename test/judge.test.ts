@@ -30,6 +30,8 @@ describe("parseVerdict()", () => {
 		expect(parseVerdict("NO, it does not")).toBe(false);
 		expect(parseVerdict("maybe")).toBeUndefined();
 		expect(parseVerdict("")).toBeUndefined();
+		// A hedging answer that says both is not usable.
+		expect(parseVerdict("yes and no")).toBeUndefined();
 	});
 });
 

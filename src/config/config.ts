@@ -435,6 +435,33 @@ function normalizeConfig(cfg: ResolvedConfig): ResolvedConfig {
 		DEFAULT_CONFIG.degradationMonitor.windowMs,
 	);
 
+	// Adapter numerics: drop invalid optional values so the provider default
+	// applies (a negative timeoutMs would fire immediately).
+	if (isPlainObject(cfg.adapters)) {
+		cfg.adapters = structuredClone(cfg.adapters);
+		const adapters = cfg.adapters as Record<string, unknown>;
+		for (const key of ["embeddings", "judge", "scorer"]) {
+			const adapter = adapters[key];
+			if (!isPlainObject(adapter)) continue;
+			for (const field of ["timeoutMs", "maxSamples"] as const) {
+				const value = adapter[field];
+				if (
+					value !== undefined &&
+					!(typeof value === "number" && Number.isFinite(value) && value > 0)
+				) {
+					delete adapter[field];
+				}
+			}
+			const minScore = adapter.minScore;
+			if (
+				minScore !== undefined &&
+				!(typeof minScore === "number" && Number.isFinite(minScore) && minScore >= 0)
+			) {
+				delete adapter.minScore;
+			}
+		}
+	}
+
 	return cfg;
 }
 

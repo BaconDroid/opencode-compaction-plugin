@@ -131,6 +131,54 @@ describe("EmbeddingVectorIndex", () => {
 		await expect(index.search("q", 5)).rejects.toThrow("vectors for");
 	});
 
+	it("skips empty-text items and drops non-positive scores", async () => {
+		// A provider-like embedder that rejects empty input.
+		const embedder: Embedder = {
+			async embed(texts) {
+				if (texts.some((t) => !t.trim())) throw new Error("empty input");
+				return texts.map((t) => (t.includes("alpha") ? [1, 0] : [0, 1]));
+			},
+		};
+		const index = new EmbeddingVectorIndex(embedder, () => [
+			{ id: "empty", text: "" },
+			{ id: "ok", text: "alpha" },
+		]);
+		const hits = await index.search("alpha", 5);
+		expect(hits.map((h) => h.id)).toEqual(["ok"]);
+	});
+
+	it("keeps separate cache entries for colliding ids with different text", async () => {
+		let calls = 0;
+		const embedder: Embedder = {
+			async embed(inputs) {
+				calls++;
+				return inputs.map(() => [1, 0]);
+			},
+		};
+		const bySession: Record<string, { id: string; text: string }[]> = {
+			A: [{ id: "x", text: "alpha" }],
+			B: [{ id: "x", text: "beta" }],
+		};
+		const index = new EmbeddingVectorIndex(
+			embedder,
+			(sessionID) => bySession[sessionID ?? ""] ?? [],
+		);
+		await index.search("q", 5, "A");
+		await index.search("q", 5, "B");
+		const before = calls;
+		await index.search("q", 5, "A");
+		await index.search("q", 5, "B");
+		// Both corpora are cached: only the two query embeddings remain.
+		expect(calls - before).toBe(2);
+
+		index.clearSession("A");
+		const afterClear = calls;
+		await index.search("q", 5, "A");
+		await index.search("q", 5, "B");
+		// A re-embeds (corpus + query); B is still cached (query only).
+		expect(calls - afterClear).toBe(3);
+	});
+
 	it("scopes the corpus by session id", async () => {
 		const bySession: Record<string, { id: string; text: string }[]> = {
 			a: [{ id: "a1", text: "alpha" }],

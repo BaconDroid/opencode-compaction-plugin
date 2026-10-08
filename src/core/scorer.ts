@@ -56,7 +56,7 @@ function collectTexts(messages: BlockMessage[], maxSamples: number): string[] {
 	for (const message of messages) {
 		for (const part of message.parts ?? []) {
 			const text = (part as { text?: unknown }).text;
-			if (typeof text !== "string" || text.length === 0) continue;
+			if (typeof text !== "string" || text.trim().length === 0) continue;
 			if (seen.has(text)) continue;
 			seen.add(text);
 			texts.push(text);

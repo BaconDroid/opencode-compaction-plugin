@@ -69,6 +69,22 @@ describe("buildScorerEstimator()", () => {
 		expect(DEFAULT_SCORER_MAX_SAMPLES).toBe(200);
 	});
 
+	it("ignores whitespace-only text parts", async () => {
+		let calls = 0;
+		const scorer: Scorer = {
+			async score() {
+				calls++;
+				return 1;
+			},
+		};
+		const messages = [
+			textMsg("assistant", "   "),
+			textMsg("assistant", "real"),
+		];
+		await buildScorerEstimator(scorer, messages as any);
+		expect(calls).toBe(1);
+	});
+
 	it("bounds the number of in-flight scorer requests", async () => {
 		let inFlight = 0;
 		let max = 0;
@@ -150,6 +166,10 @@ describe("parseScore()", () => {
 	it("throws when no numeric score is present", () => {
 		expect(() => parseScore({})).toThrow("no numeric score");
 		expect(() => parseScore("abc")).toThrow("no numeric score");
+		// Empty/whitespace is not a score (Number("") is 0).
+		expect(() => parseScore("")).toThrow("no numeric score");
+		expect(() => parseScore("   ")).toThrow("no numeric score");
+		expect(() => parseScore({ score: "  " })).toThrow("no numeric score");
 	});
 });
 

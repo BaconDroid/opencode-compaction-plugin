@@ -587,9 +587,8 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 					squashes.clear(sessionID);
 					expansions.clear(sessionID);
 					expandStore.clear(sessionID);
-					// Drop cached embeddings so a deleted session's vectors do not
-					// linger for the plugin's lifetime.
-					semanticIndex?.clear();
+					// Drop this session's cached embeddings (not every session's).
+					semanticIndex?.clearSession(sessionID);
 					todoPreserver.clear(sessionID);
 					slidingState.delete(sessionID);
 					pinnedBySession.delete(sessionID);
