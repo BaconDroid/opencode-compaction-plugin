@@ -155,4 +155,33 @@ describe("applyEviction()", () => {
 		expect(result.evictedIds).toContain("r:call-1");
 		expect(messages[1].parts[0].text).toBe("[evicted episode]");
 	});
+
+	it("is idempotent across passes (reasoning, bulk, intermediate)", () => {
+		const reasoning = [
+			userMsg("p"),
+			assistantWithReasoning("x".repeat(4000)),
+		] as any;
+		const reasoningCfg = cfg({ thresholdTokens: 1, levels: ["reasoning"] });
+		expect(applyEviction(reasoning, reasoningCfg).removed).toBe(1);
+		expect(applyEviction(reasoning, reasoningCfg).removed).toBe(0);
+
+		const bulk = [userMsg("p"), assistantWithTool("y".repeat(4000))] as any;
+		const bulkCfg = cfg({ thresholdTokens: 1, levels: ["bulk_output"] });
+		expect(applyEviction(bulk, bulkCfg).removed).toBe(1);
+		const afterFirst = (bulk[1].parts[0] as any).state.output as string;
+		expect(applyEviction(bulk, bulkCfg).removed).toBe(0);
+		expect((bulk[1].parts[0] as any).state.output).toBe(afterFirst);
+
+		const intermediate = [
+			userMsg("p"),
+			assistantWithText("a".repeat(4000)),
+			assistantWithText("last"),
+		] as any;
+		const intermediateCfg = cfg({
+			thresholdTokens: 1,
+			levels: ["intermediate"],
+		});
+		expect(applyEviction(intermediate, intermediateCfg).removed).toBe(1);
+		expect(applyEviction(intermediate, intermediateCfg).removed).toBe(0);
+	});
 });
