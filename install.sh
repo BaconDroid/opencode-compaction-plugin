@@ -64,16 +64,11 @@ fi
 # --- Create plugin directory ---
 mkdir -p "$PLUGIN_DIR"
 
-# --- Copy source files ---
-shopt -s nullglob
-src_files=("${SRC_DIR}"/*.ts)
-shopt -u nullglob
-if [[ ${#src_files[@]} -eq 0 ]]; then
+# --- Copy the source tree (preserve core/, config/, opencode/) ---
+if ! find "$SRC_DIR" -name '*.ts' -print -quit | grep -q .; then
 	error "No TypeScript sources found in ${SRC_DIR}"
 fi
-for src in "${src_files[@]}"; do
-	cp "$src" "${PLUGIN_DIR}/$(basename "$src")"
-done
+cp -R "${SRC_DIR}/." "${PLUGIN_DIR}/"
 
 # --- Create entry point barrel file ---
 # OpenCode scans .opencode/plugins/*.ts (not subdirs)
@@ -84,8 +79,8 @@ export { LiveCompactionPlugin, default } from "./live-compaction/index.ts"
 BARREL
 
 # --- Verify ---
-SRC_COUNT="${#src_files[@]}"
-FILES_COUNT="$(find "$PLUGIN_DIR" -maxdepth 1 -name '*.ts' | wc -l | tr -d ' ')"
+SRC_COUNT="$(find "$SRC_DIR" -name '*.ts' | wc -l | tr -d ' ')"
+FILES_COUNT="$(find "$PLUGIN_DIR" -name '*.ts' | wc -l | tr -d ' ')"
 if [[ "$FILES_COUNT" -lt "$SRC_COUNT" ]]; then
 	error "Expected ${SRC_COUNT} files, found ${FILES_COUNT}"
 fi
