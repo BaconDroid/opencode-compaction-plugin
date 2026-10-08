@@ -70,6 +70,14 @@ describe("FilesTouchedTracker", () => {
 		expect(manifest).toContain("- `src/copy.ts` `W`");
 	});
 
+	it("does not treat command substrings as commands", () => {
+		const tracker = new FilesTouchedTracker();
+		tracker.processToolCall("bash", {
+			command: "copycat secret.txt && confirm deploy.txt",
+		});
+		expect(tracker.size).toBe(0);
+	});
+
 	it("ignores unknown tools and malformed args", () => {
 		const tracker = new FilesTouchedTracker();
 		tracker.processToolCall("unknown_tool", { path: "src/a.ts" });
