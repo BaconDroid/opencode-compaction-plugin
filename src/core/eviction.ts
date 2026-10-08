@@ -52,10 +52,28 @@ const REASONING_MARKER = "[evicted reasoning]";
 const INTERMEDIATE_MARKER = "[evicted intermediate]";
 
 /**
- * Rough token estimate (4 chars ≈ 1 token) over text, outputs and inputs.
+ * Scripts that are roughly one token per character (CJK and the space-less
+ * Southeast Asian scripts), unlike Latin text at ~4 characters per token.
+ */
+const WIDE_CHAR =
+	/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/gu;
+
+/**
+ * Length of `text` in "weighted characters": a wide (CJK) character counts as
+ * four, so the shared `ceil(chars / 4)` rule yields ~1 token per wide character
+ * while keeping the Latin rule of thumb (~4 characters per token).
+ */
+function weightedLength(text: string): number {
+	const wide = text.length - text.replace(WIDE_CHAR, "").length;
+	return text.length + wide * 3;
+}
+
+/**
+ * Rough token estimate (4 chars ≈ 1 token) over text, outputs and inputs. Wide
+ * (CJK) characters are weighted as ~1 token each rather than a quarter.
  *
  * `resolveText` optionally overrides the estimate for a given text (e.g. a
- * scorer adapter, E5); unresolved texts keep the chars ÷ 4 heuristic.
+ * scorer adapter, E5); unresolved texts keep the heuristic.
  */
 export function estimateTokens(
 	messages: BlockMessage[],
@@ -85,18 +103,19 @@ function measurePart(
 	if (typeof part.text === "string") {
 		const scored = resolveText?.(part.text);
 		if (scored !== undefined) tokens += scored;
-		else chars += part.text.length;
+		else chars += weightedLength(part.text);
 	}
 	const state = (part as { state?: { output?: unknown; input?: unknown } })
 		.state;
 	if (state && typeof state.output === "string") {
-		chars += state.output.length;
+		chars += weightedLength(state.output);
 	}
 	if (state && state.input !== undefined && state.input !== null) {
-		chars +=
+		chars += weightedLength(
 			typeof state.input === "string"
-				? state.input.length
-				: JSON.stringify(state.input).length;
+				? state.input
+				: JSON.stringify(state.input),
+		);
 	}
 	return { chars, tokens };
 }

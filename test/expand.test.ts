@@ -237,6 +237,21 @@ describe("inspection & deterministic search", () => {
 			"No stored block matches",
 		);
 	});
+
+	it("ranks blocks by how many query terms they contain", () => {
+		const sidecar = new ExpansionSidecar();
+		sidecar.save("s", "id-1", [textMsg("user", "login flow only")], {
+			label: "b0",
+		});
+		sidecar.save("s", "id-2", [textMsg("user", "login and token refresh")], {
+			label: "b1",
+		});
+		const hits = sidecar.search("login token", 5);
+		expect(hits.map((h) => h.id)).toEqual(["id-2", "id-1"]);
+		expect(hits[0].snippet).toContain("login");
+		// A single-character / punctuation-only query matches nothing.
+		expect(sidecar.search("a !", 5)).toEqual([]);
+	});
 });
 
 describe("expand/inspect/search tool definitions", () => {

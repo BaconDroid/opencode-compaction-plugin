@@ -48,6 +48,29 @@ export function recordText(record: ExpansionRecord): string {
 	return text;
 }
 
+/** Lowercase query terms (letters/numbers/underscore), length >= 2, de-duped. */
+function queryTerms(query: string): string[] {
+	return [
+		...new Set(
+			query
+				.toLowerCase()
+				.split(/[^\p{L}\p{N}_]+/u)
+				.filter((term) => term.length >= 2),
+		),
+	];
+}
+
+/** A short context window around a match of `length` chars at `index`. */
+function snippetAround(text: string, index: number, length: number): string {
+	const start = Math.max(0, index - 40);
+	const end = Math.min(text.length, index + length + 80);
+	return (
+		(start > 0 ? "…" : "") +
+		text.slice(start, end).replace(/\s+/g, " ") +
+		(end < text.length ? "…" : "")
+	);
+}
+
 export type ExpandMode = "sticky" | "once";
 
 export interface ExpandRequest {
@@ -119,31 +142,61 @@ export class ExpansionSidecar {
 	}
 
 	/**
-	 * Deterministic keyword search over the stored originals (case-insensitive
-	 * substring, no embeddings). Returns up to `maxResults` hits with a snippet.
+	 * Deterministic keyword search over the stored originals: rank blocks by how
+	 * many query terms they contain (then total occurrences, then earliest
+	 * match). Case-insensitive, no embeddings.
 	 */
 	search(query: string, maxResults: number, sessionID?: string): SearchHit[] {
-		const needle = query.trim().toLowerCase();
-		if (!needle || maxResults <= 0) return [];
-		const hits: SearchHit[] = [];
+		if (maxResults <= 0) return [];
+		const terms = queryTerms(query);
+		if (terms.length === 0) return [];
+
+		const ranked: Array<{
+			record: ExpansionRecord;
+			matched: number;
+			occurrences: number;
+			first: number;
+			firstTerm: string;
+		}> = [];
+
 		for (const record of this.listForSession(sessionID)) {
 			const text = recordText(record);
-			const index = text.toLowerCase().indexOf(needle);
-			if (index === -1) continue;
-			const start = Math.max(0, index - 40);
-			const end = Math.min(text.length, index + needle.length + 80);
-			hits.push({
-				id: record.id,
-				label: record.label,
-				topic: record.topic,
-				snippet:
-					(start > 0 ? "…" : "") +
-					text.slice(start, end).replace(/\s+/g, " ") +
-					(end < text.length ? "…" : ""),
-			});
-			if (hits.length >= maxResults) break;
+			const lower = text.toLowerCase();
+			let matched = 0;
+			let occurrences = 0;
+			let first = -1;
+			let firstTerm = "";
+			for (const term of terms) {
+				const at = lower.indexOf(term);
+				if (at === -1) continue;
+				matched++;
+				if (first === -1 || at < first) {
+					first = at;
+					firstTerm = term;
+				}
+				let index = at;
+				while (index !== -1) {
+					occurrences++;
+					index = lower.indexOf(term, index + term.length);
+				}
+			}
+			if (matched === 0) continue;
+			ranked.push({ record, matched, occurrences, first, firstTerm });
 		}
-		return hits;
+
+		ranked.sort(
+			(a, b) =>
+				b.matched - a.matched ||
+				b.occurrences - a.occurrences ||
+				a.first - b.first,
+		);
+
+		return ranked.slice(0, maxResults).map(({ record, first, firstTerm }) => ({
+			id: record.id,
+			label: record.label,
+			topic: record.topic,
+			snippet: snippetAround(recordText(record), first, firstTerm.length),
+		}));
 	}
 
 	clear(sessionID: string): void {

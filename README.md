@@ -146,7 +146,7 @@ Restores a compressed block's original messages from the in-memory sidecar, refe
 
 ### `inspect` / `search`
 
-`inspect` lists the compressed blocks currently held in memory (labels, topics, sizes). `search` runs a **deterministic** case-insensitive keyword search over the stored originals (no embeddings) and returns matching `[bN]` labels with a snippet; use `expand` to restore a match. Both return their result directly; `search` is bounded by `compress.searchMaxResults`.
+`inspect` lists the compressed blocks currently held in memory (labels, topics, sizes). `search` runs a **deterministic** keyword search over the stored originals (no embeddings): it splits the query into terms and ranks blocks by how many terms they contain, then by total occurrences. It returns matching `[bN]` labels with a snippet; use `expand` to restore a match. Both return their result directly; `search` is bounded by `compress.searchMaxResults`.
 
 When the optional [semantic retrieval adapter](#optional-adapters-) is configured, `search` runs semantic retrieval first — embedding similarity, or a model reranker when `adapters.rerank` is set — and falls back to the keyword search on any error or when it finds nothing.
 
@@ -264,7 +264,8 @@ Each feature below lists **what** it does, its **config** keys and how it
 
 ### Residual/perplexity scoring (optional adapter)
 - **What** — eviction normally budgets with the heuristic `estimateTokens`
-  (chars ÷ 4). When `adapters.scorer` is configured, each distinct text part is
+  (Latin ≈ 4 chars/token; wide CJK characters ≈ 1 token each). When
+  `adapters.scorer` is configured, each distinct text part is
   scored once and its residual estimate replaces the heuristic for that text.
   The `opencode` provider reuses a model already configured in OpenCode (no
   endpoint or credentials handled by the plugin) and is **non-blocking**: it
@@ -478,7 +479,7 @@ bun run test:coverage
 # (OpenCode loads .ts files directly via Bun)
 ```
 
-Current coverage: **95.8% functions, 99.5% lines** (287 tests).
+Current coverage: **95.9% functions, 99.6% lines** (289 tests).
 
 ## File Structure
 

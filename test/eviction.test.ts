@@ -52,6 +52,14 @@ describe("estimateTokens()", () => {
 		] as any;
 		expect(estimateTokens(withIO)).toBe(100);
 	});
+
+	it("weights wide (CJK) characters as ~1 token each", () => {
+		// 40 CJK chars → 40 tokens (not 10); Latin stays at 4 chars/token.
+		expect(estimateTokens([assistantWithText("你".repeat(40))] as any)).toBe(40);
+		expect(
+			estimateTokens([assistantWithText(`${"你".repeat(20)}${"x".repeat(40)}`)] as any),
+		).toBe(30);
+	});
 });
 
 describe("applyEviction()", () => {
