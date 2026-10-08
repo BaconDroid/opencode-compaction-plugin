@@ -13,6 +13,8 @@ import type { CompressionStore, SquashStore } from "./compress.js";
 import {
 	applyCompressions,
 	applySquash,
+	belongsToBatch,
+	presentCallIds,
 	selectCompressions,
 } from "./compress.js";
 import type { ExpansionSidecar, ExpandStore } from "./expand.js";
@@ -20,6 +22,24 @@ import { applyExpansions } from "./expand.js";
 
 // Deferred compression requests older than this are dropped (N2).
 const DEFERRED_COMPRESSION_MAX_AGE_MS = 30 * 60 * 1000;
+
+/** Requeue requests that belong to another conversation, unless they are stale. */
+function requeueDeferred<T extends { timestamp: number }>(
+	store: { queue(sessionID: string, item: T): void },
+	sessionID: string,
+	deferred: T[],
+	logger: Logger,
+	label: string,
+): void {
+	const now = Date.now();
+	for (const req of deferred) {
+		if (now - req.timestamp < DEFERRED_COMPRESSION_MAX_AGE_MS) {
+			store.queue(sessionID, req);
+		} else {
+			logger.info(`${label} deferred request expired`, { sessionID });
+		}
+	}
+}
 
 export interface RequestDeps {
 	config: ResolvedConfig;
@@ -40,6 +60,11 @@ export function applyPendingRequests(
 		deps;
 
 	for (const sid of deps.sessionIDs) {
+		// Tool callIDs present in this batch; requests are scoped to their
+		// originating conversation so one session's queue is never applied to
+		// another session's messages.
+		const present = presentCallIds(messages);
+
 		// Compressions.
 		const requests = compressions.drain(sid);
 		if (requests.length > 0) {
@@ -82,20 +107,34 @@ export function applyPendingRequests(
 		// Squash contiguous blocks.
 		const squashRequests = squashes.drain(sid);
 		if (squashRequests.length > 0) {
-			const merged = applySquash(messages, squashRequests, {
+			const applicable = squashRequests.filter((req) =>
+				belongsToBatch(req.callID, present),
+			);
+			const merged = applySquash(messages, applicable, {
 				maxBlocks: config.compress?.maxBlocksPerSquash ?? 8,
 			});
 			if (merged > 0) {
 				logger.info("squash applied", { sessionID: sid, blocksMerged: merged });
 			}
+			requeueDeferred(
+				squashes,
+				sid,
+				squashRequests.filter((req) => !belongsToBatch(req.callID, present)),
+				logger,
+				"squash",
+			);
 		}
 
-		// Expand compressed blocks back to their originals.
+		// Expand compressed blocks back to their originals. `drain` retains
+		// sticky requests; deferred one-shot requests are requeued here.
 		const expandRequests = expandStore.drain(sid);
 		if (expandRequests.length > 0) {
+			const applicable = expandRequests.filter((req) =>
+				belongsToBatch(req.callID, present),
+			);
 			const { expanded, unmatched } = applyExpansions(
 				messages,
-				expandRequests,
+				applicable,
 				expansions,
 			);
 			if (expanded > 0) {
@@ -104,6 +143,16 @@ export function applyPendingRequests(
 			if (unmatched.length > 0) {
 				logger.info("expand unmatched", { sessionID: sid, blocks: unmatched });
 			}
+			requeueDeferred(
+				expandStore,
+				sid,
+				expandRequests.filter(
+					(req) =>
+						req.mode === "once" && !belongsToBatch(req.callID, present),
+				),
+				logger,
+				"expand",
+			);
 		}
 	}
 }
