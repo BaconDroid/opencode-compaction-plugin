@@ -115,16 +115,20 @@ export function parseJudgeResponse(payload: unknown): string {
  */
 export function parseScore(payload: unknown): number {
 	if (typeof payload === "number" && Number.isFinite(payload)) return payload;
-	if (typeof payload === "string" && Number.isFinite(Number(payload.trim()))) {
-		return Number(payload.trim());
+	// Reject empty/whitespace strings: `Number("")` is 0, which would silently
+	// report a residual of zero tokens.
+	if (typeof payload === "string" && payload.trim() !== "") {
+		const n = Number(payload.trim());
+		if (Number.isFinite(n)) return n;
 	}
 	if (payload && typeof payload === "object") {
 		const obj = payload as Record<string, unknown>;
 		for (const key of ["score", "value", "tokens", "residual"]) {
 			const value = obj[key];
 			if (typeof value === "number" && Number.isFinite(value)) return value;
-			if (typeof value === "string" && Number.isFinite(Number(value))) {
-				return Number(value);
+			if (typeof value === "string" && value.trim() !== "") {
+				const n = Number(value);
+				if (Number.isFinite(n)) return n;
 			}
 		}
 		if (Array.isArray(obj.data) && obj.data.length > 0) {
@@ -237,7 +241,11 @@ function runCommand(
 			}
 			finish(() => resolve(stdout));
 		});
-		child.stdin?.on("error", (error) => finish(() => reject(error)));
+		child.stdin?.on("error", (error) => {
+			// Kill the child so a command that closed stdin early cannot leak.
+			child.kill("SIGKILL");
+			finish(() => reject(error));
+		});
 		child.stdin?.end(body);
 	});
 }

@@ -104,6 +104,23 @@ describe("mergeConfig()", () => {
 		);
 	});
 
+	it("drops invalid adapter numerics", () => {
+		const cfg = mergeConfig({
+			adapters: {
+				embeddings: {
+					provider: "http",
+					url: "u",
+					timeoutMs: -5,
+					minScore: -1,
+				},
+				scorer: { provider: "command", command: "c", maxSamples: 0 },
+			},
+		} as any);
+		expect(cfg.adapters?.embeddings?.timeoutMs).toBeUndefined();
+		expect(cfg.adapters?.embeddings?.minScore).toBeUndefined();
+		expect(cfg.adapters?.scorer?.maxSamples).toBeUndefined();
+	});
+
 	it("tolerates malformed non-object sections", () => {
 		const cfg = mergeConfig({
 			dedup: null,
