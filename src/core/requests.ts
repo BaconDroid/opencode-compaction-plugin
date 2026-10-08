@@ -59,10 +59,9 @@ export function applyPendingRequests(
 	const { config, logger, compressions, squashes, expansions, expandStore } =
 		deps;
 
-	// Tool callIDs present in this batch; requests are scoped to their
-	// originating conversation so one session's queue is never applied to
-	// another session's messages. Invariant across sessions: compute once.
-	const present = presentCallIds(messages);
+	// Requests are scoped to their originating conversation by callID. The set
+	// of callIDs must be recomputed per stage because earlier stages
+	// (compressions) mutate `messages`.
 	const reversible = config.compress?.reversible ?? false;
 
 	for (const sid of deps.sessionIDs) {
@@ -96,6 +95,7 @@ export function applyPendingRequests(
 		// Squash contiguous blocks.
 		const squashRequests = squashes.drain(sid);
 		if (squashRequests.length > 0) {
+			const present = presentCallIds(messages);
 			const applicable = squashRequests.filter((req) =>
 				belongsToBatch(req.callID, present),
 			);
@@ -135,6 +135,7 @@ export function applyPendingRequests(
 		// sticky requests; deferred one-shot requests are requeued here.
 		const expandRequests = expandStore.drain(sid);
 		if (expandRequests.length > 0) {
+			const present = presentCallIds(messages);
 			const applicable = expandRequests.filter((req) =>
 				belongsToBatch(req.callID, present),
 			);

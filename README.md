@@ -561,7 +561,7 @@ bun run test:coverage
 # (OpenCode loads .ts files directly via Bun)
 ```
 
-Current coverage: **96.6% functions, 99.7% lines** (311 tests).
+Current coverage: **96.6% functions, 99.7% lines** (312 tests).
 
 ## File Structure
 
@@ -622,6 +622,7 @@ test/
   scorer.test.ts    — Optional scorer adapter, estimator and eviction integration
   trim.test.ts      — Tool-output trimming tests
   messages.test.ts  — Message helper tests
+  requests.test.ts  — Queued request scoping tests
   helpers.ts        — Shared test setup + recording logger
 docs/
   context-compaction-research.md — Consolidated literature catalog, categories and implementation backlog
