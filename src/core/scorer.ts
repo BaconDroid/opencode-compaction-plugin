@@ -15,6 +15,39 @@ import { estimateTokens } from "./eviction.js";
 import type { Scorer } from "./adapters.js";
 
 export const DEFAULT_SCORER_MAX_SAMPLES = 200;
+/** Maximum in-flight scorer requests, to avoid hammering the endpoint. */
+export const SCORER_CONCURRENCY = 8;
+
+/**
+ * Score every text with at most `limit` requests in flight. Resolves in input
+ * order; rejects with the first error once the in-flight requests settle.
+ */
+async function scoreAll(
+	scorer: Scorer,
+	texts: string[],
+	limit: number,
+): Promise<number[]> {
+	const results: number[] = new Array(texts.length);
+	let next = 0;
+	let failure: unknown;
+	const worker = async (): Promise<void> => {
+		while (failure === undefined) {
+			const index = next++;
+			if (index >= texts.length) return;
+			try {
+				results[index] = await scorer.score(texts[index]);
+			} catch (error) {
+				failure = error;
+				return;
+			}
+		}
+	};
+	await Promise.all(
+		Array.from({ length: Math.min(limit, texts.length) }, worker),
+	);
+	if (failure !== undefined) throw failure;
+	return results;
+}
 
 /** Distinct non-empty text parts, oldest first, bounded by `maxSamples`. */
 function collectTexts(messages: BlockMessage[], maxSamples: number): string[] {
@@ -47,7 +80,7 @@ export async function buildScorerEstimator(
 	const texts = collectTexts(messages, maxSamples);
 	if (texts.length === 0) return estimateTokens;
 
-	const values = await Promise.all(texts.map((text) => scorer.score(text)));
+	const values = await scoreAll(scorer, texts, SCORER_CONCURRENCY);
 	const scores = new Map<string, number>();
 	texts.forEach((text, index) => {
 		const value = values[index];

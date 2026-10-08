@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	DEFAULT_SCORER_MAX_SAMPLES,
+	SCORER_CONCURRENCY,
 	buildScorerEstimator,
 } from "../src/core/scorer.ts";
 import { applyEviction, estimateTokens } from "../src/core/eviction.ts";
@@ -66,6 +67,38 @@ describe("buildScorerEstimator()", () => {
 		expect(seen).toEqual(["alpha"]);
 		expect(estimate(messages as any)).toBe(21);
 		expect(DEFAULT_SCORER_MAX_SAMPLES).toBe(200);
+	});
+
+	it("bounds the number of in-flight scorer requests", async () => {
+		let inFlight = 0;
+		let max = 0;
+		const scorer: Scorer = {
+			async score() {
+				inFlight++;
+				max = Math.max(max, inFlight);
+				await new Promise((resolve) => setTimeout(resolve, 1));
+				inFlight--;
+				return 1;
+			},
+		};
+		const messages = Array.from({ length: 50 }, (_, i) =>
+			textMsg("assistant", `t${i}`),
+		);
+		await buildScorerEstimator(scorer, messages as any);
+		expect(max).toBeLessThanOrEqual(SCORER_CONCURRENCY);
+	});
+
+	it("rejects when a score fails (the caller falls back)", async () => {
+		const messages = [textMsg("assistant", "a"), textMsg("assistant", "b")];
+		const scorer: Scorer = {
+			async score(text) {
+				if (text === "b") throw new Error("boom");
+				return 1;
+			},
+		};
+		await expect(
+			buildScorerEstimator(scorer, messages as any),
+		).rejects.toThrow("boom");
 	});
 });
 
