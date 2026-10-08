@@ -51,14 +51,9 @@ describe("mergeConfig()", () => {
 			threshold: 0.78,
 			countCacheTokens: true,
 			minTokensSinceLast: 0,
-			minMessagesSinceLast: 0,
 			cooldownMs: 60000,
 		});
 		expect(cfg.preemptiveCompaction.absoluteTokenThreshold).toBeUndefined();
-		expect(cfg.preemptiveCompaction.tailGuard).toEqual({
-			enabled: false,
-			minNewToolCalls: 3,
-		});
 		expect(cfg.degradationMonitor).toMatchObject({
 			enabled: false,
 			threshold: 4,
@@ -209,8 +204,6 @@ describe("mergeConfig()", () => {
 				absoluteTokenThreshold: 330000,
 				countCacheTokens: true,
 				minTokensSinceLast: 20000,
-				minMessagesSinceLast: 6,
-				tailGuard: { enabled: true, minNewToolCalls: 5 },
 			},
 			degradationMonitor: { enabled: true, threshold: 2, windowMs: 60000 },
 		});
@@ -230,8 +223,6 @@ describe("mergeConfig()", () => {
 			absoluteTokenThreshold: 330000,
 			countCacheTokens: true,
 			minTokensSinceLast: 20000,
-			minMessagesSinceLast: 6,
-			tailGuard: { enabled: true, minNewToolCalls: 5 },
 		});
 		expect(cfg.degradationMonitor).toMatchObject({
 			enabled: true,

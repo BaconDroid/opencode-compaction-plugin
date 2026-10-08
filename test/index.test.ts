@@ -1474,43 +1474,6 @@ describe("LiveCompactionPlugin", () => {
 			});
 		});
 
-		it("honors the tail guard until enough new tool calls", async () => {
-			const summarize = mock().mockResolvedValue(undefined);
-			const list = mock().mockResolvedValue({
-				data: {
-					all: [
-						{ id: "prov", models: { "model-x": { limit: { context: 1000 } } } },
-					],
-				},
-			});
-			const hooks = await LiveCompactionPlugin(
-				{
-					...mockCtx,
-					client: {
-						app: { log: logMock() },
-						session: { summarize },
-						provider: { list },
-					},
-					directory: TMP_DIR,
-				} as any,
-				{
-					preemptiveCompaction: {
-						enabled: true,
-						tailGuard: { enabled: true, minNewToolCalls: 3 },
-					},
-				} as any,
-			);
-
-			await emit(hooks, "message.updated", { info: { sessionID: "sess-tail", role: "assistant", providerID: "prov", modelID: "model-x", finish: "stop", tokens: { input: 900 }, }, });
-			expect(summarize).not.toHaveBeenCalled();
-
-			for (let i = 0; i < 3; i++) {
-				await afterTool(hooks, "read", "sess-tail", `c${i}`, { filePath: "a.ts" });
-			}
-
-			expect(summarize).toHaveBeenCalledTimes(1);
-		});
-
 		it("does not trigger when disabled", async () => {
 			const summarize = mock().mockResolvedValue(undefined);
 			const hooks = await LiveCompactionPlugin({

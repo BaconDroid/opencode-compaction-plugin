@@ -335,7 +335,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			const { tool, sessionID, args } = input;
 			if (!sessionID || !args) return;
 
-			preemption.recordToolCall(sessionID);
 			getTracker(sessionID).processToolCall(
 				tool,
 				args as Record<string, unknown>,
@@ -598,7 +597,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 						info.modelID ?? "",
 						info.tokens,
 					);
-					preemption.recordMessage(info.sessionID);
 					// Check on turn end too, so text-only sessions still trigger.
 					void preemption.maybePreempt(info.sessionID).catch(() => {});
 				}

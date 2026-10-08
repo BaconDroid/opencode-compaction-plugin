@@ -89,13 +89,6 @@ export interface TurnProtectionConfig {
 	turns?: number;
 }
 
-export interface TailGuardConfig {
-	/** Enable the tail guard (default: false) */
-	enabled?: boolean;
-	/** Minimum new tool calls since the last compaction before compacting (default: 3) */
-	minNewToolCalls?: number;
-}
-
 export interface PreemptiveCompactionConfig {
 	/** Compact proactively before the context overflows (default: false) */
 	enabled?: boolean;
@@ -107,10 +100,6 @@ export interface PreemptiveCompactionConfig {
 	countCacheTokens?: boolean;
 	/** Minimum new tokens since the last compaction before compacting (default: 0) */
 	minTokensSinceLast?: number;
-	/** Minimum new messages since the last compaction before compacting (default: 0) */
-	minMessagesSinceLast?: number;
-	/** Do not compact until enough new tool calls accumulated since the last compaction */
-	tailGuard?: TailGuardConfig;
 	/** Minimum delay between proactive compactions, in ms (default: 60000) */
 	cooldownMs?: number;
 	/** Override the model context limit (otherwise resolved from the provider) */
@@ -300,11 +289,6 @@ export const DEFAULT_CONFIG: Required<
 		threshold: 0.78,
 		countCacheTokens: true,
 		minTokensSinceLast: 0,
-		minMessagesSinceLast: 0,
-		tailGuard: {
-			enabled: false,
-			minNewToolCalls: 3,
-		},
 		cooldownMs: 60000,
 	},
 	degradationMonitor: {
@@ -411,10 +395,6 @@ function normalizeConfig(cfg: ResolvedConfig): ResolvedConfig {
 	cfg.preemptiveCompaction.minTokensSinceLast = nonNegative(
 		cfg.preemptiveCompaction.minTokensSinceLast,
 		DEFAULT_CONFIG.preemptiveCompaction.minTokensSinceLast,
-	);
-	cfg.preemptiveCompaction.minMessagesSinceLast = nonNegative(
-		cfg.preemptiveCompaction.minMessagesSinceLast,
-		DEFAULT_CONFIG.preemptiveCompaction.minMessagesSinceLast,
 	);
 	const threshold = cfg.preemptiveCompaction.threshold;
 	if (typeof threshold !== "number" || !(threshold > 0 && threshold <= 1)) {

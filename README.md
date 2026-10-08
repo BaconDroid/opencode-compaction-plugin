@@ -31,7 +31,7 @@ OpenCode's built-in compaction produces a 7-section summary. This plugin replace
 | **Block folding** | None | Stable `[bN]` block labels for compressed ranges |
 | **Reversible compression** | None | **expand** (sticky or one-shot) restores the original messages from an in-memory sidecar |
 | **Trigger threshold** | Fixed | Hybrid `min(contextLimit × ratio, absolute)`; cache tokens counted by default |
-| **Deterministic gates** | None | Optional minimum new tokens/messages since the last compaction + tail guard |
+| **Deterministic gate** | None | Optional minimum new tokens since the last compaction |
 | **Graduated eviction** | None | LLM-free `reasoning → intermediate → episode`, oldest first (never evicts `user` turns) |
 | **Task state** | "Goal" prose | `<task-state>` block with todo ids/statuses/priorities |
 | **Constraint pinning** | None | Opt-in patterns whose clauses survive trim/dedup/purge/eviction and are re-injected verbatim (`<pinned-constraints>`) |
@@ -291,10 +291,10 @@ Each feature below lists **what** it does, its **config** keys and how it
 
 ### Preemptive compaction
 - **What** — calls `session.summarize` before the context is full.
-- **Config** — `preemptiveCompaction.{enabled,threshold,absoluteTokenThreshold,countCacheTokens,minTokensSinceLast,minMessagesSinceLast,tailGuard,cooldownMs,contextLimit}`.
+- **Config** — `preemptiveCompaction.{enabled,threshold,absoluteTokenThreshold,countCacheTokens,minTokensSinceLast,cooldownMs,contextLimit}`.
 - **Interactions** — threshold is `min(contextLimit × threshold, absoluteTokenThreshold)`;
-  the gates compose (AND) with the cooldown; the same usage signal gates the
-  `compress` tool (below 50% of the threshold defers it).
+  the optional `minTokensSinceLast` gate composes (AND) with the cooldown; the
+  same usage signal gates the `compress` tool (below 50% of the threshold defers it).
 
 ### Degradation monitor
 - **What** — post-compaction diagnostic: warns when assistant messages stop producing text.
@@ -448,8 +448,6 @@ Precedence, low to high: **defaults → global file → plugin options → proje
         // "absoluteTokenThreshold": 330000,  // optional ceiling; unset by default
         "countCacheTokens": true,     // count cache read/write tokens (matches OpenCode's context size)
         "minTokensSinceLast": 0,      // gate: minimum new tokens since the last compaction
-        "minMessagesSinceLast": 0,    // gate: minimum new messages since the last compaction
-        "tailGuard": { "enabled": false, "minNewToolCalls": 3 },  // gate: minimum new tool calls
         "cooldownMs": 60000,          // minimum delay between proactive compactions
         // "contextLimit": 200000,    // optional override; unset by default (resolved from the provider)
     },

@@ -1,8 +1,8 @@
 /**
  * Proactive (preemptive) compaction: the pure trigger logic plus the controller
- * that owns the per-session usage cache, the deterministic gate counters and the
- * context-limit cache, and decides when to call `session.summarize`. Also gates
- * the model-driven `compress` tool on the same usage signal.
+ * that owns the per-session usage cache and the context-limit cache, and decides
+ * when to call `session.summarize`. Also gates the model-driven `compress` tool
+ * on the same usage signal.
  */
 
 import type { ResolvedConfig } from "../config/config.js";
@@ -71,34 +71,21 @@ export function resolveTriggerThreshold(
 	return relative;
 }
 
-export interface TriggerGateInput {
+export function shouldTriggerPreemptiveCompaction(input: {
+	totalInputTokens: number;
+	contextLimit: number;
+	threshold: number;
+	/** Absolute token threshold; when set it replaces the ratio comparison. */
+	thresholdTokens?: number;
+	cooldownMs: number;
+	now: number;
+	lastCompactionAt?: number;
+	inProgress: boolean;
 	/** Config gate: minimum new tokens since the last compaction (0 disables). */
 	minTokensSinceLast?: number;
-	/** Config gate: minimum new messages since the last compaction (0 disables). */
-	minMessagesSinceLast?: number;
 	/** Measured new tokens since the last compaction (undefined = unknown). */
 	tokensSinceLast?: number;
-	/** Measured new messages since the last compaction. */
-	messagesSinceLast?: number;
-	/** Config gate: do not compact until enough new tool calls accumulated. */
-	tailGuard?: { enabled?: boolean; minNewToolCalls?: number };
-	/** Measured new tool calls since the last compaction. */
-	newToolCallsSinceLast?: number;
-}
-
-export function shouldTriggerPreemptiveCompaction(
-	input: {
-		totalInputTokens: number;
-		contextLimit: number;
-		threshold: number;
-		/** Absolute token threshold; when set it replaces the ratio comparison. */
-		thresholdTokens?: number;
-		cooldownMs: number;
-		now: number;
-		lastCompactionAt?: number;
-		inProgress: boolean;
-	} & TriggerGateInput,
-): boolean {
+}): boolean {
 	if (input.inProgress) return false;
 	if (!Number.isFinite(input.contextLimit) || input.contextLimit <= 0) {
 		return false;
@@ -109,24 +96,11 @@ export function shouldTriggerPreemptiveCompaction(
 	) {
 		return false;
 	}
-	// Deterministic gates (composition AND, cf. selfcompact).
+	// Deterministic token gate (composition AND, cf. selfcompact).
 	if (
 		input.minTokensSinceLast &&
 		(input.tokensSinceLast ?? Number.POSITIVE_INFINITY) <
 			input.minTokensSinceLast
-	) {
-		return false;
-	}
-	if (
-		input.minMessagesSinceLast &&
-		(input.messagesSinceLast ?? Number.POSITIVE_INFINITY) <
-			input.minMessagesSinceLast
-	) {
-		return false;
-	}
-	if (
-		input.tailGuard?.enabled &&
-		(input.newToolCallsSinceLast ?? 0) < (input.tailGuard.minNewToolCalls ?? 0)
 	) {
 		return false;
 	}
@@ -144,10 +118,8 @@ export class PreemptionController {
 	private usage = new Map<string, CachedUsage>();
 	private inProgress = new Set<string>();
 	private last = new Map<string, number>();
-	// Counters since the last proactive compaction (deterministic gates).
+	// Post-compaction token baseline for the "new tokens since last" gate.
 	private tokensAtLast = new Map<string, number>();
-	private toolCallsSince = new Map<string, number>();
-	private messagesSince = new Map<string, number>();
 	// Sessions that compacted and are waiting for the next usage report to set
 	// the post-compaction token baseline.
 	private pendingBaseline = new Set<string>();
@@ -167,22 +139,6 @@ export class PreemptionController {
 		private readonly config: ResolvedConfig,
 		private readonly logger: Logger,
 	) {}
-
-	/** Count a tool call since the last compaction. */
-	recordToolCall(sessionID: string): void {
-		this.toolCallsSince.set(
-			sessionID,
-			(this.toolCallsSince.get(sessionID) ?? 0) + 1,
-		);
-	}
-
-	/** Count a completed assistant turn since the last compaction. */
-	recordMessage(sessionID: string): void {
-		this.messagesSince.set(
-			sessionID,
-			(this.messagesSince.get(sessionID) ?? 0) + 1,
-		);
-	}
 
 	recordUsage(
 		sessionID: string,
@@ -204,8 +160,6 @@ export class PreemptionController {
 			);
 		}
 	}
-
-
 
 	/**
 	 * Eligibility gate for the model-driven `compress` tool: when proactive
@@ -264,15 +218,11 @@ export class PreemptionController {
 				threshold: cfg.threshold,
 				thresholdTokens,
 				minTokensSinceLast: cfg.minTokensSinceLast,
-				minMessagesSinceLast: cfg.minMessagesSinceLast,
 				tokensSinceLast: this.pendingBaseline.has(sessionID)
 					? 0
 					: baseline === undefined
 						? undefined
 						: Math.max(0, effectiveTokens - baseline),
-				messagesSinceLast: this.messagesSince.get(sessionID) ?? 0,
-				tailGuard: cfg.tailGuard,
-				newToolCallsSinceLast: this.toolCallsSince.get(sessionID) ?? 0,
 				cooldownMs: cfg.cooldownMs,
 				now: Date.now(),
 				lastCompactionAt: this.last.get(sessionID),
@@ -309,8 +259,6 @@ export class PreemptionController {
 			this.last.set(sessionID, Date.now());
 			this.pendingBaseline.add(sessionID);
 			this.tokensAtLast.delete(sessionID);
-			this.toolCallsSince.set(sessionID, 0);
-			this.messagesSince.set(sessionID, 0);
 			this.logger.info("preemptive compaction triggered", {
 				sessionID,
 				ratio: effectiveTokens / limit,
@@ -325,8 +273,6 @@ export class PreemptionController {
 		this.inProgress.delete(sessionID);
 		this.last.delete(sessionID);
 		this.tokensAtLast.delete(sessionID);
-		this.toolCallsSince.delete(sessionID);
-		this.messagesSince.delete(sessionID);
 		this.pendingBaseline.delete(sessionID);
 		this.generation.set(sessionID, (this.generation.get(sessionID) ?? 0) + 1);
 	}
@@ -336,8 +282,6 @@ export class PreemptionController {
 		this.inProgress.clear();
 		this.last.clear();
 		this.tokensAtLast.clear();
-		this.toolCallsSince.clear();
-		this.messagesSince.clear();
 		this.pendingBaseline.clear();
 		this.contextLimitCache.clear();
 		this.generation.clear();

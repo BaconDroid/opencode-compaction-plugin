@@ -135,7 +135,7 @@ describe("shouldTriggerPreemptiveCompaction()", () => {
 		).toBe(true);
 	});
 
-	it("applies the deterministic gates", () => {
+	it("applies the deterministic token gate", () => {
 		// token gate (unknown measurement is allowed)
 		expect(
 			shouldTriggerPreemptiveCompaction({
@@ -158,48 +158,6 @@ describe("shouldTriggerPreemptiveCompaction()", () => {
 				...base,
 				totalInputTokens: 900,
 				minTokensSinceLast: 20_000,
-			}),
-		).toBe(true);
-		// message gate
-		expect(
-			shouldTriggerPreemptiveCompaction({
-				...base,
-				totalInputTokens: 900,
-				minMessagesSinceLast: 6,
-				messagesSinceLast: 3,
-			}),
-		).toBe(false);
-		expect(
-			shouldTriggerPreemptiveCompaction({
-				...base,
-				totalInputTokens: 900,
-				minMessagesSinceLast: 6,
-				messagesSinceLast: 6,
-			}),
-		).toBe(true);
-		// tail guard
-		expect(
-			shouldTriggerPreemptiveCompaction({
-				...base,
-				totalInputTokens: 900,
-				tailGuard: { enabled: true, minNewToolCalls: 3 },
-				newToolCallsSinceLast: 1,
-			}),
-		).toBe(false);
-		expect(
-			shouldTriggerPreemptiveCompaction({
-				...base,
-				totalInputTokens: 900,
-				tailGuard: { enabled: true, minNewToolCalls: 3 },
-				newToolCallsSinceLast: 3,
-			}),
-		).toBe(true);
-		expect(
-			shouldTriggerPreemptiveCompaction({
-				...base,
-				totalInputTokens: 900,
-				tailGuard: { enabled: false, minNewToolCalls: 3 },
-				newToolCallsSinceLast: 0,
 			}),
 		).toBe(true);
 	});
