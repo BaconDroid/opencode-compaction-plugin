@@ -51,7 +51,7 @@ Message indices are 0-based. Use the message order visible in the conversation.`
 				.enum(["granular", "deep"])
 				.optional()
 				.describe(
-					"granular compresses a single message; deep compresses a whole range (default: deep)",
+					"Descriptive label for the block; does not change the selected range",
 				),
 			start: tool.schema
 				.number()

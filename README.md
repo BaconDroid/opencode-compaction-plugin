@@ -14,7 +14,7 @@ OpenCode's built-in compaction produces a 7-section summary. This plugin replace
 | **User intent** | Captured as "Goal" | **Chronological intent trail** with direction changes |
 | **Dead ends** | Not tracked | **Dedicated section** for failed approaches |
 | **Task continuity** | Not captured | **Exact moment** where work stopped |
-| **Files touched** | "Relevant Files" section | **Operation-badge manifest** (`R`=read, `E`=edit, `W`=write, `D`=delete) |
+| **Files touched** | "Relevant Files" section | **Operation-badge manifest** (`R`=read, `E`=edit, `W`=write, `M`=move, `D`=delete) |
 | **Prompt** | Hardcoded | Replaced via plugin hook (customizable) |
 | **Tool output size** | Unmanaged | **Configurable per-tool trim limits** |
 | **Duplicate tool calls** | Kept as-is | **Deduplicated** (keeps only latest) |
@@ -30,7 +30,7 @@ OpenCode's built-in compaction produces a 7-section summary. This plugin replace
 | **Compress tool** | None | Model-driven **compress** tool (deterministic span selection — no indices needed) |
 | **Block folding** | None | Stable `[bN]` block labels + **squash** tool to merge contiguous blocks |
 | **Reversible compression** | None | **expand** (sticky) / **recall** (one-shot) restore the original messages from an in-memory sidecar |
-| **Trigger threshold** | Fixed | Hybrid `min(contextLimit × ratio, absolute)`; cache tokens excluded by default |
+| **Trigger threshold** | Fixed | Hybrid `min(contextLimit × ratio, absolute)`; cache tokens counted by default |
 | **Deterministic gates** | None | Optional minimum new tokens/messages since the last compaction + tail guard |
 | **Graduated eviction** | None | LLM-free `reasoning → bulk output → intermediate → episode` (never evicts `user` turns) |
 | **Task state** | "Goal" prose | `<task-state>` block with todo ids/statuses/priorities |
@@ -71,7 +71,12 @@ Add to your `opencode.json`:
 
 ```bash
 git clone https://github.com/BaconDroid/opencode-live-compaction.git
-cp -r opencode-live-compaction/src/* .opencode/plugins/live-compaction/
+mkdir -p .opencode/plugins/live-compaction
+cp -r opencode-live-compaction/src/. .opencode/plugins/live-compaction/
+# OpenCode scans .opencode/plugins/*.ts (not subdirs), so add the barrel entry:
+cat > .opencode/plugins/live-compaction.ts <<'EOF'
+export { LiveCompactionPlugin, default } from "./live-compaction/index.ts"
+EOF
 ```
 
 ## How it works
@@ -98,7 +103,7 @@ Runs on every message batch sent to the LLM. Applies the following strategies in
 4. **Tool output trimming** — Truncates long tool outputs (bash, read, grep, etc.) to configurable limits. Keeps the *end* of the output (usually has the result/error).
 5. **Deduplication** — When the same tool is called with the same args multiple times, only the latest output is kept. Earlier duplicates are replaced with a short marker.
 6. **Error purge** — Purges the whole failed attempt (input + output, with a compact error extract) from errored tool calls older than N turns; `cascade` extends the purge to calls that depend on a purged call.
-7. **Graduated eviction** — Opt-in, LLM-free eviction (`reasoning → bulk output → intermediate → episode`) once the estimated budget is exceeded; user turns are never evicted.
+7. **Graduated eviction** — LLM-free eviction (`reasoning → bulk output → intermediate → episode`) once the estimated budget is exceeded; user turns are never evicted.
 
 Messages matching `pinning.patterns` are **pinned**: they are skipped by trimming, dedup, purge and eviction, and their clauses are re-injected into the compaction prompt as `<pinned-constraints>`.
 
@@ -132,7 +137,7 @@ The plugin exposes six model-driven tools for proactive context management: `com
 |---|---|---|
 | `topic` | string | Short label (3-5 words) for display |
 | `summary` | string | Complete technical summary replacing the range |
-| `scale` | `"granular"` \| `"deep"` *(optional)* | One message vs. a whole range (default: deep) |
+| `scale` | `"granular"` \| `"deep"` *(optional)* | Descriptive label for the block (does not change span selection) |
 | `start` | number *(optional, legacy)* | Explicit start message index (inclusive, 0-based) |
 | `end` | number *(optional, legacy)* | Explicit end message index (inclusive, 0-based) |
 
@@ -148,7 +153,7 @@ Restore a compressed block's original messages from the in-memory sidecar, refer
 
 ### `inspect` / `search`
 
-`inspect` lists the compressed blocks currently held in memory (labels, topics, sizes). `search` runs a **deterministic** case-insensitive keyword search over the stored originals (no embeddings) and returns matching `[bN]` labels with a snippet; use `expand`/`recall` to restore a match. Both return their result directly and are bounded by `compress.searchMaxResults`.
+`inspect` lists the compressed blocks currently held in memory (labels, topics, sizes). `search` runs a **deterministic** case-insensitive keyword search over the stored originals (no embeddings) and returns matching `[bN]` labels with a snippet; use `expand`/`recall` to restore a match. Both return their result directly; `search` is bounded by `compress.searchMaxResults`.
 
 When the optional [semantic retrieval adapter](#optional-adapters-) is configured, `search` runs embedding-based retrieval first and falls back to the keyword search on any error or when it finds nothing.
 
@@ -235,8 +240,8 @@ Each feature below lists **what** it does, its **config** keys and how it
 - **Config** — none (replace mode).
 
 ### Files-touched manifest
-- **What** — records read/write/edit/delete and emits an operation-badge manifest
-  (`R`/`W`/`E`/`D`).
+- **What** — records read/write/edit/move/delete and emits an operation-badge
+  manifest (`R`/`W`/`E`/`M`/`D`).
 - **Config** — none.
 
 ### Tool-output trimming
@@ -248,7 +253,8 @@ Each feature below lists **what** it does, its **config** keys and how it
 ### Turn protection
 - **What** — never trims tool outputs from the last N user turns.
 - **Config** — `turnProtection.{enabled,turns}`.
-- **Interactions** — overrides trimming; the same window also protects purge.
+- **Interactions** — overrides trimming only; error purge uses its own
+  `purgeErrors.turns` window.
 
 ### Protected file patterns
 - **What** — never trims outputs from files matching glob patterns.
@@ -264,8 +270,9 @@ Each feature below lists **what** it does, its **config** keys and how it
 - **What** — purges the whole failed attempt after N turns (`wholeAttempt`: input
   + output + compact error extract) and `cascade`s to dependent calls.
 - **Config** — `purgeErrors.{enabled,turns,wholeAttempt,cascade}`.
-- **Interactions** — recent turns and pinned messages are never purged; `cascade`
-  only fires for calls actually purged.
+- **Interactions** — errored calls within the last `purgeErrors.turns` user turns
+  and pinned messages are never purged; `cascade` only fires for calls actually
+  purged.
 
 ### Graduated eviction
 - **What** — LLM-free eviction (`reasoning → bulk_output → intermediate → episode`)
@@ -341,7 +348,7 @@ Override rules:
 - **Pinned messages** (`pinning.patterns`) are skipped by **all** of trim, dedup,
   purge and eviction.
 - **Protected files** (`protectedFilePatterns`) affect **trimming** only; **recent
-  turns** (`turnProtection`) affect trimming and purge.
+  turns** (`turnProtection`) affect trimming, while purge uses `purgeErrors.turns`.
 - The protect mechanisms are independent and compose — a message is skipped if any applies.
 
 ## Configuration
@@ -437,13 +444,13 @@ Precedence, low to high: **defaults → global file → plugin options → proje
     "preemptiveCompaction": {
         "enabled": false,             // enable to compact before the context is full
         "threshold": 0.78,            // fraction of the context limit that triggers it
-        "absoluteTokenThreshold": 0,  // optional absolute ceiling (0 = disabled); min(ratio, this) wins
+        // "absoluteTokenThreshold": 330000,  // optional ceiling; unset by default
         "countCacheTokens": true,     // count cache read/write tokens (matches OpenCode's context size)
         "minTokensSinceLast": 0,      // gate: minimum new tokens since the last compaction
         "minMessagesSinceLast": 0,    // gate: minimum new messages since the last compaction
         "tailGuard": { "enabled": false, "minNewToolCalls": 3 },  // gate: minimum new tool calls
         "cooldownMs": 60000,          // minimum delay between proactive compactions
-        "contextLimit": 200000        // optional override; else resolved from the provider
+        // "contextLimit": 200000,    // optional override; unset by default (resolved from the provider)
     },
 
     // How the compaction prompt is applied: "replace" (default) or "augment"
@@ -586,6 +593,7 @@ src/
     degradation-monitor.ts — post-compaction degradation diagnostic
     preemption.ts       — trigger logic + preemption controller
     glob.ts             — glob matcher for protected files
+    store.ts            — per-session keyed queue shared by the compression stores
   config/
     config.ts           — config types, defaults and merge
     config-loader.ts    — JSON/JSONC file loading
@@ -614,10 +622,11 @@ test/
   scorer.test.ts    — Optional scorer adapter, estimator and eviction integration
   trim.test.ts      — Tool-output trimming tests
   messages.test.ts  — Message helper tests
+  helpers.ts        — Shared test setup + recording logger
 docs/
   context-compaction-research.md — Consolidated literature catalog, categories and implementation backlog
   research-prompt.md — Reusable prompt (bootstrap + sweep) to reproduce the literature sweep
-  ensembles/        — Per-ensemble research, plans and results (E1–E5)
+  ensembles/        — Per-ensemble research, plans and results (E1–E3, E5) plus adapter/options docs
 ```
 
 ## Compatibility
