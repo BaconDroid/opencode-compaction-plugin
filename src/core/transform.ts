@@ -14,7 +14,7 @@ import {
 } from "./strategies.js";
 import { applyEviction } from "./eviction.js";
 import { applyPendingRequests, type RequestDeps } from "./requests.js";
-import { buildScorerEstimator } from "./scorer.js";
+import { buildScorerEstimator, type ScorerEstimator } from "./scorer.js";
 import type { Scorer } from "./adapters.js";
 import type { Message } from "../types.js";
 
@@ -119,10 +119,10 @@ export async function applyTransform(
 	if (config.eviction?.enabled) {
 		// Optional scorer adapter (E5): calibrate the budget estimate. Any error
 		// falls back to the heuristic `estimateTokens` (fail-open).
-		let estimate: ((messages: Message[]) => number) | undefined;
+		let scorerEstimator: ScorerEstimator | undefined;
 		if (deps.scorer) {
 			try {
-				estimate = await buildScorerEstimator(
+				scorerEstimator = await buildScorerEstimator(
 					deps.scorer,
 					messages,
 					deps.scorerMaxSamples,
@@ -139,7 +139,8 @@ export async function applyTransform(
 			levels: config.eviction.levels,
 			protectPrologue: config.eviction.protectPrologue ?? true,
 			protectedIndices: pinnedIndices,
-			estimate,
+			estimate: scorerEstimator,
+			resolveText: scorerEstimator?.resolveText,
 		});
 		if (removed > 0) {
 			logger.info("eviction applied", { removed, ids: evictedIds.length });

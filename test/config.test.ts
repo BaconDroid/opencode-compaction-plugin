@@ -38,7 +38,6 @@ describe("mergeConfig()", () => {
 		});
 		expect(cfg.eviction.levels).toEqual([
 			"reasoning",
-			"bulk_output",
 			"intermediate",
 			"episode",
 		]);
@@ -77,7 +76,7 @@ describe("mergeConfig()", () => {
 		a.dedup.protectedTools.push("x");
 		a.eviction.levels.push("episode");
 		expect(mergeConfig({}).dedup.protectedTools).toEqual([]);
-		expect(mergeConfig({}).eviction.levels).toHaveLength(4);
+		expect(mergeConfig({}).eviction.levels).toHaveLength(3);
 	});
 
 	it("normalizes destructive or malformed values", () => {
@@ -128,7 +127,7 @@ describe("mergeConfig()", () => {
 			degradationMonitor: "x",
 		} as any);
 		expect(cfg.dedup.enabled).toBe(true);
-		expect(cfg.eviction.levels).toHaveLength(4);
+		expect(cfg.eviction.levels).toHaveLength(3);
 		expect(cfg.preemptiveCompaction.threshold).toBe(0.78);
 		expect(cfg.degradationMonitor.threshold).toBe(4);
 	});
@@ -142,7 +141,6 @@ describe("mergeConfig()", () => {
 		const cfg = mergeConfig({ eviction: { levels: ["bogus"] } } as any);
 		expect(cfg.eviction.levels).toEqual([
 			"reasoning",
-			"bulk_output",
 			"intermediate",
 			"episode",
 		]);

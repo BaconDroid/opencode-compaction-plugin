@@ -32,7 +32,7 @@ OpenCode's built-in compaction produces a 7-section summary. This plugin replace
 | **Reversible compression** | None | **expand** (sticky or one-shot) restores the original messages from an in-memory sidecar |
 | **Trigger threshold** | Fixed | Hybrid `min(contextLimit × ratio, absolute)`; cache tokens counted by default |
 | **Deterministic gates** | None | Optional minimum new tokens/messages since the last compaction + tail guard |
-| **Graduated eviction** | None | LLM-free `reasoning → bulk output → intermediate → episode` (never evicts `user` turns) |
+| **Graduated eviction** | None | LLM-free `reasoning → intermediate → episode`, oldest first (never evicts `user` turns) |
 | **Task state** | "Goal" prose | `<task-state>` block with todo ids/statuses/priorities |
 | **Constraint pinning** | None | Opt-in patterns whose clauses survive trim/dedup/purge/eviction and are re-injected verbatim (`<pinned-constraints>`) |
 | **Focus** | None | `<latest-user-ask>` block anchored to the current user request |
@@ -102,7 +102,7 @@ Runs on every message batch sent to the LLM. Applies the following strategies in
 3. **Tool output trimming** — Truncates long tool outputs (bash, read, grep, etc.) to configurable limits. Keeps the *end* of the output (usually has the result/error).
 4. **Deduplication** — When the same tool is called with the same args multiple times, only the latest output is kept. Earlier duplicates are replaced with a short marker.
 5. **Error purge** — Purges the whole failed attempt (input + output, with a compact error extract) from errored tool calls older than N turns; the opt-in `cascade` (default off) extends the purge to calls that depend on a purged call.
-6. **Graduated eviction** — LLM-free eviction (`reasoning → bulk output → intermediate → episode`) once the estimated budget is exceeded; user turns are never evicted.
+6. **Graduated eviction** — LLM-free eviction (`reasoning → intermediate → episode`) once the estimated budget is exceeded; user turns are never evicted.
 
 Messages matching `pinning.patterns` are **pinned**: they are skipped by trimming, dedup, purge and eviction, and their clauses are re-injected into the compaction prompt as `<pinned-constraints>`.
 
@@ -206,7 +206,7 @@ Each feature below lists **what** it does, its **config** keys and how it
 | Protected files | `protectedFilePatterns` | `[]` |
 | Deduplication | `dedup.{enabled,protectedTools}` | `true`, `[]` |
 | Error purge | `purgeErrors.{enabled,turns,wholeAttempt,cascade}` | `true`, `4`, `true`, `false` |
-| Graduated eviction | `eviction.{enabled,thresholdTokens,levels,protectPrologue}` | `true`, `80000`, all levels, `true` |
+| Graduated eviction | `eviction.{enabled,thresholdTokens,levels,protectPrologue}` | `true`, `80000`, reasoning/intermediate/episode, `true` |
 | Constraint pinning | `pinning.{enabled,patterns,maxClauses}` | `true`, `[]`, `20` |
 | Preemptive compaction | `preemptiveCompaction.*` | disabled |
 | Degradation monitor | `degradationMonitor.{enabled,threshold,windowMs}` | `false`, `4`, `120000` |
@@ -276,8 +276,9 @@ Each feature below lists **what** it does, its **config** keys and how it
   purged.
 
 ### Graduated eviction
-- **What** — LLM-free eviction (`reasoning → bulk_output → intermediate → episode`)
-  once the estimated budget is exceeded.
+- **What** — LLM-free eviction (`reasoning → intermediate → episode`) once the
+  estimated budget is exceeded. `bulk_output` remains available in `levels` but
+  is off by default (redundant with `trim`).
 - **Config** — `eviction.{enabled,thresholdTokens,levels,protectPrologue}`.
 - **Interactions** — runs last; never evicts user turns, the prologue or pinned messages.
 
@@ -423,7 +424,7 @@ Precedence, low to high: **defaults → global file → plugin options → proje
     "eviction": {
         "enabled": true,
         "thresholdTokens": 80000,   // Eviction runs only above this estimated budget
-        "levels": ["reasoning", "bulk_output", "intermediate", "episode"],
+        "levels": ["reasoning", "intermediate", "episode"],   // "bulk_output" is opt-in (redundant with trim)
         "protectPrologue": true     // Never evict the first message
     },
 

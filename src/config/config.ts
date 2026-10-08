@@ -76,7 +76,7 @@ export interface EvictionSettings {
 	enabled?: boolean;
 	/** Token budget; eviction runs only above it (default: 80000) */
 	thresholdTokens?: number;
-	/** Levels to apply, in order (default: reasoning, bulk_output, intermediate, episode) */
+	/** Levels to apply, in order (default: reasoning, intermediate, episode) */
 	levels?: EvictionLevel[];
 	/** Protect the prologue from eviction (default: true) */
 	protectPrologue?: boolean;
@@ -283,7 +283,7 @@ export const DEFAULT_CONFIG: Required<
 	eviction: {
 		enabled: true,
 		thresholdTokens: 80000,
-		levels: ["reasoning", "bulk_output", "intermediate", "episode"],
+		levels: ["reasoning", "intermediate", "episode"],
 		protectPrologue: true,
 	},
 	pinning: {
@@ -346,7 +346,6 @@ export function deepMerge(
 
 const EVICTION_LEVELS: EvictionLevel[] = [
 	"reasoning",
-	"bulk_output",
 	"intermediate",
 	"episode",
 ];

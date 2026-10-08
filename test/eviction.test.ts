@@ -185,3 +185,83 @@ describe("applyEviction()", () => {
 		expect(applyEviction(intermediate, intermediateCfg).removed).toBe(0);
 	});
 });
+
+describe("applyEviction() exact running total", () => {
+	// The O(n) path (running char/token totals) must be byte-for-byte equivalent
+	// to the old re-estimating path (opaque `estimate`), with and without a scorer
+	// resolver. Compare pass0 (legacy) vs pass1 (exact) over many inputs.
+	const scenarios = (): any[] => [
+		[
+			userMsg("p"),
+			assistantWithReasoning("r".repeat(4000)),
+			assistantWithText("m".repeat(4000)),
+			assistantWithTool("t".repeat(4000), "c1"),
+		],
+		[
+			assistantWithReasoning("a".repeat(123)),
+			assistantWithTool("b".repeat(5000), "c2"),
+			assistantWithText("c".repeat(1500)),
+			assistantWithText("d".repeat(50)),
+		],
+	];
+	const thresholds = [1, 50, 300, 900, 1200, 5000, 100000];
+	const levelSets: Array<any> = [
+		["reasoning", "bulk_output", "intermediate", "episode"],
+		["bulk_output", "episode"],
+		["intermediate"],
+	];
+
+	it("matches the re-estimating path without a scorer", () => {
+		for (const messages of scenarios()) {
+			for (const thresholdTokens of thresholds) {
+				for (const levels of levelSets) {
+					const base = { enabled: true, thresholdTokens, levels };
+					const legacyMsgs = structuredClone(messages);
+					const exactMsgs = structuredClone(messages);
+					const legacy = applyEviction(legacyMsgs, {
+						...base,
+						estimate: estimateTokens,
+					});
+					const exact = applyEviction(exactMsgs, { ...base });
+					expect(exact.removed).toBe(legacy.removed);
+					expect(exact.evictedIds).toEqual(legacy.evictedIds);
+					expect(JSON.stringify(exactMsgs)).toBe(JSON.stringify(legacyMsgs));
+				}
+			}
+		}
+	});
+
+	it("matches the re-estimating path with a scorer resolver", () => {
+		const scores = new Map<string, number>([
+			["r".repeat(4000), 500],
+			["m".repeat(4000), 12],
+			["[evicted reasoning]", 3],
+			["[evicted intermediate]", 4],
+		]);
+		const resolveText = (text: string) => scores.get(text);
+		const blackbox = (msgs: any[]) => estimateTokens(msgs, resolveText);
+		for (const messages of scenarios()) {
+			for (const thresholdTokens of thresholds) {
+				for (const levels of levelSets) {
+					const legacyMsgs = structuredClone(messages);
+					const exactMsgs = structuredClone(messages);
+					const legacy = applyEviction(legacyMsgs, {
+						enabled: true,
+						thresholdTokens,
+						levels,
+						estimate: blackbox,
+					});
+					const exact = applyEviction(exactMsgs, {
+						enabled: true,
+						thresholdTokens,
+						levels,
+						resolveText,
+					});
+					expect(exact.removed).toBe(legacy.removed);
+					expect(exact.evictedIds).toEqual(legacy.evictedIds);
+					expect(JSON.stringify(exactMsgs)).toBe(JSON.stringify(legacyMsgs));
+				}
+			}
+		}
+	});
+});

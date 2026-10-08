@@ -2,8 +2,9 @@
  * Graduated, LLM-free eviction for opencode-live-compaction.
  *
  * When the estimated token budget is exceeded, evict content in a deterministic
- * order — reasoning, bulk tool output, intermediate text, then whole episodes —
- * oldest first. User turns and the prologue are never evicted.
+ * order — reasoning, intermediate text, then whole episodes — oldest first
+ * (`bulk_output` is opt-in and off by default, being redundant with trimming).
+ * User turns and the prologue are never evicted.
  */
 
 import { blockId, type BlockMessage } from "./blocks.js";
@@ -26,10 +27,19 @@ export interface EvictionConfig {
 	/** Message indices never evicted (e.g. pinned constraints). */
 	protectedIndices?: Set<number>;
 	/**
-	 * Token estimator; defaults to the heuristic `estimateTokens`. An optional
-	 * scorer adapter supplies a calibrated estimator (E5).
+	 * Opaque token estimator. Kept for callers that only have a black-box
+	 * estimate; when supplied without `resolveText`, eviction re-estimates the
+	 * whole array after each change (O(n²)). Prefer `resolveText`, which lets
+	 * eviction maintain the running total exactly in O(n).
 	 */
 	estimate?: (messages: BlockMessage[]) => number;
+	/**
+	 * Optional per-text token resolver (e.g. a scorer adapter, E5). When set,
+	 * eviction tracks the exact char/token totals itself using the same
+	 * accounting as `estimateTokens` (including this resolver), so tool outputs
+	 * and unscored texts keep the heuristic.
+	 */
+	resolveText?: (text: string) => number | undefined;
 }
 
 export interface EvictionResult {
@@ -41,7 +51,6 @@ export interface EvictionResult {
 
 const DEFAULT_LEVELS: EvictionLevel[] = [
 	"reasoning",
-	"bulk_output",
 	"intermediate",
 	"episode",
 ];
@@ -61,29 +70,70 @@ export function estimateTokens(
 	messages: BlockMessage[],
 	resolveText?: (text: string) => number | undefined,
 ): number {
+	const totals = measureMessages(messages, resolveText);
+	return Math.ceil(totals.chars / 4) + totals.tokens;
+}
+
+/** Raw char/token totals under the same accounting as `estimateTokens`. */
+interface TokenTotals {
+	chars: number;
+	tokens: number;
+}
+
+/** Contribution of a single part, mirroring `estimateTokens` exactly. */
+function measurePart(
+	part: BlockMessage["parts"][number],
+	resolveText?: (text: string) => number | undefined,
+): TokenTotals {
+	let chars = 0;
+	let tokens = 0;
+	if (typeof part.text === "string") {
+		const scored = resolveText?.(part.text);
+		if (scored !== undefined) tokens += scored;
+		else chars += part.text.length;
+	}
+	const state = (part as { state?: { output?: unknown; input?: unknown } })
+		.state;
+	if (state && typeof state.output === "string") {
+		chars += state.output.length;
+	}
+	if (state && state.input !== undefined && state.input !== null) {
+		chars +=
+			typeof state.input === "string"
+				? state.input.length
+				: JSON.stringify(state.input).length;
+	}
+	return { chars, tokens };
+}
+
+/** Contribution of a single message (sum of its parts). */
+function measureMessage(
+	message: BlockMessage,
+	resolveText?: (text: string) => number | undefined,
+): TokenTotals {
+	let chars = 0;
+	let tokens = 0;
+	for (const part of message.parts ?? []) {
+		const totals = measurePart(part, resolveText);
+		chars += totals.chars;
+		tokens += totals.tokens;
+	}
+	return { chars, tokens };
+}
+
+/** Contribution of an array of messages. */
+function measureMessages(
+	messages: BlockMessage[],
+	resolveText?: (text: string) => number | undefined,
+): TokenTotals {
 	let chars = 0;
 	let tokens = 0;
 	for (const message of messages) {
-		for (const part of message.parts ?? []) {
-			if (typeof part.text === "string") {
-				const scored = resolveText?.(part.text);
-				if (scored !== undefined) tokens += scored;
-				else chars += part.text.length;
-			}
-			const state = (part as { state?: { output?: unknown; input?: unknown } })
-				.state;
-			if (state && typeof state.output === "string") {
-				chars += state.output.length;
-			}
-			if (state && state.input !== undefined && state.input !== null) {
-				chars +=
-					typeof state.input === "string"
-						? state.input.length
-						: JSON.stringify(state.input).length;
-			}
-		}
+		const totals = measureMessage(message, resolveText);
+		chars += totals.chars;
+		tokens += totals.tokens;
 	}
-	return Math.ceil(chars / 4) + tokens;
+	return { chars, tokens };
 }
 
 /** Returns true when something was evicted (so the budget can be re-checked). */
@@ -173,13 +223,23 @@ export function applyEviction(
 ): EvictionResult {
 	const result: EvictionResult = { removed: 0, evictedIds: [] };
 	if (!cfg.enabled) return result;
-	const estimate = cfg.estimate ?? estimateTokens;
-	if (estimate(messages) <= cfg.thresholdTokens) return result;
+
+	// Exact path: maintain the running char/token totals in O(n) using the same
+	// accounting as `estimateTokens` (so a scorer's per-text resolver is honoured
+	// without re-scanning the whole array after every change). The opaque
+	// `estimate`-only path is kept for callers that cannot provide a resolver.
+	const exact = !cfg.estimate || cfg.resolveText !== undefined;
+	let totals: TokenTotals | undefined = exact
+		? measureMessages(messages, cfg.resolveText)
+		: undefined;
+	const budgetReached = (): boolean => {
+		if (totals) return Math.ceil(totals.chars / 4) + totals.tokens <= cfg.thresholdTokens;
+		return (cfg.estimate as (m: BlockMessage[]) => number)(messages) <= cfg.thresholdTokens;
+	};
+	if (budgetReached()) return result;
 
 	const levels = cfg.levels ?? DEFAULT_LEVELS;
 	const prologueEnd = cfg.protectPrologue === false ? 0 : 1;
-	const budgetReached = (): boolean =>
-		estimate(messages) <= cfg.thresholdTokens;
 	const isProtected = (index: number): boolean =>
 		index < prologueEnd ||
 		messages[index]?.info?.role === "user" ||
@@ -196,27 +256,28 @@ export function applyEviction(
 	for (const level of levels) {
 		if (budgetReached()) break;
 
-		if (level === "episode") {
-			// Oldest assistant tool episodes first.
-			for (let i = 0; i < messages.length; i++) {
-				if (isProtected(i)) continue;
-				// Only re-estimate the budget after an actual eviction.
-				if (evictEpisode(messages[i], result) && budgetReached()) break;
-			}
-			continue;
-		}
-
 		for (let i = 0; i < messages.length; i++) {
 			if (isProtected(i)) continue;
+			const before = totals
+				? measureMessage(messages[i], cfg.resolveText)
+				: undefined;
 			let changed = false;
-			if (level === "reasoning") {
+			if (level === "episode") {
+				changed = evictEpisode(messages[i], result);
+			} else if (level === "reasoning") {
 				changed = evictReasoning(messages[i], result);
 			} else if (level === "bulk_output") {
 				changed = evictBulkOutput(messages[i], result);
 			} else if (level === "intermediate") {
 				changed = evictIntermediate(messages[i], result, lastAssistantIndex, i);
 			}
-			if (changed && budgetReached()) break;
+			if (!changed) continue;
+			if (before && totals) {
+				const after = measureMessage(messages[i], cfg.resolveText);
+				totals.chars -= before.chars - after.chars;
+				totals.tokens -= before.tokens - after.tokens;
+			}
+			if (budgetReached()) break;
 		}
 	}
 

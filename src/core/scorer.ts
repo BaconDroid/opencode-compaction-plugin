@@ -71,6 +71,24 @@ const scoreCache = new WeakMap<Scorer, Map<string, number>>();
 const MAX_SCORE_CACHE = 1000;
 
 /**
+ * A synchronous estimator plus the per-text resolver it uses. The resolver lets
+ * the eviction pass maintain an exact running budget without re-scanning.
+ */
+export type ScorerEstimator = ((
+	messages: BlockMessage[],
+) => number) & {
+	resolveText: (text: string) => number | undefined;
+};
+
+/** Estimator that scores nothing (unresolved texts keep the heuristic). */
+function heuristicEstimator(): ScorerEstimator {
+	return Object.assign(
+		(messages: BlockMessage[]) => estimateTokens(messages),
+		{ resolveText: (_text: string) => undefined },
+	);
+}
+
+/**
  * Build a synchronous token estimator calibrated by the scorer. Each distinct
  * text is scored once and the result is cached across transforms; unresolved
  * texts and tool outputs keep the heuristic. Falls back to `estimateTokens`
@@ -80,9 +98,9 @@ export async function buildScorerEstimator(
 	scorer: Scorer,
 	messages: BlockMessage[],
 	maxSamples = DEFAULT_SCORER_MAX_SAMPLES,
-): Promise<(messages: BlockMessage[]) => number> {
+): Promise<ScorerEstimator> {
 	const texts = collectTexts(messages, maxSamples);
-	if (texts.length === 0) return estimateTokens;
+	if (texts.length === 0) return heuristicEstimator();
 
 	let cache = scoreCache.get(scorer);
 	if (!cache) {
@@ -116,7 +134,11 @@ export async function buildScorerEstimator(
 		cache.delete(oldest);
 	}
 
-	if (scores.size === 0) return estimateTokens;
+	if (scores.size === 0) return heuristicEstimator();
 
-	return (msgs) => estimateTokens(msgs, (text) => scores.get(text));
+	const resolveText = (text: string): number | undefined => scores.get(text);
+	return Object.assign(
+		(msgs: BlockMessage[]) => estimateTokens(msgs, resolveText),
+		{ resolveText },
+	);
 }
