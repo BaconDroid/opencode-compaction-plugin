@@ -1,7 +1,7 @@
 /**
  * The `experimental.chat.messages.transform` pipeline: applies the queued
- * compress/squash/expand requests, then trimming, dedup, error purge and
- * (opt-in) graduated eviction — before OpenCode's own truncation.
+ * compress/expand requests, then trimming, dedup, error purge and (opt-in)
+ * graduated eviction — before OpenCode's own truncation.
  */
 
 import { getRecentTurnIndices } from "./messages.js";
@@ -34,7 +34,7 @@ export async function applyTransform(
 	messages: Message[],
 	deps: TransformDeps,
 ): Promise<void> {
-	// 0. Apply pending compression/squash/expand requests.
+	// 0. Apply pending compression/expand requests.
 	applyPendingRequests(messages, deps);
 
 	const { config, logger } = deps;

@@ -29,7 +29,6 @@ describe("mergeConfig()", () => {
 		expect(cfg.compress).toEqual({
 			protectedTurns: 3,
 			reversible: false,
-			maxBlocksPerSquash: 8,
 			searchMaxResults: 5,
 		});
 		expect(cfg.eviction).toMatchObject({
@@ -204,7 +203,7 @@ describe("mergeConfig()", () => {
 
 	it("overrides compress, eviction, preemptive and degradation settings", () => {
 		const cfg = mergeConfig({
-			compress: { protectedTurns: 5, reversible: false, maxBlocksPerSquash: 2 },
+			compress: { protectedTurns: 5, reversible: false },
 			eviction: { enabled: true, thresholdTokens: 1000, levels: ["episode"] },
 			preemptiveCompaction: {
 				enabled: true,
@@ -220,7 +219,6 @@ describe("mergeConfig()", () => {
 		expect(cfg.compress).toEqual({
 			protectedTurns: 5,
 			reversible: false,
-			maxBlocksPerSquash: 2,
 			searchMaxResults: 5,
 		});
 		expect(cfg.eviction).toMatchObject({

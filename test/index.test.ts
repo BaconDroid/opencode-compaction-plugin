@@ -675,7 +675,6 @@ describe("LiveCompactionPlugin", () => {
 			expect(opencodeConfig.permission).toEqual({
 				bash: "ask",
 				compress: "allow",
-				squash: "allow",
 				expand: "allow",
 				inspect: "allow",
 				search: "allow",
@@ -690,7 +689,6 @@ describe("LiveCompactionPlugin", () => {
 			await (hooks as any).config(opencodeConfig);
 			expect(opencodeConfig.permission).toEqual({
 				compress: "deny",
-				squash: "allow",
 				expand: "allow",
 				inspect: "allow",
 				search: "allow",
@@ -700,10 +698,10 @@ describe("LiveCompactionPlugin", () => {
 		it("respects an explicit deny for any plugin tool", async () => {
 			const hooks = await getHooks();
 			const opencodeConfig: Record<string, unknown> = {
-				permission: { squash: "deny" },
+				permission: { inspect: "deny" },
 			};
 			await (hooks as any).config(opencodeConfig);
-			expect((opencodeConfig.permission as any).squash).toBe("deny");
+			expect((opencodeConfig.permission as any).inspect).toBe("deny");
 			expect((opencodeConfig.permission as any).compress).toBe("allow");
 		});
 
@@ -714,7 +712,7 @@ describe("LiveCompactionPlugin", () => {
 			};
 			await (hooks as any).config(opencodeConfig);
 			expect((opencodeConfig.permission as any).compress).toBe("ask");
-			expect((opencodeConfig.permission as any).squash).toBe("allow");
+			expect((opencodeConfig.permission as any).expand).toBe("allow");
 		});
 	});
 
@@ -1042,36 +1040,6 @@ describe("LiveCompactionPlugin", () => {
 			expect(messages[1].parts[0].text).toBe("next task");
 		});
 
-		it("exposes a squash tool and merges contiguous blocks", async () => {
-			const hooks = await getHooks();
-			expect((hooks as any).tool.squash).toBeDefined();
-
-			await afterTool(hooks, "squash", "sess-squash", "c-sq", { from: "b0", to: "b1", topic: "Merged", summary: "combined" });
-
-			const block = (id: string, label: string, body: string) => ({
-				info: { role: "assistant" },
-				parts: [
-					{
-						type: "text",
-						text: `<compressed-block id="${id}" label="${label}">${body}</compressed-block>`,
-					},
-				],
-			});
-			// The squash tool call must be part of the conversation for the
-			// request to be scoped to it.
-			const first = block("a", "b0", "[b0]\n\nfirst");
-			first.parts.push({
-				type: "tool",
-				tool: "squash",
-				callID: "c-sq",
-				state: { output: "ok" },
-			} as never);
-			const messages = [first, block("b", "b1", "[b1]\n\nsecond")];
-			await transform(hooks, messages);
-			expect(messages).toHaveLength(1);
-			expect(messages[0].parts[0].text).toContain("combined");
-		});
-
 		it("does not apply a compression to a different session's messages", async () => {
 			const hooks = await getHooks();
 
@@ -1105,48 +1073,6 @@ describe("LiveCompactionPlugin", () => {
 			await transform(hooks, own);
 			expect(own).toHaveLength(2); // 3 - 2 + 1 = 2
 			expect((own[0].parts[0] as any).text).toContain("sumA");
-		});
-
-		it("does not apply a squash to a different session's messages", async () => {
-			const hooks = await getHooks();
-			await afterTool(hooks, "squash", "sess-S", "c-S", {
-				from: "b0",
-				to: "b1",
-				topic: "M",
-				summary: "sumS",
-			});
-			const block = (id: string, label: string, body: string) => ({
-				info: { role: "assistant" },
-				parts: [
-					{
-						type: "text",
-						text: `<compressed-block id="${id}" label="${label}">${body}</compressed-block>`,
-					},
-				],
-			});
-
-			// Other conversation (no c-S): untouched.
-			const other = [
-				block("a", "b0", "[b0]\n\nfirst"),
-				block("b", "b1", "[b1]\n\nsecond"),
-			];
-			await transform(hooks, other);
-			expect(other).toHaveLength(2);
-
-			// Owning conversation (contains c-S): merged.
-			const own = [
-				block("a", "b0", "[b0]\n\nfirst"),
-				block("b", "b1", "[b1]\n\nsecond"),
-			];
-			own[0].parts.push({
-				type: "tool",
-				tool: "squash",
-				callID: "c-S",
-				state: { output: "ok" },
-			} as never);
-			await transform(hooks, own);
-			expect(own).toHaveLength(1);
-			expect(own[0].parts[0].text).toContain("sumS");
 		});
 
 		it("does not apply an expand to a different session's messages", async () => {
@@ -1382,84 +1308,6 @@ describe("LiveCompactionPlugin", () => {
 			const second = rebuild();
 			await transform(hooks, second);
 			expect((second[0].parts[0] as any).text).toContain("[b0]");
-		});
-
-		it("expands a squashed reversible block to all originals", async () => {
-			const hooks = await LiveCompactionPlugin(mockCtx as any, {
-				compress: { reversible: true },
-			} as any);
-			const messages = [
-				{
-					info: { role: "user", timestamp: 1 },
-					parts: [{ type: "text", text: "u0" }],
-				},
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "a1" }] },
-				{
-					info: { role: "user", timestamp: 2 },
-					parts: [{ type: "text", text: "u2" }],
-				},
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "a3" }] },
-				{
-					info: { role: "user" },
-					parts: [
-						{ type: "text", text: "keep" },
-						{
-							type: "tool",
-							tool: "squash",
-							callID: "c-sq",
-							state: { output: "ok" },
-						},
-						{
-							type: "tool",
-							tool: "expand",
-							callID: "c-exp",
-							state: { output: "ok" },
-						},
-					],
-				},
-			];
-
-			await afterTool(hooks, "compress", "s", "", {
-				topic: "A",
-				start: 0,
-				end: 1,
-				summary: "first",
-			});
-			await transform(hooks, messages);
-			await afterTool(hooks, "compress", "s", "", {
-				topic: "B",
-				start: 1,
-				end: 2,
-				summary: "second",
-			});
-			await transform(hooks, messages);
-			expect(messages).toHaveLength(3); // blockA, blockB, keep
-
-			await afterTool(hooks, "squash", "s", "c-sq", {
-				from: "b0",
-				to: "b1",
-				topic: "M",
-				summary: "merged",
-			});
-			await transform(hooks, messages);
-			expect(messages).toHaveLength(2); // merged, keep
-			// The merged-away block's record is dropped: inspect lists one block.
-			const report = await (hooks as any).tool.inspect.execute(
-				{},
-				{ sessionID: "s" },
-			);
-			expect(report.trim().split("\n")).toHaveLength(1);
-
-			await afterTool(hooks, "expand", "s", "c-exp", { block: "b0" });
-			await transform(hooks, messages);
-			expect(messages).toHaveLength(5);
-			expect(messages.map((m) => (m.parts[0] as any).text)).toEqual([
-				"u0",
-				"a1",
-				"u2",
-				"a3",
-				"keep",
-			]);
 		});
 
 		it("drops stale deferred compressions", async () => {

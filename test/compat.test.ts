@@ -13,7 +13,6 @@ const TMP_DIR = join(import.meta.dirname, "__tmp_compat_test");
 
 const PLUGIN_TOOLS = [
 	"compress",
-	"squash",
 	"expand",
 	"inspect",
 	"search",

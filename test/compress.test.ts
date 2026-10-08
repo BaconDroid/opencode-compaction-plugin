@@ -1,16 +1,10 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import {
 	CompressionStore,
-	SquashStore,
 	applyCompressions,
-	applySquash,
 	type CompressRequest,
-	type SquashRequest,
 } from "../src/core/compress.ts";
-import {
-	buildCompressToolDef,
-	buildSquashToolDef,
-} from "../src/opencode/tools.ts";
+import { buildCompressToolDef } from "../src/opencode/tools.ts";
 
 // ---------------------------------------------------------------------------
 // buildCompressToolDef
@@ -395,133 +389,5 @@ describe("applyCompressions()", () => {
 		expect(msgs[0].parts[0].text).toContain('label="b0"');
 		expect(msgs[0].parts[0].text).toContain("[b0]");
 		expect(msgs[0].parts[0].text).toContain('id="u:7"');
-	});
-});
-
-// ---------------------------------------------------------------------------
-// squash
-// ---------------------------------------------------------------------------
-
-describe("buildSquashToolDef()", () => {
-	it("exposes from/to/topic/summary and executes", async () => {
-		const def = buildSquashToolDef();
-		expect(def.description).toContain("Merge");
-		expect(def.args).toHaveProperty("from");
-		expect(def.args).toHaveProperty("to");
-		expect(def.args).toHaveProperty("topic");
-		expect(def.args).toHaveProperty("summary");
-		expect(
-			await def.execute(
-				{ from: "b0", to: "b1", topic: "T", summary: "S" },
-				{} as any,
-			),
-		).toContain("b0-b1");
-	});
-});
-
-describe("SquashStore", () => {
-	it("queues, drains and clears per session", () => {
-		const store = new SquashStore();
-		store.queue("s", {
-			from: "b0",
-			to: "b1",
-			topic: "T",
-			summary: "S",
-			timestamp: 1,
-		});
-		expect(store.drain("s")).toHaveLength(1);
-		expect(store.drain("s")).toHaveLength(0);
-		store.queue("s", {
-			from: "b0",
-			to: "b1",
-			topic: "T",
-			summary: "S",
-			timestamp: 1,
-		});
-		store.clear("s");
-		expect(store.drain("s")).toHaveLength(0);
-	});
-});
-
-describe("applySquash()", () => {
-	function blockMsg(id: string, topic: string, text: string) {
-		return {
-			info: { role: "assistant" },
-			parts: [
-				{
-					type: "text",
-					text: `<compressed-block id="${id}" label="x" topic="${topic}">${text}</compressed-block>`,
-				},
-			],
-		};
-	}
-
-	it("merges two contiguous blocks into one", () => {
-		const msgs = [
-			blockMsg("a", "A", "[b0]\n\nfirst"),
-			blockMsg("b", "B", "[b1]\n\nsecond"),
-		];
-		const merged = applySquash(msgs as any, [
-			{ from: "b0", to: "b1", topic: "Merged", summary: "combined", timestamp: 1 },
-		]);
-		expect(merged).toBe(2);
-		expect(msgs).toHaveLength(1);
-		expect(msgs[0].parts[0].text).toContain("combined");
-		expect(msgs[0].parts[0].text).toContain('squashed="true"');
-	});
-
-	it("reports the merged id and constituent ids", () => {
-		const msgs = [
-			blockMsg("a", "A", "[b0]\n\nfirst"),
-			blockMsg("b", "B", "[b1]\n\nsecond"),
-		];
-		const records: Array<{ id: string; constituentIds: string[] }> = [];
-		applySquash(
-			msgs as any,
-			[
-				{
-					from: "b0",
-					to: "b1",
-					topic: "Merged",
-					summary: "combined",
-					timestamp: 1,
-				},
-			],
-			{
-				record: (info) =>
-					records.push({ id: info.id, constituentIds: info.constituentIds }),
-			},
-		);
-		expect(records).toEqual([{ id: "a", constituentIds: ["a", "b"] }]);
-	});
-
-	it("refuses ambiguous requests (single, non-contiguous, unknown, over max)", () => {
-		const single = [blockMsg("a", "A", "[b0]\n\nfirst")];
-		const nonContiguous = [
-			blockMsg("a", "A", "[b0]\n\nfirst"),
-			{ info: { role: "user" }, parts: [{ type: "text", text: "interrupt" }] },
-			blockMsg("b", "B", "[b1]\n\nsecond"),
-		];
-		const three = [
-			blockMsg("a", "A", "[b0]\n\na"),
-			blockMsg("b", "B", "[b1]\n\nb"),
-			blockMsg("c", "C", "[b2]\n\nc"),
-		];
-		const req = (from: string, to: string): SquashRequest => ({
-			from,
-			to,
-			topic: "T",
-			summary: "S",
-			timestamp: 1,
-		});
-		const cases: Array<[unknown[], SquashRequest, { maxBlocks: number }?]> = [
-			[single, req("b0", "b0")],
-			[nonContiguous, req("b0", "b1")],
-			[single, req("b0", "b9")],
-			[three, req("b0", "b2"), { maxBlocks: 2 }],
-		];
-		for (const [msgs, request, opts] of cases) {
-			expect(applySquash(msgs as any, [request], opts)).toBe(0);
-		}
 	});
 });

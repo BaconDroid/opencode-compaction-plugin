@@ -17,7 +17,6 @@ import type { Message } from "../types.js";
 import { KeyedQueue } from "./store.js";
 import {
 	blockId,
-	orderCompressBlocks,
 	parseCompressBlocks,
 	renderBlockBody,
 	selectDeterministicSpan,
@@ -215,100 +214,6 @@ export function applyCompressions(
 	}
 
 	return totalReplaced;
-}
-
-// ---------------------------------------------------------------------------
-// Squash: merge contiguous compressed blocks into one
-// ---------------------------------------------------------------------------
-
-export interface SquashRequest {
-	/** First block label (`bN`) to merge. */
-	from: string;
-	/** Last block label (`bN`) to merge. */
-	to: string;
-	summary: string;
-	topic: string;
-	timestamp: number;
-	callID?: string;
-}
-
-/** Per-plugin-instance store of pending squash requests, keyed by session. */
-export class SquashStore extends KeyedQueue<SquashRequest> {}
-
-export interface ApplySquashOptions {
-	/** Maximum number of blocks merged by a single squash (default: 8). */
-	maxBlocks?: number;
-	/**
-	 * Called before the merge, with the durable id of the merged block and the
-	 * ids of its constituents (for combining reversible sidecar records).
-	 */
-	record?: (info: {
-		id: string;
-		label: string;
-		topic: string;
-		constituentIds: string[];
-	}) => void;
-}
-
-/**
- * Merge contiguous compressed blocks into a single block.
- *
- * Fail-closed: refuses requests that reference unknown labels, fewer than two
- * blocks, more than `maxBlocks`, or blocks that are not contiguous messages.
- * Returns the number of blocks merged.
- */
-export function applySquash(
-	messages: Message[],
-	requests: SquashRequest[],
-	opts: ApplySquashOptions = {},
-): number {
-	const maxBlocks = opts.maxBlocks ?? 8;
-	let merged = 0;
-
-	for (const req of requests) {
-		const blocks = orderCompressBlocks(parseCompressBlocks(messages));
-		const fromIndex = blocks.findIndex((b) => b.label === req.from);
-		const toIndex = blocks.findIndex((b) => b.label === req.to);
-		if (fromIndex === -1 || toIndex === -1 || fromIndex >= toIndex) continue;
-
-		const selected = blocks.slice(fromIndex, toIndex + 1);
-		if (selected.length < 2 || selected.length > maxBlocks) continue;
-
-		// Require the selected blocks to occupy adjacent messages.
-		const contiguous = selected.every(
-			(block, i) => i === 0 || block.index === selected[i - 1].index + 1,
-		);
-		if (!contiguous) continue;
-
-		const firstIndex = selected[0].index;
-		const lastIndex = selected[selected.length - 1].index;
-		const prevRole = messages[firstIndex - 1]?.info?.role;
-		const role = prevRole === "user" ? "assistant" : "user";
-		const label = selected[0].label as string;
-		const id = selected[0].id;
-
-		opts.record?.({
-			id,
-			label,
-			topic: req.topic,
-			constituentIds: selected.map((block) => block.id),
-		});
-
-		const summaryMessage: Message = {
-			info: { role },
-			parts: [
-				{
-					type: "text",
-					text: `<compressed-block id="${escapeAttr(id)}" label="${label}" topic="${escapeAttr(req.topic)}" range="${firstIndex}-${lastIndex}" count="${selected.length}" squashed="true">\n${renderBlockBody(label, req.summary)}\n</compressed-block>`,
-				},
-			],
-		};
-
-		messages.splice(firstIndex, lastIndex - firstIndex + 1, summaryMessage);
-		merged += selected.length;
-	}
-
-	return merged;
 }
 
 function escapeAttr(s: string): string {

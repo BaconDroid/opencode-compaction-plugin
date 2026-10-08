@@ -1,6 +1,6 @@
 /**
- * Applies the queued model-driven requests (compress / squash / expand) to the
- * message array.
+ * Applies the queued model-driven requests (compress / expand) to the message
+ * array.
  *
  * The transform hook receives no session id, so a compression is scoped by the
  * callID of its compress tool call: a request queued for one session is never
@@ -9,10 +9,9 @@
 
 import type { ResolvedConfig } from "../config/config.js";
 import type { Logger, Message } from "../types.js";
-import type { CompressionStore, SquashStore } from "./compress.js";
+import type { CompressionStore } from "./compress.js";
 import {
 	applyCompressions,
-	applySquash,
 	belongsToBatch,
 	presentCallIds,
 	selectCompressions,
@@ -45,7 +44,6 @@ export interface RequestDeps {
 	config: ResolvedConfig;
 	logger: Logger;
 	compressions: CompressionStore;
-	squashes: SquashStore;
 	expansions: ExpansionSidecar;
 	expandStore: ExpandStore;
 }
@@ -54,8 +52,7 @@ export function applyPendingRequests(
 	messages: Message[],
 	deps: RequestDeps,
 ): void {
-	const { config, logger, compressions, squashes, expansions, expandStore } =
-		deps;
+	const { config, logger, compressions, expansions, expandStore } = deps;
 
 	// Requests are scoped to their originating conversation by callID. The set
 	// of callIDs must be recomputed after compressions, which mutate `messages`.
@@ -64,7 +61,7 @@ export function applyPendingRequests(
 	// Only sessions with a queued request need processing (not every tracked
 	// session), keeping the per-transform cost proportional to pending work.
 	const sessions = new Set<string>();
-	for (const store of [compressions, squashes, expandStore]) {
+	for (const store of [compressions, expandStore]) {
 		for (const sid of store.sessions()) sessions.add(sid);
 	}
 
@@ -96,48 +93,11 @@ export function applyPendingRequests(
 			requeueDeferred(compressions, sid, deferred, logger, "compress");
 		}
 
-		// Squash and expand run after compressions; neither changes tool
-		// callIDs, so one present-set scan serves both.
-		const squashRequests = squashes.drain(sid);
+		// Expand runs after compressions; it does not change tool callIDs, so a
+		// single present-set scan suffices.
 		const expandRequests = expandStore.drain(sid);
-		if (squashRequests.length === 0 && expandRequests.length === 0) continue;
+		if (expandRequests.length === 0) continue;
 		const present = presentCallIds(messages);
-
-		if (squashRequests.length > 0) {
-			const applicable = squashRequests.filter((req) =>
-				belongsToBatch(req.callID, present),
-			);
-			const merged = applySquash(messages, applicable, {
-				maxBlocks: config.compress?.maxBlocksPerSquash ?? 8,
-				record: reversible
-					? ({ id, label, topic, constituentIds }) => {
-							// Combine the constituents' originals so expanding the merged
-							// block restores the whole history, not just the first block.
-							const originals = constituentIds.flatMap(
-								(blockId) => expansions.get(blockId, sid)?.original ?? [],
-							);
-							if (originals.length > 0) {
-								expansions.save(sid, id, originals, { label, topic });
-							}
-							// Drop the merged-away records so inspect/search do not report
-							// phantom blocks.
-							for (const blockId of constituentIds) {
-								if (blockId !== id) expansions.delete(sid, blockId);
-							}
-						}
-					: undefined,
-			});
-			if (merged > 0) {
-				logger.info("squash applied", { sessionID: sid, blocksMerged: merged });
-			}
-			requeueDeferred(
-				squashes,
-				sid,
-				squashRequests.filter((req) => !belongsToBatch(req.callID, present)),
-				logger,
-				"squash",
-			);
-		}
 
 		// Expand compressed blocks back to their originals. `drain` retains
 		// sticky requests; deferred one-shot requests are requeued here.

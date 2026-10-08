@@ -79,35 +79,6 @@ Message indices are 0-based. Use the message order visible in the conversation.`
 }
 
 /**
- * Build the `squash` tool definition: merge two or more contiguous compressed
- * blocks (referenced by their `bN` labels) into a single block.
- */
-export function buildSquashToolDef() {
-	return tool({
-		description: `Merge contiguous compressed blocks into a single block.
-
-Use this after several compressions have accumulated to collapse them into one
-coherent summary. Reference blocks by their [bN] labels. The blocks must be
-adjacent; ambiguous requests are refused.`,
-		args: {
-			from: tool.schema
-				.string()
-				.describe("First block label to merge, e.g. 'b0'"),
-			to: tool.schema.string().describe("Last block label to merge, e.g. 'b2'"),
-			topic: tool.schema
-				.string()
-				.describe("Short label (3-5 words) for the merged block"),
-			summary: tool.schema
-				.string()
-				.describe("Merged summary replacing the selected blocks"),
-		},
-		async execute(args) {
-			return `Squash queued for blocks ${args.from}-${args.to} (${args.topic}). It will be applied on the next message transform.`;
-		},
-	});
-}
-
-/**
  * Build the `expand` tool: restore a compressed block from the sidecar. The
  * `mode` argument selects a sticky expansion (kept on later transforms) or a
  * one-shot restore (the block re-compresses afterwards).

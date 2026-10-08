@@ -98,7 +98,7 @@ export class ExpansionSidecar {
 		return undefined;
 	}
 
-	/** Remove a single record (e.g. a block merged away by squash). */
+	/** Remove a single record (e.g. a block superseded by another). */
 	delete(sessionID: string, id: string): void {
 		const key = this.key(sessionID, id);
 		if (this.records.delete(key)) this.bySession.get(sessionID)?.delete(key);

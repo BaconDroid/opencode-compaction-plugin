@@ -1,7 +1,7 @@
 /**
  * A per-session queue of items, keyed by session id.
  *
- * The compression / squash / expand stores share this queue/clear surface and
+ * The compression / expand stores share this queue/clear surface and
  * only differ in how `drain` orders or retains items.
  */
 export class KeyedQueue<T> {

@@ -28,7 +28,7 @@ OpenCode's built-in compaction produces a 7-section summary. This plugin replace
 | **Post-compaction health** | None | Opt-in diagnostic for assistant messages without text |
 | **Todo list** | Not managed | **Captured before compaction and restored after** (best-effort) |
 | **Compress tool** | None | Model-driven **compress** tool (deterministic span selection — no indices needed) |
-| **Block folding** | None | Stable `[bN]` block labels + **squash** tool to merge contiguous blocks |
+| **Block folding** | None | Stable `[bN]` block labels for compressed ranges |
 | **Reversible compression** | None | **expand** (sticky or one-shot) restores the original messages from an in-memory sidecar |
 | **Trigger threshold** | Fixed | Hybrid `min(contextLimit × ratio, absolute)`; cache tokens counted by default |
 | **Deterministic gates** | None | Optional minimum new tokens/messages since the last compaction + tail guard |
@@ -98,12 +98,11 @@ Records every file operation (read, write, edit, delete) during the session. Pro
 Runs on every message batch sent to the LLM. Applies the following strategies in order:
 
 1. **Pending compressions** — Applies queued `compress` calls (deterministic span selection) as `<compressed-block>` messages with stable `[bN]` labels.
-2. **Squash** — Merges contiguous compressed blocks requested via the `squash` tool (fail-closed on ambiguous requests).
-3. **Expand** — Restores a block's original messages from the in-memory sidecar (`mode: "sticky"` keeps it expanded, `mode: "once"` restores it for one transform).
-4. **Tool output trimming** — Truncates long tool outputs (bash, read, grep, etc.) to configurable limits. Keeps the *end* of the output (usually has the result/error).
-5. **Deduplication** — When the same tool is called with the same args multiple times, only the latest output is kept. Earlier duplicates are replaced with a short marker.
-6. **Error purge** — Purges the whole failed attempt (input + output, with a compact error extract) from errored tool calls older than N turns; the opt-in `cascade` (default off) extends the purge to calls that depend on a purged call.
-7. **Graduated eviction** — LLM-free eviction (`reasoning → bulk output → intermediate → episode`) once the estimated budget is exceeded; user turns are never evicted.
+2. **Expand** — Restores a block's original messages from the in-memory sidecar (`mode: "sticky"` keeps it expanded, `mode: "once"` restores it for one transform).
+3. **Tool output trimming** — Truncates long tool outputs (bash, read, grep, etc.) to configurable limits. Keeps the *end* of the output (usually has the result/error).
+4. **Deduplication** — When the same tool is called with the same args multiple times, only the latest output is kept. Earlier duplicates are replaced with a short marker.
+5. **Error purge** — Purges the whole failed attempt (input + output, with a compact error extract) from errored tool calls older than N turns; the opt-in `cascade` (default off) extends the purge to calls that depend on a purged call.
+6. **Graduated eviction** — LLM-free eviction (`reasoning → bulk output → intermediate → episode`) once the estimated budget is exceeded; user turns are never evicted.
 
 Messages matching `pinning.patterns` are **pinned**: they are skipped by trimming, dedup, purge and eviction, and their clauses are re-injected into the compaction prompt as `<pinned-constraints>`.
 
@@ -129,7 +128,7 @@ Enables the synthetic "continue" turn after compaction, except for the compactio
 
 ## Compression Tools
 
-The plugin exposes five model-driven tools for proactive context management: `compress` and `squash` (fold), `expand` (restore, sticky or one-shot), `inspect` and `search` (browse/retrieve). The model decides when to compress and writes the summaries itself (it has full context).
+The plugin exposes four model-driven tools for proactive context management: `compress` (fold), `expand` (restore, sticky or one-shot), `inspect` and `search` (browse/retrieve). The model decides when to compress and writes the summaries itself (it has full context).
 
 ### `compress`
 
@@ -142,10 +141,6 @@ The plugin exposes five model-driven tools for proactive context management: `co
 | `end` | number *(optional, legacy)* | Explicit end message index (inclusive, 0-based) |
 
 When `start`/`end` are omitted, the plugin selects the range **deterministically**: everything after the newest existing compressed block, excluding the last `compress.protectedTurns` user turns. The range is replaced with a `<compressed-block>` carrying a durable `id` and a stable `[bN]` label. The originals are kept in memory when `compress.reversible` is enabled (off by default).
-
-### `squash`
-
-Merges two or more **contiguous** compressed blocks (referenced by `[bN]` labels) into a single block: `{ from, to, topic, summary }`. Ambiguous requests (unknown labels, fewer than two blocks, non-contiguous, or more than `compress.maxBlocksPerSquash`) are refused.
 
 ### `expand`
 
@@ -216,7 +211,7 @@ Each feature below lists **what** it does, its **config** keys and how it
 | Preemptive compaction | `preemptiveCompaction.*` | disabled |
 | Degradation monitor | `degradationMonitor.{enabled,threshold,windowMs}` | `false`, `4`, `120000` |
 | Auto-continue | — | — |
-| Compression tools | `compress.{protectedTurns,reversible,maxBlocksPerSquash,searchMaxResults}` | `3`, `false`, `8`, `5` |
+| Compression tools | `compress.{protectedTurns,reversible,searchMaxResults}` | `3`, `false`, `5` |
 | Semantic retrieval (optional) | `adapters.embeddings.*` | disabled |
 | Semantic constraint validation (optional) | `adapters.judge.*` | disabled |
 | Residual/perplexity scoring (optional) | `adapters.scorer.*` | disabled |
@@ -310,9 +305,9 @@ Each feature below lists **what** it does, its **config** keys and how it
 - **Config** — none.
 
 ### Compression tools
-- **What** — `compress`/`squash` (fold), `expand` (restore), `inspect`/`search`
+- **What** — `compress` (fold), `expand` (restore), `inspect`/`search`
   (browse/retrieve). See [Compression Tools](#compression-tools).
-- **Config** — `compress.{protectedTurns,reversible,maxBlocksPerSquash,searchMaxResults}`.
+- **Config** — `compress.{protectedTurns,reversible,searchMaxResults}`.
 - **Interactions** — applied in the transform before trimming.
 
 ### Semantic retrieval (optional adapter)
@@ -346,7 +341,7 @@ The `messages.transform` pipeline runs in a fixed order (see
 [How it works](#2-experimentalchatmessagestransform--context-optimization)):
 
 ```
-compress → squash → expand → trim → dedup → purge (+cascade) → eviction
+compress → expand → trim → dedup → purge (+cascade) → eviction
 ```
 
 Override rules:
@@ -421,7 +416,6 @@ Precedence, low to high: **defaults → global file → plugin options → proje
     "compress": {
         "protectedTurns": 3,        // Trailing user turns excluded from deterministic selection
         "reversible": false,        // Keep originals in memory for expand
-        "maxBlocksPerSquash": 8,    // Max blocks merged by a single squash
         "searchMaxResults": 5       // Max hits returned by the `search` tool
     },
 
@@ -580,8 +574,8 @@ src/
   types.ts              — Shared types (messages, hooks, logger)
   core/                 — Domain logic (no OpenCode SDK)
     transform.ts        — messages.transform pipeline
-    requests.ts         — queued compress/squash/expand application
-    compress.ts         — compress/squash domain + block rendering
+    requests.ts         — queued compress/expand application
+    compress.ts         — compress domain + block rendering
     blocks.ts           — durable block ids + deterministic span selection
     expand.ts           — reversible sidecar + inspection/search
     adapters.ts         — optional adapter contracts + in-memory vector index
@@ -614,7 +608,7 @@ test/
   config.test.ts    — Config loading tests
   strategies.test.ts — Strategy unit tests
   glob.test.ts      — Glob matcher tests
-  compress.test.ts  — Compress/squash tests
+  compress.test.ts  — Compress tests
   blocks.test.ts    — Block id and span selection tests
   expand.test.ts    — Reversible expand tests
   eviction.test.ts  — Graduated eviction tests
@@ -647,8 +641,8 @@ Compatible with [`oh-my-opencode-slim`](https://github.com/alvinunreal/oh-my-ope
 
 - `experimental.session.compacting` — omo-slim only marks the session (it does not touch `output.prompt`/`output.context`), so this plugin's prompt handling is unaffected.
 - `experimental.chat.messages.transform` — omo-slim rewrites user text and image parts; this plugin trims/dedups/purges tool parts and applies compressions. Load omo-slim **before** this plugin so its in-place rewrites run before this plugin's structural compression.
-- `config` — omo-slim manages agents, MCPs and commands; this plugin only ensures permissions for its own tools (`compress`, `squash`, `expand`, `inspect`, `search`) and leaves a global permission string untouched.
-- No shared tool names (omo-slim: `task*`, `waitForUser`, `acpRun`, `webfetch`, `ast_grep_*`, `marketplace_*`; this plugin: `compress`, `squash`, `expand`, `inspect`, `search`).
+- `config` — omo-slim manages agents, MCPs and commands; this plugin only ensures permissions for its own tools (`compress`, `expand`, `inspect`, `search`) and leaves a global permission string untouched.
+- No shared tool names (omo-slim: `task*`, `waitForUser`, `acpRun`, `webfetch`, `ast_grep_*`, `marketplace_*`; this plugin: `compress`, `expand`, `inspect`, `search`).
 - omo-slim does not use `experimental.compaction.autocontinue` and does not mutate `permission`.
 
 Recommended `plugin` order in `opencode.json`:

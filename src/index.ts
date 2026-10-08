@@ -15,7 +15,7 @@
  * - Hook error isolation
  * - Opt-in preemptive compaction near the context limit
  * - Opt-in post-compaction degradation diagnostic
- * - Model-driven compress/squash/expand tools
+ * - Model-driven compress/expand tools
  * - Global + project + plugin-option config
  *
  * Usage:
@@ -31,7 +31,7 @@ import { buildCompactionPrompt, extractLatestUserAsk } from "./core/prompt.js";
 import { FilesTouchedTracker } from "./core/files-touched.js";
 import { loadConfig } from "./config/config-loader.js";
 import type { LiveCompactionConfig } from "./config/config.js";
-import { CompressionStore, SquashStore } from "./core/compress.js";
+import { CompressionStore } from "./core/compress.js";
 import {
 	ExpansionSidecar,
 	ExpandStore,
@@ -46,7 +46,6 @@ import {
 } from "./opencode/adapters.js";
 import {
 	buildCompressToolDef,
-	buildSquashToolDef,
 	buildExpandToolDef,
 	buildInspectToolDef,
 	buildSearchToolDef,
@@ -80,7 +79,6 @@ import type { Hooks, Logger, Message, Plugin, PluginInput } from "./types.js";
 /** Model-driven tools registered by this plugin (used for permission wiring). */
 const PLUGIN_TOOL_NAMES = [
 	"compress",
-	"squash",
 	"expand",
 	"inspect",
 	"search",
@@ -190,7 +188,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 	// Per-instance state.
 	const sessionTrackers = new Map<string, FilesTouchedTracker>();
 	const compressions = new CompressionStore();
-	const squashes = new SquashStore();
 	const expansions = new ExpansionSidecar();
 	const expandStore = new ExpandStore();
 	const todoPreserver = new TodoPreserver();
@@ -332,7 +329,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 
 	const hooks: Hooks = {
 		// -----------------------------------------------------------------------
-		// Track file operations + capture compress/squash/expand tool calls
+		// Track file operations + capture compress/expand tool calls
 		// -----------------------------------------------------------------------
 		"tool.execute.after": async (input) => {
 			const { tool, sessionID, args } = input;
@@ -375,24 +372,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 						topic: a.topic,
 					});
 				}
-			}
-
-			if (
-				tool === "squash" &&
-				typeof a.from === "string" &&
-				typeof a.to === "string" &&
-				typeof a.topic === "string" &&
-				typeof a.summary === "string"
-			) {
-				squashes.queue(sessionID, {
-					from: a.from,
-					to: a.to,
-					topic: a.topic,
-					summary: a.summary,
-					timestamp: Date.now(),
-					callID: input.callID,
-				});
-				logger.info("squash queued", { sessionID, from: a.from, to: a.to });
 			}
 
 			if (tool === "expand" && typeof a.block === "string") {
@@ -515,7 +494,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 				config,
 				logger,
 				compressions,
-				squashes,
 				expansions,
 				expandStore,
 				trimMap,
@@ -582,7 +560,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 				if (sessionID) {
 					sessionTrackers.delete(sessionID);
 					compressions.clear(sessionID);
-					squashes.clear(sessionID);
 					expansions.clear(sessionID);
 					expandStore.clear(sessionID);
 					// Drop this session's cached embeddings (not every session's).
@@ -672,7 +649,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		dispose: async () => {
 			sessionTrackers.clear();
 			compressions.clearAll();
-			squashes.clearAll();
 			expansions.clearAll();
 			expandStore.clearAll();
 			semanticIndex?.clear();
@@ -710,7 +686,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		// The `tool` hook maps a tool name to its definition.
 		tool: {
 			compress: buildCompressToolDef(),
-			squash: buildSquashToolDef(),
 			expand: buildExpandToolDef(),
 			inspect: buildInspectToolDef(expansions),
 			search: buildSearchToolDef(
