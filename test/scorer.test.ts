@@ -9,9 +9,8 @@ import {
 import { applyEviction, estimateTokens } from "../src/core/eviction.ts";
 import { parseScore, resolveScorer } from "../src/opencode/adapters.ts";
 import { LiveCompactionPlugin } from "../src/index.ts";
-import { makeTmpSetup } from "./helpers.ts";
+import { makeTmpSetup, recordingLogger } from "./helpers.ts";
 import type { Scorer } from "../src/core/adapters.ts";
-import type { Logger } from "../src/types.ts";
 
 function textMsg(role: string, text: string, type = "text") {
 	return { info: { role }, parts: [{ type, text }] };
@@ -22,11 +21,6 @@ function toolMsg(output: string) {
 		info: { role: "assistant" },
 		parts: [{ type: "tool", tool: "bash", state: { output } }],
 	};
-}
-
-function recordingLogger(): { logger: Logger; messages: string[] } {
-	const messages: string[] = [];
-	return { messages, logger: { info: (message) => messages.push(message) } };
 }
 
 describe("buildScorerEstimator()", () => {

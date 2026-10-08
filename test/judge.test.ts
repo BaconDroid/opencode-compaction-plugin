@@ -2,7 +2,7 @@ import { describe, it, expect, afterAll, beforeEach, afterEach } from "bun:test"
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { makeTmpSetup } from "./helpers.ts";
+import { makeTmpSetup, recordingLogger } from "./helpers.ts";
 import {
 	buildIntegrityPrompt,
 	judgeClausesPreserved,
@@ -11,15 +11,6 @@ import {
 import { parseJudgeResponse, resolveJudge } from "../src/opencode/adapters.ts";
 import { LiveCompactionPlugin } from "../src/index.ts";
 import type { Judge } from "../src/core/adapters.ts";
-import type { Logger } from "../src/types.ts";
-
-function recordingLogger(): { logger: Logger; messages: string[] } {
-	const messages: string[] = [];
-	return {
-		messages,
-		logger: { info: (message) => messages.push(message) },
-	};
-}
 
 describe("buildIntegrityPrompt()", () => {
 	it("lists the clauses and the summary", () => {

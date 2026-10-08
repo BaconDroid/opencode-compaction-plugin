@@ -1,4 +1,4 @@
-import { describe, it, expect, afterAll } from "bun:test";
+import { describe, it, expect, afterAll, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,22 +19,11 @@ import {
 	resolveEmbedder,
 } from "../src/opencode/adapters.ts";
 import { mergeConfig } from "../src/config/config.ts";
-import type { Logger } from "../src/types.ts";
+import { LiveCompactionPlugin } from "../src/index.ts";
+import { makeTmpSetup, recordingLogger } from "./helpers.ts";
 
 function textMsg(role: string, text: string) {
 	return { info: { role }, parts: [{ type: "text", text }] };
-}
-
-function recordingLogger(): { logger: Logger; messages: string[] } {
-	const messages: string[] = [];
-	return {
-		messages,
-		logger: {
-			info: (message) => {
-				messages.push(message);
-			},
-		},
-	};
 }
 
 /** A deterministic embedder: each text maps to a fixed vector by keyword. */
@@ -369,5 +358,86 @@ describe("config: adapters.embeddings", () => {
 		});
 		expect(cfg.adapters?.embeddings?.url).toBe("http://localhost/embed");
 		expect(cfg.adapters?.embeddings?.model).toBe("m");
+	});
+});
+
+describe("plugin wiring: semantic search adapter", () => {
+	const dir = mkdtempSync(join(tmpdir(), "lc-wiring-"));
+	const script = join(dir, "embed.mjs");
+	writeFileSync(
+		script,
+		`let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{const {input}=JSON.parse(d);process.stdout.write(JSON.stringify({embeddings:input.map(()=>[1,0])}))});`,
+	);
+	afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+	const TMP_DIR = join(import.meta.dirname, "__tmp_wiring_test");
+	const { setup, cleanup } = makeTmpSetup(TMP_DIR);
+	beforeEach(setup);
+	afterEach(cleanup);
+
+	it("indexes compressed blocks and searches them semantically", async () => {
+		const logs: string[] = [];
+		const ctx = {
+			client: {
+				app: {
+					log: (input: { body: { message: string } }) => {
+						logs.push(input.body.message);
+						return Promise.resolve();
+					},
+				},
+			},
+			project: { id: "p", name: "p" },
+			directory: TMP_DIR,
+			worktree: TMP_DIR,
+			serverUrl: new URL("http://localhost:4096"),
+		};
+		const hooks = await LiveCompactionPlugin(ctx as any, {
+			debug: true,
+			compress: { reversible: true },
+			adapters: {
+				embeddings: {
+					provider: "command",
+					command: `"${process.execPath}" "${script}"`,
+				},
+			},
+		} as any);
+
+		await hooks["tool.execute.after"]!(
+			{
+				tool: "compress",
+				sessionID: "s1",
+				callID: "c1",
+				args: { topic: "Auth", start: 0, end: 3, summary: "login flow" },
+			},
+			{ title: "", output: "", metadata: {} },
+		);
+		const messages = [
+			{ info: { role: "user" }, parts: [{ type: "text", text: "fix auth" }] },
+			{ info: { role: "assistant" }, parts: [{ type: "text", text: "investigating" }] },
+			{ info: { role: "user" }, parts: [{ type: "text", text: "try this" }] },
+			{ info: { role: "assistant" }, parts: [{ type: "text", text: "done" }] },
+			{
+				info: { role: "user" },
+				parts: [
+					{ type: "text", text: "next" },
+					{
+						type: "tool",
+						tool: "compress",
+						callID: "c1",
+						state: { output: "compressed" },
+					},
+				],
+			},
+		];
+		await hooks["experimental.chat.messages.transform"]!(
+			{} as any,
+			{ messages } as any,
+		);
+		expect(logs).toContain("semantic search adapter enabled");
+
+		const search = (hooks as any).tool.search;
+		const result = await search.execute({ query: "login" }, {});
+		expect(result).toContain("(semantic)");
+		expect(result).toContain("[b0]");
 	});
 });

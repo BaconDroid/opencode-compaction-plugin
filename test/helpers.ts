@@ -1,5 +1,15 @@
 import { mkdirSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import type { Logger } from "../src/types.ts";
+
+/** A `Logger` that records every message it is given, for assertions. */
+export function recordingLogger(): { logger: Logger; messages: string[] } {
+	const messages: string[] = [];
+	return {
+		messages,
+		logger: { info: (message) => messages.push(message) },
+	};
+}
 
 /**
  * Build setup/cleanup callbacks that isolate a temp dir and the global XDG
