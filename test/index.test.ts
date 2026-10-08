@@ -461,6 +461,30 @@ describe("LiveCompactionPlugin", () => {
 			expect(messages[1].parts[0].state.output).toBe("new content");
 		});
 
+		it("keeps dedup markers intact across passes with a small trim limit", async () => {
+			const hooks = await getHooks();
+			const tool = (output: string) => ({
+				info: { role: "assistant" },
+				parts: [
+					{
+						type: "tool",
+						tool: "delete",
+						args: { filePath: "a.ts" },
+						state: { output },
+					},
+				],
+			});
+			// `delete` trim limit (50) is smaller than the dedup marker length, so
+			// trimming the marker would break dedup idempotency. The messages are
+			// pushed out of the turn window so trimming actually runs.
+			const messages = [tool("removed"), tool("removed"), ...userTurns(5)];
+			await transform(hooks, messages);
+			const marker = messages[0].parts[0].state.output as string;
+			expect(marker).toContain("deduped");
+			await transform(hooks, messages);
+			expect(messages[0].parts[0].state.output).toBe(marker);
+		});
+
 		it("purges large inputs from errored tools outside the recent window", async () => {
 			const hooks = await LiveCompactionPlugin(mockCtx as any, {
 				purgeErrors: { wholeAttempt: false },

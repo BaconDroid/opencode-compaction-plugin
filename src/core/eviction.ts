@@ -7,6 +7,7 @@
  */
 
 import { blockId, type BlockMessage } from "./blocks.js";
+import { EVICTED_BULK_SUFFIX } from "./markers.js";
 
 export type EvictionLevel =
 	| "reasoning"
@@ -46,7 +47,6 @@ const DEFAULT_LEVELS: EvictionLevel[] = [
 ];
 
 const BULK_OUTPUT_LIMIT = 200;
-const BULK_OUTPUT_MARKER = "\n... [evicted bulk output]";
 const EPISODE_MARKER = "[evicted episode]";
 const REASONING_MARKER = "[evicted reasoning]";
 const INTERMEDIATE_MARKER = "[evicted intermediate]";
@@ -113,10 +113,11 @@ function evictBulkOutput(message: BlockMessage, result: EvictionResult): boolean
 			part.type === "tool" &&
 			state &&
 			typeof state.output === "string" &&
-			state.output.length > BULK_OUTPUT_LIMIT &&
-			!state.output.endsWith(BULK_OUTPUT_MARKER)
+			// Only evict when the result is actually shorter (never enlarge).
+			state.output.length > BULK_OUTPUT_LIMIT + EVICTED_BULK_SUFFIX.length &&
+			!state.output.endsWith(EVICTED_BULK_SUFFIX)
 		) {
-			state.output = state.output.slice(-BULK_OUTPUT_LIMIT) + BULK_OUTPUT_MARKER;
+			state.output = state.output.slice(-BULK_OUTPUT_LIMIT) + EVICTED_BULK_SUFFIX;
 			result.removed++;
 			result.evictedIds.push(
 				typeof part.callID === "string" ? `r:${part.callID}` : blockId(message),

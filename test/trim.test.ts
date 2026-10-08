@@ -10,13 +10,26 @@ describe("trimToolOutput()", () => {
 	});
 
 	it("keeps the tail and appends a marker", () => {
-		const out = trimToolOutput("bash", "x".repeat(30), map, 5);
-		expect(out).toBe("x".repeat(10) + "\n... [trimmed 20/30 chars]");
+		const out = trimToolOutput("bash", "x".repeat(100), map, 5);
+		expect(out).toBe("x".repeat(10) + "\n... [trimmed 90/100 chars]");
 	});
 
 	it("does not re-trim an already trimmed output", () => {
-		const once = trimToolOutput("bash", "x".repeat(30), map, 5);
+		const once = trimToolOutput("bash", "x".repeat(100), map, 5);
 		expect(trimToolOutput("bash", once, map, 5)).toBe(once);
+	});
+
+	it("does not re-trim deduped or bulk-evicted outputs", () => {
+		const deduped = "[deduped: same call as later read output — 500 chars removed]";
+		expect(trimToolOutput("delete", deduped, { delete: 50 }, 5)).toBe(deduped);
+		const evicted = "tail\n... [evicted bulk output]";
+		expect(trimToolOutput("delete", evicted, { delete: 50 }, 5)).toBe(evicted);
+	});
+
+	it("never enlarges an output", () => {
+		// 30 chars with a limit of 10 would become 10 + 24 marker = 34 chars.
+		const out = "x".repeat(30);
+		expect(trimToolOutput("bash", out, map, 5)).toBe(out);
 	});
 
 	it("drops the whole output for a non-positive limit", () => {
@@ -27,8 +40,8 @@ describe("trimToolOutput()", () => {
 	});
 
 	it("falls back to the default limit for unlisted tools", () => {
-		expect(trimToolOutput("unknown", "abcdefghij", {}, 4)).toBe(
-			"ghij\n... [trimmed 6/10 chars]",
+		expect(trimToolOutput("unknown", "a".repeat(100), {}, 4)).toBe(
+			"aaaa\n... [trimmed 96/100 chars]",
 		);
 	});
 });

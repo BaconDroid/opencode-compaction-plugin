@@ -4,6 +4,11 @@
 
 import type { LiveCompactionConfig } from "../config/config.js";
 import { extractFilePaths, isFileProtected } from "./glob.js";
+import {
+	DEDUPED_PREFIX,
+	EVICTED_BULK_SUFFIX,
+	TRIMMED_MARKER,
+} from "./markers.js";
 import { partInput } from "./messages.js";
 import type { MessagePart } from "../types.js";
 
@@ -22,17 +27,21 @@ export function buildTrimMap(
 	};
 }
 
-const TRIMMED_MARKER = /\n\.\.\. \[trimmed \d+\/\d+ chars\]$/;
-
 export function trimToolOutput(
 	toolName: string,
 	output: string,
 	trimMap: Record<string, number>,
 	defaultLimit: number,
 ): string {
-	// Already trimmed in a previous transform pass: leave it as-is so the
-	// retained tail is not re-sliced and eroded on every message batch.
-	if (TRIMMED_MARKER.test(output)) return output;
+	// Already processed in a previous pass or by another stage: leave it as-is
+	// so markers are not truncated (which would break their idempotency).
+	if (
+		TRIMMED_MARKER.test(output) ||
+		output.startsWith(DEDUPED_PREFIX) ||
+		output.endsWith(EVICTED_BULK_SUFFIX)
+	) {
+		return output;
+	}
 
 	const limit = trimMap[toolName] ?? defaultLimit;
 	// A non-positive limit means "keep nothing"; `slice(-0)` would otherwise
@@ -45,8 +54,10 @@ export function trimToolOutput(
 	if (output.length <= limit) return output;
 
 	const indicator = `\n... [trimmed ${output.length - limit}/${output.length} chars]`;
-	// Keep the END of output (usually has the important result/error)
-	return output.slice(-limit) + indicator;
+	// Keep the END of output (usually has the important result/error). Never
+	// enlarge: if the tail + marker is not shorter, leave the output as-is.
+	const trimmed = output.slice(-limit) + indicator;
+	return trimmed.length < output.length ? trimmed : output;
 }
 
 /**
