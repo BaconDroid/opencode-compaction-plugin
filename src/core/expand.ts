@@ -171,6 +171,15 @@ export class ExpansionSidecar {
 
 /** Per-plugin-instance store of pending expand requests, keyed by session. */
 export class ExpandStore extends KeyedQueue<ExpandRequest> {
+	/** Keep at most one request per block to bound the queue. */
+	override queue(sessionID: string, item: ExpandRequest): void {
+		const existing = this.take(sessionID).filter(
+			(req) => req.block !== item.block,
+		);
+		existing.push(item);
+		this.retain(sessionID, existing);
+	}
+
 	/**
 	 * Return the active requests for a session. Sticky requests are retained for
 	 * the next transform; one-shot requests are returned only once.
@@ -182,6 +191,15 @@ export class ExpandStore extends KeyedQueue<ExpandRequest> {
 			queue.filter((req) => req.mode === "sticky"),
 		);
 		return queue;
+	}
+
+	/** Drop retained sticky requests for blocks that no longer resolve. */
+	prune(sessionID: string, blocks: string[]): void {
+		if (blocks.length === 0) return;
+		const remaining = this.take(sessionID).filter(
+			(req) => !(req.mode === "sticky" && blocks.includes(req.block)),
+		);
+		this.retain(sessionID, remaining);
 	}
 }
 

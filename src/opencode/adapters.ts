@@ -25,6 +25,8 @@ import type {
 import type { Logger } from "../types.js";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
+/** Cap on command stdout, to bound memory for a misbehaving command. */
+const MAX_COMMAND_STDOUT = 8 * 1024 * 1024;
 
 export interface AdapterResolutionDeps {
 	logger: Logger;
@@ -227,6 +229,12 @@ function runCommand(
 
 		child.stdout?.on("data", (chunk) => {
 			stdout += String(chunk);
+			if (stdout.length > MAX_COMMAND_STDOUT) {
+				child.kill("SIGKILL");
+				finish(() =>
+					reject(new Error(`${label} command produced too much output`)),
+				);
+			}
 		});
 		// Drain stderr: an unconsumed pipe buffer would block the child (and
 		// trip the timeout) even when stdout is valid.

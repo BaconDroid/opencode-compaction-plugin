@@ -42,10 +42,17 @@ export interface CompressBlock {
 	label?: string;
 }
 
+const attrRegexCache = new Map<string, RegExp>();
+
 function readAttr(attrs: string, name: string): string | undefined {
-	// Anchor the attribute name so `id` does not match `data-id`.
-	const match = new RegExp(`(?:^|\\s)${name}="([^"]*)"`).exec(attrs);
-	return match?.[1];
+	// Anchor the attribute name so `id` does not match `data-id`; cache the
+	// compiled regex (only two attribute names are used).
+	let regex = attrRegexCache.get(name);
+	if (!regex) {
+		regex = new RegExp(`(?:^|\\s)${name}="([^"]*)"`);
+		attrRegexCache.set(name, regex);
+	}
+	return regex.exec(attrs)?.[1];
 }
 
 /** Parse every `<compressed-block>` in the message list, in message order. */

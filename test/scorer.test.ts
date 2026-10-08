@@ -69,6 +69,24 @@ describe("buildScorerEstimator()", () => {
 		expect(DEFAULT_SCORER_MAX_SAMPLES).toBe(200);
 	});
 
+	it("caches scores across transforms for the same scorer", async () => {
+		let calls = 0;
+		const scorer: Scorer = {
+			async score() {
+				calls++;
+				return 1;
+			},
+		};
+		const messages = [
+			textMsg("assistant", "alpha"),
+			textMsg("assistant", "beta"),
+		];
+		await buildScorerEstimator(scorer, messages as any);
+		expect(calls).toBe(2);
+		await buildScorerEstimator(scorer, messages as any);
+		expect(calls).toBe(2);
+	});
+
 	it("ignores whitespace-only text parts", async () => {
 		let calls = 0;
 		const scorer: Scorer = {
