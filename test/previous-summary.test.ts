@@ -100,20 +100,6 @@ describe("extractPreviousSummary()", () => {
 		expect(state.lastSummaryMessageId).toBe("s2");
 	});
 
-	it("respects cutoffIndex and falls back to the carried text", () => {
-		const state: SlidingState = {
-			cutoffIndex: 0,
-			lastSummaryText: "carried",
-		};
-		const messages = [
-			{
-				info: { role: "assistant", summary: true, id: "s1" },
-				parts: [{ type: "text", text: "too old" }],
-			},
-		];
-		expect(extractPreviousSummary(messages, state)).toBe("carried");
-	});
-
 	it("returns the carried text when no summary message remains", () => {
 		const state: SlidingState = { lastSummaryText: "carried" };
 		expect(

@@ -14,8 +14,6 @@
 import { lastMessageWhere, partsText } from "./messages.js";
 
 export interface SlidingState {
-	/** Only consider summaries strictly after this message index (inclusive cutoff). */
-	cutoffIndex?: number;
 	/** id of the summary message carried forward last time. */
 	lastSummaryMessageId?: string;
 	/** Text of the summary carried forward last time (fallback). */
@@ -27,10 +25,7 @@ export function extractPreviousSummary(
 	messages: unknown,
 	state?: SlidingState,
 ): string | undefined {
-	const found = lastMessageWhere(messages, (message, index) => {
-		if (state?.cutoffIndex !== undefined && index <= state.cutoffIndex) {
-			return false;
-		}
+	const found = lastMessageWhere(messages, (message) => {
 		if (message.info?.role !== "assistant" || message.info.summary !== true) {
 			return false;
 		}
