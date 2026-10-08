@@ -62,7 +62,6 @@ export function loadConfig(
 	return mergeConfig(user);
 }
 
-/** Strip single-line and block comments from JSONC strings. */
 /**
  * Strip JSONC comments (`//`, `/* *​/`) and trailing commas before `}`/`]` in a
  * single pass, ignoring both inside strings.
@@ -116,10 +115,28 @@ function stripJsonc(json: string): string {
 			i += 2;
 			continue;
 		}
-		// Trailing comma before } or ].
+		// Trailing comma before } or ] (skipping whitespace and comments).
 		if (ch === ",") {
 			let j = i + 1;
-			while (j < json.length && /\s/.test(json[j])) j++;
+			for (;;) {
+				while (j < json.length && /\s/.test(json[j])) j++;
+				if (json[j] === "/" && json[j + 1] === "/") {
+					while (j < json.length && json[j] !== "\n") j++;
+					continue;
+				}
+				if (json[j] === "/" && json[j + 1] === "*") {
+					j += 2;
+					while (
+						j + 1 < json.length &&
+						!(json[j] === "*" && json[j + 1] === "/")
+					) {
+						j++;
+					}
+					j += 2;
+					continue;
+				}
+				break;
+			}
 			if (json[j] === "}" || json[j] === "]") {
 				i++;
 				continue;

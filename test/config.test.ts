@@ -197,6 +197,20 @@ describe("loadConfig()", () => {
 		expect(cfg.purgeErrors.turns).toBe(10);
 	});
 
+	it("tolerates a comment between a trailing comma and the closing brace", () => {
+		writeFileSync(
+			join(TMP_DIR, ".opencode", "live-compaction.jsonc"),
+			`{
+				"enabled": false,
+				"purgeErrors": { "turns": 10 },
+				// comment before the closing brace
+			}`,
+		);
+		const cfg = loadConfig(TMP_DIR);
+		expect(cfg.enabled).toBe(false);
+		expect(cfg.purgeErrors.turns).toBe(10);
+	});
+
 	it("preserves slashes and escapes inside JSONC strings", () => {
 		writeFileSync(
 			join(TMP_DIR, ".opencode", "live-compaction.jsonc"),
