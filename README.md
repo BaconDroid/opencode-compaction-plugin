@@ -102,7 +102,7 @@ Runs on every message batch sent to the LLM. Applies the following strategies in
 3. **Expand / recall** — Restores a block's original messages from the in-memory sidecar (`expand` is sticky, `recall` is one-shot).
 4. **Tool output trimming** — Truncates long tool outputs (bash, read, grep, etc.) to configurable limits. Keeps the *end* of the output (usually has the result/error).
 5. **Deduplication** — When the same tool is called with the same args multiple times, only the latest output is kept. Earlier duplicates are replaced with a short marker.
-6. **Error purge** — Purges the whole failed attempt (input + output, with a compact error extract) from errored tool calls older than N turns; `cascade` extends the purge to calls that depend on a purged call.
+6. **Error purge** — Purges the whole failed attempt (input + output, with a compact error extract) from errored tool calls older than N turns; the opt-in `cascade` (default off) extends the purge to calls that depend on a purged call.
 7. **Graduated eviction** — LLM-free eviction (`reasoning → bulk output → intermediate → episode`) once the estimated budget is exceeded; user turns are never evicted.
 
 Messages matching `pinning.patterns` are **pinned**: they are skipped by trimming, dedup, purge and eviction, and their clauses are re-injected into the compaction prompt as `<pinned-constraints>`.
@@ -205,7 +205,7 @@ Each feature below lists **what** it does, its **config** keys and how it
 | Turn protection | `turnProtection.{enabled,turns}` | `true`, `4` |
 | Protected files | `protectedFilePatterns` | `[]` |
 | Deduplication | `dedup.{enabled,protectedTools}` | `true`, `[]` |
-| Error purge | `purgeErrors.{enabled,turns,wholeAttempt,cascade}` | `true`, `4`, `true`, `true` |
+| Error purge | `purgeErrors.{enabled,turns,wholeAttempt,cascade}` | `true`, `4`, `true`, `false` |
 | Graduated eviction | `eviction.{enabled,thresholdTokens,levels,protectPrologue}` | `true`, `80000`, all levels, `true` |
 | Constraint pinning | `pinning.{enabled,patterns,maxClauses}` | `true`, `[]`, `20` |
 | Preemptive compaction | `preemptiveCompaction.*` | disabled |
@@ -268,7 +268,8 @@ Each feature below lists **what** it does, its **config** keys and how it
 
 ### Error purge
 - **What** — purges the whole failed attempt after N turns (`wholeAttempt`: input
-  + output + compact error extract) and `cascade`s to dependent calls.
+  + output + compact error extract); the opt-in `cascade` (default off) extends
+  the purge to dependent calls.
 - **Config** — `purgeErrors.{enabled,turns,wholeAttempt,cascade}`.
 - **Interactions** — errored calls within the last `purgeErrors.turns` user turns
   and pinned messages are never purged; `cascade` only fires for calls actually
@@ -408,7 +409,7 @@ Precedence, low to high: **defaults → global file → plugin options → proje
         "enabled": true,
         "turns": 4,             // Purge errored calls older than N user turns
         "wholeAttempt": true,   // Also replace the output with a compact error extract
-        "cascade": true         // Cascade the purge to calls depending on a purged call
+        "cascade": false        // Opt-in: cascade the purge to calls depending on a purged call
     },
 
     // Model-driven compression tools

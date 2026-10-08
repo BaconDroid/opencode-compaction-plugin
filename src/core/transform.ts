@@ -103,7 +103,7 @@ export async function applyTransform(
 		if (purged > 0) logger.info("error purge applied", { count: purged });
 
 		// 4b. Cascade the purge to work depending on purged calls.
-		if ((config.purgeErrors.cascade ?? true) && purgedCallIds.size > 0) {
+		if ((config.purgeErrors.cascade ?? false) && purgedCallIds.size > 0) {
 			const cascaded = applyCascadePurge(
 				messages,
 				purgedCallIds,

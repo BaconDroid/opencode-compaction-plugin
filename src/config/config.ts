@@ -48,7 +48,7 @@ export interface PurgeErrorsConfig {
 	 */
 	wholeAttempt?: boolean;
 	/**
-	 * Cascade the purge to work that depends on a purged call (default: true)
+	 * Cascade the purge to work that depends on a purged call (default: false)
 	 */
 	cascade?: boolean;
 }
@@ -275,7 +275,7 @@ export const DEFAULT_CONFIG: Required<
 		enabled: true,
 		turns: 4,
 		wholeAttempt: true,
-		cascade: true,
+		cascade: false,
 	},
 	compress: {
 		protectedTurns: 3,

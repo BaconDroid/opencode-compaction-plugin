@@ -24,7 +24,7 @@ describe("mergeConfig()", () => {
 			enabled: true,
 			turns: 4,
 			wholeAttempt: true,
-			cascade: true,
+			cascade: false,
 		});
 		expect(cfg.compress).toEqual({
 			protectedTurns: 3,
