@@ -193,7 +193,7 @@ matching [bN] labels and a snippet; use expand or recall to restore a match.`,
 						maxResults,
 						sessionID,
 					);
-					const enriched = semanticHits(sidecar, hits);
+					const enriched = semanticHits(sidecar, hits, undefined, sessionID);
 					if (enriched.length > 0) {
 						return renderHits(enriched, args.query, "semantic");
 					}

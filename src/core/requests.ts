@@ -117,10 +117,15 @@ export function applyPendingRequests(
 							// Combine the constituents' originals so expanding the merged
 							// block restores the whole history, not just the first block.
 							const originals = constituentIds.flatMap(
-								(blockId) => expansions.get(blockId)?.original ?? [],
+								(blockId) => expansions.get(blockId, sid)?.original ?? [],
 							);
 							if (originals.length > 0) {
 								expansions.save(sid, id, originals, { label, topic });
+							}
+							// Drop the merged-away records so inspect/search do not report
+							// phantom blocks.
+							for (const blockId of constituentIds) {
+								if (blockId !== id) expansions.delete(sid, blockId);
 							}
 						}
 					: undefined,
@@ -148,6 +153,7 @@ export function applyPendingRequests(
 				messages,
 				applicable,
 				expansions,
+				sid,
 			);
 			if (expanded > 0) {
 				logger.info("expand applied", { sessionID: sid, expanded });

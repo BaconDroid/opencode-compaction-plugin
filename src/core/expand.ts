@@ -15,11 +15,16 @@ import type { VectorHit } from "./adapters.js";
 
 export interface ExpansionRecord {
 	id: string;
+	/** Owning session (records are keyed per session to avoid id collisions). */
+	sessionID?: string;
 	label?: string;
 	topic?: string;
 	original: unknown[];
 	createdAt: number;
 }
+
+/** Separator for the per-session record key (never appears in block ids). */
+const KEY_SEP = "\u0000";
 
 export interface SearchHit {
 	id: string;
@@ -46,10 +51,15 @@ export interface ExpandRequest {
 	timestamp: number;
 }
 
-/** Per-plugin-instance store of original messages, keyed by block id. */
+/** Per-plugin-instance store of original messages, keyed by session + block id. */
 export class ExpansionSidecar {
 	private records = new Map<string, ExpansionRecord>();
+	// sessionID -> set of composite record keys.
 	private bySession = new Map<string, Set<string>>();
+
+	private key(sessionID: string, id: string): string {
+		return `${sessionID}${KEY_SEP}${id}`;
+	}
 
 	save(
 		sessionID: string,
@@ -57,23 +67,40 @@ export class ExpansionSidecar {
 		original: unknown[],
 		meta?: { label?: string; topic?: string },
 	): void {
-		this.records.set(id, {
+		const key = this.key(sessionID, id);
+		this.records.set(key, {
 			id,
+			sessionID,
 			label: meta?.label,
 			topic: meta?.topic,
 			original,
 			createdAt: Date.now(),
 		});
-		let ids = this.bySession.get(sessionID);
-		if (!ids) {
-			ids = new Set();
-			this.bySession.set(sessionID, ids);
+		let keys = this.bySession.get(sessionID);
+		if (!keys) {
+			keys = new Set();
+			this.bySession.set(sessionID, keys);
 		}
-		ids.add(id);
+		keys.add(key);
 	}
 
-	get(id: string): ExpansionRecord | undefined {
-		return this.records.get(id);
+	/**
+	 * A record by block id. With a session id the lookup is scoped to that
+	 * session; without one, any session's record with that id is returned
+	 * (backward compatible).
+	 */
+	get(id: string, sessionID?: string): ExpansionRecord | undefined {
+		if (sessionID !== undefined) return this.records.get(this.key(sessionID, id));
+		for (const record of this.records.values()) {
+			if (record.id === id) return record;
+		}
+		return undefined;
+	}
+
+	/** Remove a single record (e.g. a block merged away by squash). */
+	delete(sessionID: string, id: string): void {
+		const key = this.key(sessionID, id);
+		if (this.records.delete(key)) this.bySession.get(sessionID)?.delete(key);
 	}
 
 	/** All stored records, newest first. */
@@ -87,13 +114,13 @@ export class ExpansionSidecar {
 	 */
 	listForSession(sessionID?: string): ExpansionRecord[] {
 		// A known session with no records must return nothing, not everything.
-		const ids =
+		const records =
 			sessionID === undefined
-				? undefined
-				: (this.bySession.get(sessionID) ?? new Set<string>());
-		return [...this.records.values()]
-			.filter((record) => ids === undefined || ids.has(record.id))
-			.sort((a, b) => b.createdAt - a.createdAt);
+				? [...this.records.values()]
+				: [...(this.bySession.get(sessionID) ?? [])]
+						.map((key) => this.records.get(key))
+						.filter((record): record is ExpansionRecord => record !== undefined);
+		return records.sort((a, b) => b.createdAt - a.createdAt);
 	}
 
 	/**
@@ -125,9 +152,9 @@ export class ExpansionSidecar {
 	}
 
 	clear(sessionID: string): void {
-		const ids = this.bySession.get(sessionID);
-		if (ids) {
-			for (const id of ids) this.records.delete(id);
+		const keys = this.bySession.get(sessionID);
+		if (keys) {
+			for (const key of keys) this.records.delete(key);
 			this.bySession.delete(sessionID);
 		}
 	}
@@ -172,6 +199,7 @@ export function applyExpansions(
 	messages: BlockMessage[],
 	requests: ExpandRequest[],
 	sidecar: ExpansionSidecar,
+	sessionID?: string,
 ): ApplyExpansionsResult {
 	if (requests.length === 0) return { expanded: 0, unmatched: [] };
 
@@ -189,7 +217,7 @@ export function applyExpansions(
 			unmatched.push(req.block);
 			continue;
 		}
-		const record = sidecar.get(block.id);
+		const record = sidecar.get(block.id, sessionID);
 		if (!record) {
 			unmatched.push(req.block);
 			continue;
@@ -200,7 +228,9 @@ export function applyExpansions(
 	let expanded = 0;
 	for (const [index, original] of [...planned].sort((a, b) => b[0] - a[0])) {
 		if (index < 0 || index >= messages.length) continue;
-		messages.splice(index, 1, ...(original as BlockMessage[]));
+		// Clone so later trim/dedup/purge/eviction cannot mutate the stored
+		// originals (which would make a second expand restore corrupted text).
+		messages.splice(index, 1, ...(structuredClone(original) as BlockMessage[]));
 		expanded++;
 	}
 
@@ -266,10 +296,11 @@ export function semanticHits(
 	sidecar: ExpansionSidecar,
 	hits: VectorHit[],
 	snippetLength = 160,
+	sessionID?: string,
 ): SearchHit[] {
 	const out: SearchHit[] = [];
 	for (const hit of hits) {
-		const record = sidecar.get(hit.id);
+		const record = sidecar.get(hit.id, sessionID);
 		if (!record) continue;
 		const text = recordText(record);
 		const snippet = text.slice(0, snippetLength).replace(/\s+/g, " ");
