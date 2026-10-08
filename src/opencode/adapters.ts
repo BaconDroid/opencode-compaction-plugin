@@ -1,12 +1,13 @@
 /**
  * Provider implementations for the optional external adapters (the SDK/OS
- * boundary). This module turns config into concrete `Embedder`/`Judge` objects;
- * the pure contracts live in `../core/adapters.ts`.
+ * boundary). This module turns config into concrete `Embedder`/`Judge`/`Scorer`
+ * objects; the pure contracts live in `../core/adapters.ts`.
  *
- * No dependency is added: HTTP uses the platform `fetch`, commands use
- * `node:child_process`. Providers never throw at resolution time — when a
+ * All three families share one transport abstraction: an `http` POST or a
+ * spawned `command` that reads a JSON payload on stdin. No dependency is added
+ * (platform `fetch` + `node:child_process`). Resolution never throws — when a
  * provider is unusable (missing field, unsupported transport) `undefined` is
- * returned and the caller keeps its deterministic fallback. Runtime errors are
+ * returned and the caller keeps its deterministic fallback; runtime errors are
  * caught by the caller (fail-open).
  *
  * Secrets: URLs and commands are user-supplied and are never logged; only the
@@ -31,20 +32,16 @@ export interface AdapterResolutionDeps {
 	fetcher?: typeof fetch;
 }
 
-type ResolvedTransport =
-	| {
-			provider: "http";
-			url: string;
-			model?: string;
-			timeoutMs: number;
-			fetcher: typeof fetch;
-	  }
-	| {
-			provider: "command";
-			command: string;
-			model?: string;
-			timeoutMs: number;
-	  };
+/** Send a JSON payload and return the parsed response. */
+interface Transport {
+	send(payload: unknown, label: string): Promise<unknown>;
+}
+
+/** A resolved adapter: its transport and the optional model id. */
+interface ResolvedAdapter {
+	transport: Transport;
+	model?: string;
+}
 
 /**
  * Normalise the many embedding response shapes into `number[][]`.
@@ -137,36 +134,61 @@ export function parseScore(payload: unknown): number {
 	throw new Error("scorer response has no numeric score");
 }
 
-/** POST JSON and return the parsed response, with a timeout. */
-async function postJson(
+/** HTTP transport: POST JSON and return the parsed response, with a timeout. */
+function httpTransport(
 	url: string,
-	body: unknown,
 	timeoutMs: number,
 	fetcher: typeof fetch,
-	label: string,
-): Promise<unknown> {
-	const controller = new AbortController();
-	const timer = setTimeout(() => controller.abort(), timeoutMs);
-	try {
-		const response = await fetcher(url, {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify(body),
-			signal: controller.signal,
-		});
-		if (!response.ok) {
-			throw new Error(`${label} endpoint returned HTTP ${response.status}`);
-		}
-		return await response.json();
-	} finally {
-		clearTimeout(timer);
-	}
+): Transport {
+	return {
+		async send(payload, label) {
+			const controller = new AbortController();
+			const timer = setTimeout(() => controller.abort(), timeoutMs);
+			try {
+				const response = await fetcher(url, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify(payload),
+					signal: controller.signal,
+				});
+				if (!response.ok) {
+					throw new Error(
+						`${label} endpoint returned HTTP ${response.status}`,
+					);
+				}
+				return await response.json();
+			} finally {
+				clearTimeout(timer);
+			}
+		},
+	};
 }
 
 /**
- * Spawn `command`, write `body` on stdin and resolve with stdout. The process
- * is non-interactive (stdin is closed after the write) and killed on timeout.
+ * Command transport: spawn `command`, write the JSON payload on stdin and
+ * parse stdout. Non-interactive (stdin is closed after the write) and killed on
+ * timeout. stdout is parsed as JSON when possible, otherwise used as raw text.
  */
+function commandTransport(command: string, timeoutMs: number): Transport {
+	return {
+		async send(payload, label) {
+			const stdout = await runCommand(
+				command,
+				JSON.stringify(payload),
+				timeoutMs,
+				label,
+			);
+			const trimmed = stdout.trim();
+			if (!trimmed) throw new Error("adapter command produced no output");
+			try {
+				return JSON.parse(trimmed);
+			} catch {
+				return trimmed;
+			}
+		},
+	};
+}
+
 function runCommand(
 	command: string,
 	body: string,
@@ -217,27 +239,11 @@ function runCommand(
 	});
 }
 
-function embeddingBody(model: string | undefined, texts: string[]): string {
-	return JSON.stringify(model ? { model, input: texts } : { input: texts });
-}
-
-function judgeBody(model: string | undefined, prompt: string): string {
-	return JSON.stringify(model ? { model, prompt } : { prompt });
-}
-
-function httpEmbedder(
-	url: string,
-	model: string | undefined,
-	timeoutMs: number,
-	fetcher: typeof fetch,
-): Embedder {
+function buildEmbedder({ transport, model }: ResolvedAdapter): Embedder {
 	return {
 		async embed(texts) {
-			const payload = await postJson(
-				url,
+			const payload = await transport.send(
 				model ? { model, input: texts } : { input: texts },
-				timeoutMs,
-				fetcher,
 				"embedding",
 			);
 			return parseEmbeddings(payload, texts.length);
@@ -245,40 +251,12 @@ function httpEmbedder(
 	};
 }
 
-function commandEmbedder(
-	command: string,
-	model: string | undefined,
-	timeoutMs: number,
-): Embedder {
-	return {
-		async embed(texts) {
-			const stdout = await runCommand(
-				command,
-				embeddingBody(model, texts),
-				timeoutMs,
-				"embedding",
-			);
-			return parseEmbeddings(JSON.parse(stdout), texts.length);
-		},
-	};
-}
-
-function httpJudge(
-	url: string,
-	model: string | undefined,
-	timeoutMs: number,
-	fetcher: typeof fetch,
-): Judge {
+function buildJudge({ transport, model }: ResolvedAdapter): Judge {
 	return {
 		async ask(prompt) {
-			const body = model
-				? { model, messages: [{ role: "user", content: prompt }] }
-				: { messages: [{ role: "user", content: prompt }] };
-			const payload = await postJson(
-				url,
-				body,
-				timeoutMs,
-				fetcher,
+			const message = { role: "user", content: prompt };
+			const payload = await transport.send(
+				model ? { model, messages: [message] } : { messages: [message] },
 				"judge",
 			);
 			return parseJudgeResponse(payload);
@@ -286,41 +264,11 @@ function httpJudge(
 	};
 }
 
-function commandJudge(
-	command: string,
-	model: string | undefined,
-	timeoutMs: number,
-): Judge {
-	return {
-		async ask(prompt) {
-			const stdout = await runCommand(
-				command,
-				judgeBody(model, prompt),
-				timeoutMs,
-				"judge",
-			);
-			return parseCommandText(stdout);
-		},
-	};
-}
-
-function scorerBody(model: string | undefined, text: string): string {
-	return JSON.stringify(model ? { model, text } : { text });
-}
-
-function httpScorer(
-	url: string,
-	model: string | undefined,
-	timeoutMs: number,
-	fetcher: typeof fetch,
-): Scorer {
+function buildScorer({ transport, model }: ResolvedAdapter): Scorer {
 	return {
 		async score(text) {
-			const payload = await postJson(
-				url,
+			const payload = await transport.send(
 				model ? { model, text } : { text },
-				timeoutMs,
-				fetcher,
 				"scorer",
 			);
 			return parseScore(payload);
@@ -328,46 +276,16 @@ function httpScorer(
 	};
 }
 
-function commandScorer(
-	command: string,
-	model: string | undefined,
-	timeoutMs: number,
-): Scorer {
-	return {
-		async score(text) {
-			const stdout = await runCommand(
-				command,
-				scorerBody(model, text),
-				timeoutMs,
-				"scorer",
-			);
-			return parseScore(JSON.parse(stdout));
-		},
-	};
-}
-
-/** Parse a command's stdout: plain text, or a JSON judge response. */
-function parseCommandText(stdout: string): string {
-	const trimmed = stdout.trim();
-	if (!trimmed) throw new Error("judge command produced no output");
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(trimmed);
-	} catch {
-		return trimmed;
-	}
-	return parseJudgeResponse(parsed);
-}
-
 /** Resolve a shared transport from an adapter config, or `undefined`. */
-function resolveTransport(
+function resolveAdapter(
 	cfg: AdapterTransportConfig | undefined,
 	deps: AdapterResolutionDeps,
 	kind: string,
-): ResolvedTransport | undefined {
+): ResolvedAdapter | undefined {
 	if (!cfg || cfg.enabled === false) return undefined;
 
 	const provider = cfg.provider ?? "http";
+	const timeoutMs = cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
 	if (provider === "http") {
 		if (!cfg.url) {
@@ -380,13 +298,7 @@ function resolveTransport(
 			deps.fetcher ??
 			((input: string | URL | Request, init?: RequestInit) =>
 				globalThis.fetch(input, init));
-		return {
-			provider: "http",
-			url: cfg.url,
-			model: cfg.model,
-			timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-			fetcher,
-		};
+		return { transport: httpTransport(cfg.url, timeoutMs, fetcher), model: cfg.model };
 	}
 
 	if (provider === "command") {
@@ -396,12 +308,7 @@ function resolveTransport(
 			);
 			return undefined;
 		}
-		return {
-			provider: "command",
-			command: cfg.command,
-			model: cfg.model,
-			timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-		};
+		return { transport: commandTransport(cfg.command, timeoutMs), model: cfg.model };
 	}
 
 	if (provider === "mcp") {
@@ -425,21 +332,8 @@ export function resolveEmbedder(
 	cfg: EmbeddingsAdapterConfig | undefined,
 	deps: AdapterResolutionDeps,
 ): Embedder | undefined {
-	const resolved = resolveTransport(cfg, deps, "embeddings");
-	if (!resolved) return undefined;
-	if (resolved.provider === "http") {
-		return httpEmbedder(
-			resolved.url,
-			resolved.model,
-			resolved.timeoutMs,
-			resolved.fetcher,
-		);
-	}
-	return commandEmbedder(
-		resolved.command,
-		resolved.model,
-		resolved.timeoutMs,
-	);
+	const resolved = resolveAdapter(cfg, deps, "embeddings");
+	return resolved ? buildEmbedder(resolved) : undefined;
 }
 
 /**
@@ -450,17 +344,8 @@ export function resolveJudge(
 	cfg: JudgeAdapterConfig | undefined,
 	deps: AdapterResolutionDeps,
 ): Judge | undefined {
-	const resolved = resolveTransport(cfg, deps, "judge");
-	if (!resolved) return undefined;
-	if (resolved.provider === "http") {
-		return httpJudge(
-			resolved.url,
-			resolved.model,
-			resolved.timeoutMs,
-			resolved.fetcher,
-		);
-	}
-	return commandJudge(resolved.command, resolved.model, resolved.timeoutMs);
+	const resolved = resolveAdapter(cfg, deps, "judge");
+	return resolved ? buildJudge(resolved) : undefined;
 }
 
 /**
@@ -471,15 +356,6 @@ export function resolveScorer(
 	cfg: ScorerAdapterConfig | undefined,
 	deps: AdapterResolutionDeps,
 ): Scorer | undefined {
-	const resolved = resolveTransport(cfg, deps, "scorer");
-	if (!resolved) return undefined;
-	if (resolved.provider === "http") {
-		return httpScorer(
-			resolved.url,
-			resolved.model,
-			resolved.timeoutMs,
-			resolved.fetcher,
-		);
-	}
-	return commandScorer(resolved.command, resolved.model, resolved.timeoutMs);
+	const resolved = resolveAdapter(cfg, deps, "scorer");
+	return resolved ? buildScorer(resolved) : undefined;
 }
