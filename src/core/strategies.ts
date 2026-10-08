@@ -21,22 +21,20 @@ import type { Message, MessagePart } from "../types.js";
  */
 export function toolCallKey(tool: string, args: unknown): string {
 	const sorted =
-		typeof args === "object" && args !== null
-			? sortKeys(args as Record<string, unknown>)
-			: args;
+		typeof args === "object" && args !== null ? sortKeys(args) : args;
 	return `${tool}::${JSON.stringify(sorted)}`;
 }
 
-function sortKeys(obj: Record<string, unknown>): Record<string, unknown> {
-	const sorted: Record<string, unknown> = {};
-	for (const key of Object.keys(obj).sort()) {
-		const val = obj[key];
-		sorted[key] =
-			typeof val === "object" && val !== null && !Array.isArray(val)
-				? sortKeys(val as Record<string, unknown>)
-				: val;
+/** Recursively sort object keys (including inside arrays) for a stable hash. */
+function sortKeys(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map(sortKeys);
+	if (value && typeof value === "object") {
+		const obj = value as Record<string, unknown>;
+		const sorted: Record<string, unknown> = {};
+		for (const key of Object.keys(obj).sort()) sorted[key] = sortKeys(obj[key]);
+		return sorted;
 	}
-	return sorted;
+	return value;
 }
 
 /**
@@ -46,6 +44,8 @@ function sortKeys(obj: Record<string, unknown>): Record<string, unknown> {
  * Earlier duplicates have their output replaced with a short marker.
  * Protected tools (in config) are never deduped.
  */
+const DEDUPED_MARKER = /^\[deduped: /;
+
 export function applyDedup(
 	messages: Message[],
 	config: LiveCompactionConfig,
@@ -68,6 +68,9 @@ export function applyDedup(
 			// Only completed tool parts have an output to dedup; error states
 			// carry `error`, not `output`.
 			if (typeof part.state?.output !== "string") continue;
+			// Already deduped in a previous pass: leave it so the removed-char
+			// count is not recomputed from the marker itself.
+			if (DEDUPED_MARKER.test(part.state.output)) continue;
 
 			const key = toolCallKey(part.tool, partInput(part));
 

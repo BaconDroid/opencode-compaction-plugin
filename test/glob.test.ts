@@ -48,6 +48,14 @@ describe("extractFilePaths()", () => {
 		});
 		expect(paths).toEqual(expect.arrayContaining(["main.ts", "a.ts", "b.ts"]));
 	});
+
+	it("trims nested edit paths and skips empty or non-string ones", () => {
+		expect(
+			extractFilePaths({
+				edits: [{ filePath: " a.ts " }, { filePath: "   " }, { filePath: 3 }],
+			}),
+		).toEqual(["a.ts"]);
+	});
 });
 
 describe("isFileProtected()", () => {
