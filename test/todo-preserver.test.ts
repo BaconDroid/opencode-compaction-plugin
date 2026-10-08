@@ -21,6 +21,14 @@ describe("extractTodos()", () => {
 		expect(extractTodos({})).toEqual([]);
 		expect(extractTodos("nope")).toEqual([]);
 	});
+
+	it("drops malformed entries and normalizes fields", () => {
+		const todos = extractTodos({
+			data: [{ content: "ok", status: "pending" }, { status: "x" }, null, 42],
+		});
+		expect(todos).toHaveLength(1);
+		expect(todos[0]).toMatchObject({ content: "ok", status: "pending" });
+	});
 });
 
 describe("renderTaskState()", () => {
