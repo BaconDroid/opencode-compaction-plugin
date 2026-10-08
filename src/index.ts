@@ -413,7 +413,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 
 			// Proactive compaction check (opt-in). Fire-and-forget so a slow
 			// summarize never blocks the tool result.
-			void preemption.maybePreempt(sessionID);
+			void preemption.maybePreempt(sessionID).catch(() => {});
 		},
 
 		// -----------------------------------------------------------------------
@@ -626,7 +626,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 					);
 					preemption.recordMessage(info.sessionID);
 					// Check on turn end too, so text-only sessions still trigger.
-					void preemption.maybePreempt(info.sessionID);
+					void preemption.maybePreempt(info.sessionID).catch(() => {});
 				}
 
 				// Post-compaction degradation diagnostic (opt-in).
