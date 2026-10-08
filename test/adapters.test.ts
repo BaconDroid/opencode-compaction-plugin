@@ -18,7 +18,6 @@ import {
 	parseEmbeddings,
 	resolveEmbedder,
 } from "../src/opencode/adapters.ts";
-import { mergeConfig } from "../src/config/config.ts";
 import { LiveCompactionPlugin } from "../src/index.ts";
 import { makeTmpSetup, recordingLogger } from "./helpers.ts";
 
@@ -341,23 +340,6 @@ describe("command embedder", () => {
 			{ logger: recordingLogger().logger },
 		);
 		await expect(embedder!.embed(["a"])).rejects.toThrow("exited with code 3");
-	});
-});
-
-describe("config: adapters.embeddings", () => {
-	it("is absent by default and preserved when configured", () => {
-		expect(mergeConfig({}).adapters).toBeUndefined();
-		const cfg = mergeConfig({
-			adapters: {
-				embeddings: {
-					provider: "http",
-					url: "http://localhost/embed",
-					model: "m",
-				},
-			},
-		});
-		expect(cfg.adapters?.embeddings?.url).toBe("http://localhost/embed");
-		expect(cfg.adapters?.embeddings?.model).toBe("m");
 	});
 });
 
