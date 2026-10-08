@@ -1667,10 +1667,11 @@ describe("LiveCompactionPlugin", () => {
 			await compact(hooks, "sess-slide", out1);
 			expect(out1.prompt).toContain("FIRST SUMMARY");
 
-			// Same summary still present: continuity is preserved.
+			// Same summary still present: continuity is preserved, emitted once.
 			const out2 = { context: [] as string[], prompt: undefined as string | undefined };
 			await compact(hooks, "sess-slide", out2);
 			expect(out2.prompt).toContain("FIRST SUMMARY");
+			expect(out2.prompt!.split("FIRST SUMMARY")).toHaveLength(2);
 
 			// A newer summary supersedes the carried one.
 			messages.mockResolvedValue({
