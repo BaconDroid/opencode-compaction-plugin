@@ -8,6 +8,7 @@
  */
 
 import type { LiveCompactionConfig } from "../config/config.js";
+import { DEDUPED_PREFIX } from "./markers.js";
 import { partInput, setPartInput } from "./messages.js";
 import type { Message, MessagePart } from "../types.js";
 
@@ -44,8 +45,6 @@ function sortKeys(value: unknown): unknown {
  * Earlier duplicates have their output replaced with a short marker.
  * Protected tools (in config) are never deduped.
  */
-const DEDUPED_MARKER = /^\[deduped: /;
-
 export function applyDedup(
 	messages: Message[],
 	config: LiveCompactionConfig,
@@ -70,7 +69,7 @@ export function applyDedup(
 			if (typeof part.state?.output !== "string") continue;
 			// Already deduped in a previous pass: leave it so the removed-char
 			// count is not recomputed from the marker itself.
-			if (DEDUPED_MARKER.test(part.state.output)) continue;
+			if (part.state.output.startsWith(DEDUPED_PREFIX)) continue;
 
 			const key = toolCallKey(part.tool, partInput(part));
 
@@ -90,7 +89,7 @@ export function applyDedup(
 			const part = messages[msgIdx].parts[partIdx];
 			if (part.state) {
 				const originalLen = (part.state.output ?? "").length;
-				part.state.output = `[deduped: same call as later ${part.tool} output — ${originalLen} chars removed]`;
+				part.state.output = `${DEDUPED_PREFIX}same call as later ${part.tool} output — ${originalLen} chars removed]`;
 			}
 			deduped++;
 		}
