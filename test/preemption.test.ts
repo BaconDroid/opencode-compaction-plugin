@@ -299,6 +299,44 @@ describe("PreemptionController", () => {
 		expect(calls).toBe(2);
 	});
 
+	it("does not resurrect a session deleted during summarize", async () => {
+		let release: () => void = () => {};
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		let entered: () => void = () => {};
+		const enteredPromise = new Promise<void>((resolve) => {
+			entered = resolve;
+		});
+		let calls = 0;
+		const controller = makeController(
+			{ contextLimit: 1000, cooldownMs: 60_000 },
+			{
+				session: {
+					summarize: async () => {
+						calls++;
+						entered();
+						if (calls === 1) await gate;
+					},
+				},
+			},
+		);
+		controller.recordUsage("s", "prov", "model-x", { input: 900 });
+		const first = controller.maybePreempt("s");
+		// Wait until summarize is in flight, then delete the session.
+		await enteredPromise;
+		controller.clear("s");
+		release();
+		await first;
+		expect(calls).toBe(1);
+
+		// The stale call must not have committed the cooldown, so a fresh
+		// trigger is allowed immediately.
+		controller.recordUsage("s", "prov", "model-x", { input: 900 });
+		await controller.maybePreempt("s");
+		expect(calls).toBe(2);
+	});
+
 	it("re-checks a negative lookup after its TTL", async () => {
 		let listCalls = 0;
 		const controller = makeController(

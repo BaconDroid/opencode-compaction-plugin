@@ -157,6 +157,9 @@ export class PreemptionController {
 		string,
 		{ limit: number | null; at: number }
 	>();
+	// Bumped by `clear` so an in-flight maybePreempt does not commit state (or
+	// summarize) for a session deleted during its awaits.
+	private generation = new Map<string, number>();
 
 	constructor(
 		private readonly client: PluginInput["client"],
@@ -237,6 +240,9 @@ export class PreemptionController {
 		// Claim the session before the first await so overlapping
 		// fire-and-forget calls cannot both summarize.
 		this.inProgress.add(sessionID);
+		const generation = this.generation.get(sessionID) ?? 0;
+		const stale = (): boolean =>
+			(this.generation.get(sessionID) ?? 0) !== generation;
 		try {
 			const usage = this.usage.get(sessionID);
 			if (!usage) return;
@@ -244,7 +250,7 @@ export class PreemptionController {
 				usage.providerID,
 				usage.modelID,
 			);
-			if (limit === undefined) return;
+			if (limit === undefined || stale()) return;
 			const effectiveTokens = effectiveInputTokens(
 				usage.tokens,
 				cfg.countCacheTokens ?? true,
@@ -275,7 +281,7 @@ export class PreemptionController {
 			if (!trigger) return;
 
 			const summarize = this.client.session?.summarize;
-			if (!summarize) return;
+			if (!summarize || stale()) return;
 
 			try {
 				await summarize({
@@ -295,6 +301,8 @@ export class PreemptionController {
 				});
 				return;
 			}
+			// A delete during the summarize must not resurrect session state.
+			if (stale()) return;
 			// Commit only after a successful compaction. The token baseline is
 			// captured on the next usage report (post-compaction), not from the
 			// pre-compaction peak.
@@ -320,6 +328,7 @@ export class PreemptionController {
 		this.toolCallsSince.delete(sessionID);
 		this.messagesSince.delete(sessionID);
 		this.pendingBaseline.delete(sessionID);
+		this.generation.set(sessionID, (this.generation.get(sessionID) ?? 0) + 1);
 	}
 
 	clearAll(): void {
@@ -331,6 +340,7 @@ export class PreemptionController {
 		this.messagesSince.clear();
 		this.pendingBaseline.clear();
 		this.contextLimitCache.clear();
+		this.generation.clear();
 	}
 
 	// Resolve the model context limit: config override first, else the provider
