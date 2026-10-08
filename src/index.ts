@@ -75,7 +75,7 @@ import {
 	missingClauses,
 	renderPinned,
 } from "./core/pin.js";
-import { partsText } from "./core/messages.js";
+import { lastMessageWhere, partsText } from "./core/messages.js";
 import type { Hooks, Logger, Message, Plugin, PluginInput } from "./types.js";
 
 /** Model-driven tools registered by this plugin (used for permission wiring). */
@@ -95,14 +95,16 @@ function makeLogger(
 	return {
 		info: (message: string, data?: unknown) => {
 			if (!enabled) return;
-			client.app.log({
+			// Fire-and-forget; swallow a rejecting log write so it cannot
+			// surface as an unhandled rejection.
+			void client.app.log({
 				body: {
 					service: "live-compaction",
 					level: "info",
 					message,
 					extra: data as Record<string, unknown> | undefined,
 				},
-			});
+			}).catch(() => {});
 		},
 	};
 }
@@ -155,9 +157,9 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 
 	// Surface config problems regardless of the debug flag.
 	for (const warning of configWarnings) {
-		ctx.client.app.log({
+		void ctx.client.app.log({
 			body: { service: "live-compaction", level: "warn", message: warning },
-		});
+		}).catch(() => {});
 	}
 
 	// Kill switch: `enabled: false` disables every hook.
@@ -282,10 +284,12 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		try {
 			const response = await fetchMessages({ path: { id: sessionID } });
 			const list = unwrapList(response);
-			const summary = (list as Message[]).find(
+			// Validate against the newest summary: older ones can still be present.
+			const summary = lastMessageWhere(
+				list,
 				(message) => message.info?.summary === true,
 			);
-			const summaryText = summary ? partsText(summary.parts) : "";
+			const summaryText = summary ? partsText(summary.message.parts) : "";
 			const missing = missingClauses(summaryText, clauses);
 			if (missing.length === 0) return;
 
@@ -677,15 +681,16 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		// Config: ensure the plugin's model-driven tools are permitted
 		// -----------------------------------------------------------------------
 		config: async (opencodeConfig) => {
-			// Without clobbering a global permission string (e.g. "allow") or an
-			// explicit per-tool deny.
+			// Without clobbering a global permission string (e.g. "allow") or any
+			// explicit per-tool rule (deny, ask, or a pattern object): only fill in
+			// an unset entry.
 			const permission = opencodeConfig.permission;
 			if (typeof permission !== "string") {
 				const map = (permission as Record<string, unknown> | undefined) ?? {};
 				const next: Record<string, unknown> = { ...map };
 				let changed = false;
 				for (const toolName of PLUGIN_TOOL_NAMES) {
-					if (next[toolName] !== "deny") {
+					if (next[toolName] === undefined) {
 						next[toolName] = "allow";
 						changed = true;
 					}

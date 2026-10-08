@@ -647,6 +647,16 @@ describe("LiveCompactionPlugin", () => {
 			expect((opencodeConfig.permission as any).squash).toBe("deny");
 			expect((opencodeConfig.permission as any).compress).toBe("allow");
 		});
+
+		it("does not escalate an explicit per-tool ask", async () => {
+			const hooks = await getHooks();
+			const opencodeConfig: Record<string, unknown> = {
+				permission: { compress: "ask" },
+			};
+			await (hooks as any).config(opencodeConfig);
+			expect((opencodeConfig.permission as any).compress).toBe("ask");
+			expect((opencodeConfig.permission as any).squash).toBe("allow");
+		});
 	});
 
 	// ---------------------------------------------------------------------------
@@ -1680,6 +1690,50 @@ describe("LiveCompactionPlugin", () => {
 			];
 			await transform(hooks, messages);
 			expect((messages[0].parts[1] as any).state.output).toBe(longOutput);
+		});
+
+		it("validates pinned clauses against the newest summary", async () => {
+			const logs: string[] = [];
+			const messages = mock().mockResolvedValue({
+				data: [
+					{
+						info: { role: "user" },
+						parts: [{ type: "text", text: "NEVER force push to main" }],
+					},
+					{
+						info: { role: "assistant", summary: true, id: "s1" },
+						parts: [{ type: "text", text: "old summary without it" }],
+					},
+					{
+						info: { role: "assistant", summary: true, id: "s2" },
+						parts: [
+							{
+								type: "text",
+								text: "new summary: NEVER force push to main",
+							},
+						],
+					},
+				],
+			});
+			const hooks = await LiveCompactionPlugin(
+				{
+					...mockCtx,
+					client: {
+						app: {
+							log: (input: { body: { message: string } }) => {
+								logs.push(input.body.message);
+								return Promise.resolve();
+							},
+						},
+						session: { messages },
+					},
+					directory: TMP_DIR,
+				} as any,
+				{ debug: true, pinning: { patterns: ["never force push"] } } as any,
+			);
+			await compact(hooks, "sess-newest", { context: [] });
+			await emit(hooks, "session.compacted", { sessionID: "sess-newest" });
+			expect(logs).not.toContain("pinned constraints missing from summary");
 		});
 	});
 });

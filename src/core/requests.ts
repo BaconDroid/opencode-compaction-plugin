@@ -59,12 +59,12 @@ export function applyPendingRequests(
 	const { config, logger, compressions, squashes, expansions, expandStore } =
 		deps;
 
-	for (const sid of deps.sessionIDs) {
-		// Tool callIDs present in this batch; requests are scoped to their
-		// originating conversation so one session's queue is never applied to
-		// another session's messages.
-		const present = presentCallIds(messages);
+	// Tool callIDs present in this batch; requests are scoped to their
+	// originating conversation so one session's queue is never applied to
+	// another session's messages. Invariant across sessions: compute once.
+	const present = presentCallIds(messages);
 
+	for (const sid of deps.sessionIDs) {
 		// Compressions.
 		const requests = compressions.drain(sid);
 		if (requests.length > 0) {

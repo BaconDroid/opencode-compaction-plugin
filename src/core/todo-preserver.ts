@@ -13,16 +13,29 @@ export interface TodoSnapshot {
 	priority?: string;
 }
 
+function normalizeTodo(value: unknown): TodoSnapshot | undefined {
+	if (!value || typeof value !== "object") return undefined;
+	const todo = value as Record<string, unknown>;
+	if (typeof todo.content !== "string") return undefined;
+	return {
+		id: typeof todo.id === "string" ? todo.id : undefined,
+		content: todo.content,
+		status: typeof todo.status === "string" ? todo.status : "",
+		priority: typeof todo.priority === "string" ? todo.priority : undefined,
+	};
+}
+
 /** Normalize the various shapes the todo API may return. */
 export function extractTodos(response: unknown): TodoSnapshot[] {
 	const payload = response as { data?: unknown } | undefined;
-	if (Array.isArray(payload?.data)) {
-		return payload.data as TodoSnapshot[];
-	}
-	if (Array.isArray(response)) {
-		return response as TodoSnapshot[];
-	}
-	return [];
+	const list = Array.isArray(payload?.data)
+		? payload.data
+		: Array.isArray(response)
+			? response
+			: [];
+	return list
+		.map(normalizeTodo)
+		.filter((todo): todo is TodoSnapshot => todo !== undefined);
 }
 
 const STATUS_MARKERS: Record<string, string> = {
