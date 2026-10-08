@@ -14,6 +14,8 @@ import {
 } from "./strategies.js";
 import { applyEviction } from "./eviction.js";
 import { applyPendingRequests, type RequestDeps } from "./requests.js";
+import { buildScorerEstimator } from "./scorer.js";
+import type { Scorer } from "./adapters.js";
 import type { Message } from "../types.js";
 
 export interface TransformDeps extends RequestDeps {
@@ -22,9 +24,16 @@ export interface TransformDeps extends RequestDeps {
 	protectedPatterns: string[];
 	turnProtectionEnabled: boolean;
 	protectedTurns: number;
+	/** Optional residual/perplexity scorer (E5); absent → heuristic estimate. */
+	scorer?: Scorer;
+	/** Max distinct texts scored per transform when `scorer` is set. */
+	scorerMaxSamples?: number;
 }
 
-export function applyTransform(messages: Message[], deps: TransformDeps): void {
+export async function applyTransform(
+	messages: Message[],
+	deps: TransformDeps,
+): Promise<void> {
 	// 0. Apply pending compression/squash/expand requests.
 	applyPendingRequests(messages, deps);
 
@@ -105,12 +114,29 @@ export function applyTransform(messages: Message[], deps: TransformDeps): void {
 
 	// 5. Graduated eviction (runs last; content-addressed, never user turns).
 	if (config.eviction?.enabled) {
+		// Optional scorer adapter (E5): calibrate the budget estimate. Any error
+		// falls back to the heuristic `estimateTokens` (fail-open).
+		let estimate: ((messages: Message[]) => number) | undefined;
+		if (deps.scorer) {
+			try {
+				estimate = await buildScorerEstimator(
+					deps.scorer,
+					messages,
+					deps.scorerMaxSamples,
+				);
+			} catch (error) {
+				logger.info("scorer adapter failed; using heuristic estimate", {
+					error: String(error),
+				});
+			}
+		}
 		const { removed, evictedIds } = applyEviction(messages, {
 			enabled: true,
 			thresholdTokens: config.eviction.thresholdTokens ?? 80000,
 			levels: config.eviction.levels,
 			protectPrologue: config.eviction.protectPrologue ?? true,
 			protectedIndices: pinnedIndices,
+			estimate,
 		});
 		if (removed > 0) {
 			logger.info("eviction applied", { removed, ids: evictedIds.length });

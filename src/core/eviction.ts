@@ -24,6 +24,11 @@ export interface EvictionConfig {
 	protectPrologue?: boolean;
 	/** Message indices never evicted (e.g. pinned constraints). */
 	protectedIndices?: Set<number>;
+	/**
+	 * Token estimator; defaults to the heuristic `estimateTokens`. An optional
+	 * scorer adapter supplies a calibrated estimator (E5).
+	 */
+	estimate?: (messages: BlockMessage[]) => number;
 }
 
 export interface EvictionResult {
@@ -142,12 +147,13 @@ export function applyEviction(
 ): EvictionResult {
 	const result: EvictionResult = { removed: 0, evictedIds: [] };
 	if (!cfg.enabled) return result;
-	if (estimateTokens(messages) <= cfg.thresholdTokens) return result;
+	const estimate = cfg.estimate ?? estimateTokens;
+	if (estimate(messages) <= cfg.thresholdTokens) return result;
 
 	const levels = cfg.levels ?? DEFAULT_LEVELS;
 	const prologueEnd = cfg.protectPrologue === false ? 0 : 1;
 	const budgetReached = (): boolean =>
-		estimateTokens(messages) <= cfg.thresholdTokens;
+		estimate(messages) <= cfg.thresholdTokens;
 	const isProtected = (index: number): boolean =>
 		index < prologueEnd ||
 		messages[index]?.info?.role === "user" ||

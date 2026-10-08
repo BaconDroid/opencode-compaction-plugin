@@ -163,12 +163,35 @@ export interface JudgeAdapterConfig {
 	timeoutMs?: number;
 }
 
+/**
+ * Optional residual/perplexity scorer adapter (E5/E9). Opt-in: disabled unless
+ * present. Refines the eviction budget estimate; absent → heuristic.
+ */
+export interface ScorerAdapterConfig {
+	/** Enable the adapter (default: true when the block is present) */
+	enabled?: boolean;
+	/** Transport: `http` (default), `command`, or `mcp` (not yet supported) */
+	provider?: AdapterProvider;
+	/** Endpoint URL (required for provider "http") */
+	url?: string;
+	/** Shell command (required for provider "command"); see README for the contract */
+	command?: string;
+	/** Optional model/identifier forwarded to the provider */
+	model?: string;
+	/** Request timeout in ms (default: 10000) */
+	timeoutMs?: number;
+	/** Maximum distinct texts scored per transform (default: 200) */
+	maxSamples?: number;
+}
+
 /** Optional external adapters (all off by default). */
 export interface AdaptersConfig {
 	/** Semantic embedding/retrieval adapter */
 	embeddings?: EmbeddingsAdapterConfig;
 	/** Model-judge adapter (semantic validation) */
 	judge?: JudgeAdapterConfig;
+	/** Residual/perplexity scorer adapter (eviction budget) */
+	scorer?: ScorerAdapterConfig;
 }
 
 export interface DegradationMonitorConfig {

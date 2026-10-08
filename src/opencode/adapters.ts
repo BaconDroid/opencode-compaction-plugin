@@ -14,11 +14,12 @@
  */
 
 import { spawn } from "node:child_process";
-import type { Embedder, Judge } from "../core/adapters.js";
+import type { Embedder, Judge, Scorer } from "../core/adapters.js";
 import type {
 	AdapterProvider,
 	EmbeddingsAdapterConfig,
 	JudgeAdapterConfig,
+	ScorerAdapterConfig,
 } from "../config/config.js";
 import type { Logger } from "../types.js";
 
@@ -118,6 +119,32 @@ export function parseJudgeResponse(payload: unknown): string {
 		}
 	}
 	throw new Error("judge response has no text");
+}
+
+/**
+ * Normalise the common scorer response shapes into a number. Accepts a bare
+ * number, a numeric string, `{ score }`/`{ value }`/`{ tokens }`/`{ residual }`
+ * or `{ data: [ … ] }`.
+ */
+export function parseScore(payload: unknown): number {
+	if (typeof payload === "number" && Number.isFinite(payload)) return payload;
+	if (typeof payload === "string" && Number.isFinite(Number(payload.trim()))) {
+		return Number(payload.trim());
+	}
+	if (payload && typeof payload === "object") {
+		const obj = payload as Record<string, unknown>;
+		for (const key of ["score", "value", "tokens", "residual"]) {
+			const value = obj[key];
+			if (typeof value === "number" && Number.isFinite(value)) return value;
+			if (typeof value === "string" && Number.isFinite(Number(value))) {
+				return Number(value);
+			}
+		}
+		if (Array.isArray(obj.data) && obj.data.length > 0) {
+			return parseScore(obj.data[0]);
+		}
+	}
+	throw new Error("scorer response has no numeric score");
 }
 
 /** POST JSON and return the parsed response, with a timeout. */
@@ -287,6 +314,48 @@ function commandJudge(
 	};
 }
 
+function scorerBody(model: string | undefined, text: string): string {
+	return JSON.stringify(model ? { model, text } : { text });
+}
+
+function httpScorer(
+	url: string,
+	model: string | undefined,
+	timeoutMs: number,
+	fetcher: typeof fetch,
+): Scorer {
+	return {
+		async score(text) {
+			const payload = await postJson(
+				url,
+				model ? { model, text } : { text },
+				timeoutMs,
+				fetcher,
+				"scorer",
+			);
+			return parseScore(payload);
+		},
+	};
+}
+
+function commandScorer(
+	command: string,
+	model: string | undefined,
+	timeoutMs: number,
+): Scorer {
+	return {
+		async score(text) {
+			const stdout = await runCommand(
+				command,
+				scorerBody(model, text),
+				timeoutMs,
+				"scorer",
+			);
+			return parseScore(JSON.parse(stdout));
+		},
+	};
+}
+
 /** Parse a command's stdout: plain text, or a JSON judge response. */
 function parseCommandText(stdout: string): string {
 	const trimmed = stdout.trim();
@@ -408,4 +477,25 @@ export function resolveJudge(
 		);
 	}
 	return commandJudge(resolved.command, resolved.model, resolved.timeoutMs);
+}
+
+/**
+ * Resolve a `Scorer` from config, or `undefined` when the adapter is off or
+ * unusable. Never throws.
+ */
+export function resolveScorer(
+	cfg: ScorerAdapterConfig | undefined,
+	deps: AdapterResolutionDeps,
+): Scorer | undefined {
+	const resolved = resolveTransport(cfg, deps, "scorer");
+	if (!resolved) return undefined;
+	if (resolved.provider === "http") {
+		return httpScorer(
+			resolved.url,
+			resolved.model,
+			resolved.timeoutMs,
+			resolved.fetcher,
+		);
+	}
+	return commandScorer(resolved.command, resolved.model, resolved.timeoutMs);
 }

@@ -34,6 +34,15 @@ export interface Judge {
 	ask(prompt: string): Promise<string>;
 }
 
+/**
+ * Optional residual/perplexity scorer: returns an estimated residual token
+ * count for a text (higher = more load-bearing). Used to refine the eviction
+ * budget estimate; absent → the heuristic `estimateTokens`.
+ */
+export interface Scorer {
+	score(text: string): Promise<number>;
+}
+
 /** A corpus entry fed to an in-memory vector index. */
 export interface CorpusItem {
 	id: string;

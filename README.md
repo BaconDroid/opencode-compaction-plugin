@@ -209,6 +209,7 @@ Each feature below lists **what** it does, its **config** keys and how it
 | Compression tools | `compress.{protectedTurns,reversible,maxBlocksPerSquash,searchMaxResults}` | `3`, `false`, `8`, `5` |
 | Semantic retrieval (optional) | `adapters.embeddings.*` | disabled |
 | Semantic constraint validation (optional) | `adapters.judge.*` | disabled |
+| Residual/perplexity scoring (optional) | `adapters.scorer.*` | disabled |
 
 ### Structured compaction prompt
 - **What** — replaces (or augments) OpenCode's default prompt with the 11-section
@@ -317,6 +318,14 @@ Each feature below lists **what** it does, its **config** keys and how it
 - **Config** — `adapters.judge.*` (opt-in; off when absent).
 - **Interactions** — only runs for clauses the substring check flagged; a `YES`
   suppresses the warning, a `NO`/unclear answer or any judge error keeps it.
+
+### Residual/perplexity scoring (optional adapter)
+- **What** — eviction normally budgets with the heuristic `estimateTokens`
+  (chars ÷ 4). When `adapters.scorer` is configured, each distinct text part is
+  scored once and its residual estimate replaces the heuristic for that text.
+- **Config** — `adapters.scorer.*` (opt-in; off when absent).
+- **Interactions** — only affects the eviction budget estimate; tool outputs and
+  unscored texts keep the heuristic; any scorer error falls back to it.
 
 ## Strategy order & interactions
 
@@ -462,11 +471,12 @@ logged and falls back to the internal behaviour, so a broken adapter can never
 break compaction. No dependency is added: adapters talk to an endpoint/command
 you already run.
 
-Two adapters exist today, both enabled by adding a block (there is no default
+Three adapters exist today, each enabled by adding a block (there is no default
 value, so each is off unless present):
 
 - **`adapters.embeddings`** — semantic retrieval for `search` (E4).
 - **`adapters.judge`** — semantic constraint validation after compaction (E6).
+- **`adapters.scorer`** — residual/perplexity estimate for the eviction budget (E5/E9).
 
 ```jsonc
 {
@@ -484,6 +494,12 @@ value, so each is off unless present):
             "url": "http://localhost:11434/v1/chat/completions",
             "model": "llama3.2",
             "timeoutMs": 20000
+        },
+        "scorer": {
+            "provider": "http",
+            "url": "http://localhost:8080/score",
+            "timeoutMs": 10000,
+            "maxSamples": 200                // max distinct texts scored per transform
         }
     }
 }
@@ -495,14 +511,17 @@ value, so each is off unless present):
 `{ "data": [{ "embedding": number[] }] }`. For `judge`, POSTs a chat request
 (`{ "model"?, "messages": [{ "role": "user", "content": prompt }] }`) and
 accepts `{ "choices": [{ "message": { "content": "…" } }] }`, `{ "response" }`,
-`{ "content" }`, `{ "text" }` or `{ "answer" }`. This covers local servers such
+`{ "content" }`, `{ "text" }` or `{ "answer" }`. For `scorer`, POSTs
+`{ "model"?, "text": "…" }` and accepts a bare number, a numeric string or
+`{ "score" | "value" | "tokens" | "residual" }`. This covers local servers such
 as Ollama, llama.cpp, LM Studio or vLLM.
 
 **Provider `command`** — spawns `command` and writes `{ "model"?, "input": [...] }`
-(`embeddings`) or `{ "model"?, "prompt": "…" }` (`judge`) on stdin. It reads the
-same response shapes as the HTTP provider on stdout; for `judge`, plain text
-stdout is accepted too. The process is non-interactive (stdin is closed) and
-killed on timeout.
+(`embeddings`), `{ "model"?, "prompt": "…" }` (`judge`) or
+`{ "model"?, "text": "…" }` (`scorer`) on stdin. It reads the same response
+shapes as the HTTP provider on stdout; for `judge`, plain text stdout is
+accepted too. The process is non-interactive (stdin is closed) and killed on
+timeout.
 
 **Provider `mcp`** — recognised but **not supported yet**; it logs a warning and
 uses the deterministic fallback. `mcp` requires SDK surface the plugin does not
@@ -535,7 +554,7 @@ bun run test:coverage
 # (OpenCode loads .ts files directly via Bun)
 ```
 
-Current coverage: **96.5% functions, 99.6% lines** (238 tests).
+Current coverage: **96.7% functions, 99.4% lines** (251 tests).
 
 ## File Structure
 
@@ -554,6 +573,7 @@ src/
     expand.ts           — reversible sidecar + inspection/search
     adapters.ts         — optional adapter contracts + in-memory vector index
     judge.ts            — optional judge orchestration for constraint validation
+    scorer.ts           — optional scorer-calibrated token estimator
     strategies.ts       — dedup, error purge, cascade purge
     eviction.ts         — graduated, LLM-free eviction
     pin.ts              — constraint pinning (E6)
@@ -591,6 +611,7 @@ test/
   pin.test.ts       — Constraint pinning tests
   adapters.test.ts  — Optional embedding adapter contracts, providers and fallback
   judge.test.ts     — Optional judge adapter, verdict parsing and E6 validation
+  scorer.test.ts    — Optional scorer adapter, estimator and eviction integration
 docs/
   context-compaction-research.md — Consolidated literature catalog, categories and implementation backlog
   research-prompt.md — Reusable prompt (bootstrap + sweep) to reproduce the literature sweep

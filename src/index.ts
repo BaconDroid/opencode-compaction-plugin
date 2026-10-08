@@ -39,7 +39,11 @@ import {
 } from "./core/expand.js";
 import { EmbeddingVectorIndex } from "./core/adapters.js";
 import { judgeClausesPreserved } from "./core/judge.js";
-import { resolveEmbedder, resolveJudge } from "./opencode/adapters.js";
+import {
+	resolveEmbedder,
+	resolveJudge,
+	resolveScorer,
+} from "./opencode/adapters.js";
 import {
 	buildCompressToolDef,
 	buildSquashToolDef,
@@ -217,6 +221,9 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 
 	// Optional model judge (opt-in) for semantic constraint validation (E6).
 	const judge = resolveJudge(config.adapters?.judge, { logger });
+
+	// Optional residual/perplexity scorer (opt-in) for the eviction budget (E5).
+	const scorer = resolveScorer(config.adapters?.scorer, { logger });
 
 	const getTracker = (sessionID: string): FilesTouchedTracker => {
 		let tracker = sessionTrackers.get(sessionID);
@@ -494,7 +501,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		// 2000-char truncation).
 		// -----------------------------------------------------------------------
 		"experimental.chat.messages.transform": async (_input, output) => {
-			applyTransform(output.messages, {
+			await applyTransform(output.messages, {
 				config,
 				logger,
 				sessionIDs: sessionTrackers.keys(),
@@ -507,6 +514,8 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 				protectedPatterns,
 				turnProtectionEnabled,
 				protectedTurns,
+				scorer,
+				scorerMaxSamples: config.adapters?.scorer?.maxSamples,
 			});
 		},
 
