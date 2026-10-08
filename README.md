@@ -614,7 +614,7 @@ test/
   expand.test.ts    — Reversible expand tests
   eviction.test.ts  — Graduated eviction tests
   todo-preserver.test.ts — Todo preserver and task-state tests
-  preemption.test.ts — Trigger, gates and preemptive tests
+  preemption.test.ts — Trigger, token gate and preemptive tests
   degradation-monitor.test.ts — Degradation monitor tests
   previous-summary.test.ts — Previous summary and sliding-state tests
   pin.test.ts       — Constraint pinning tests
@@ -625,10 +625,6 @@ test/
   messages.test.ts  — Message helper tests
   requests.test.ts  — Queued request scoping tests
   helpers.ts        — Shared test setup + recording logger
-docs/
-  context-compaction-research.md — Consolidated literature catalog, categories and implementation backlog
-  research-prompt.md — Reusable prompt (bootstrap + sweep) to reproduce the literature sweep
-  ensembles/        — Per-ensemble research, plans and results (E1–E3, E5) plus adapter/options docs
 ```
 
 ## Compatibility
