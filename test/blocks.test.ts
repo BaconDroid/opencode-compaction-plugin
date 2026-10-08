@@ -2,7 +2,6 @@ import { describe, it, expect } from "bun:test";
 import {
 	blockId,
 	isCompressedBlockMessage,
-	collectExistingBlockIds,
 	parseCompressBlocks,
 	orderCompressBlocks,
 	renderBlockBody,
@@ -51,12 +50,14 @@ describe("compressed block detection", () => {
 		);
 	});
 
-	it("collects existing block ids", () => {
-		const ids = collectExistingBlockIds([
-			textMsg("assistant", '<compressed-block id="b1" range="0-2">x</compressed-block>') as BlockMessage,
-			textMsg("assistant", '<compressed-block id="b2">y</compressed-block>') as BlockMessage,
+	it("does not let `data-id` masquerade as `id`", () => {
+		const [block] = parseCompressBlocks([
+			textMsg(
+				"assistant",
+				'<compressed-block data-id="wrong" id="right">x</compressed-block>',
+			) as BlockMessage,
 		]);
-		expect(ids).toEqual(new Set(["b1", "b2"]));
+		expect(block.id).toBe("right");
 	});
 });
 
@@ -138,6 +139,22 @@ describe("selectDeterministicSpan()", () => {
 			textMsg("assistant", '<compressed-block id="b1">x</compressed-block>') as BlockMessage,
 		];
 		expect(selectDeterministicSpan(messages, { protectedTurns: 1 })).toBeUndefined();
+	});
+
+	it("ignores a block inside the protected tail when anchoring the span", () => {
+		const messages: BlockMessage[] = [
+			textMsg("user", "u0") as BlockMessage,
+			textMsg("assistant", '<compressed-block id="b0">x</compressed-block>') as BlockMessage,
+			textMsg("user", "u1") as BlockMessage,
+			textMsg("assistant", "a1") as BlockMessage,
+			textMsg("user", "u2") as BlockMessage,
+			textMsg("assistant", '<compressed-block id="b1">y</compressed-block>') as BlockMessage,
+			textMsg("assistant", "a2") as BlockMessage,
+		];
+		// tailStart = index of the last user turn (4); the block at index 5 is
+		// inside the tail and must not anchor the span.
+		const span = selectDeterministicSpan(messages, { protectedTurns: 1 });
+		expect(span).toEqual({ start: 2, end: 3 });
 	});
 
 	it("skips synthetic block messages in the candidate queue", () => {
