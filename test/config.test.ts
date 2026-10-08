@@ -104,6 +104,24 @@ describe("mergeConfig()", () => {
 		);
 	});
 
+	it("tolerates malformed non-object sections", () => {
+		const cfg = mergeConfig({
+			dedup: null,
+			eviction: false,
+			preemptiveCompaction: 0,
+			degradationMonitor: "x",
+		} as any);
+		expect(cfg.dedup.enabled).toBe(true);
+		expect(cfg.eviction.levels).toHaveLength(4);
+		expect(cfg.preemptiveCompaction.threshold).toBe(0.78);
+		expect(cfg.degradationMonitor.threshold).toBe(4);
+	});
+
+	it("preserves an explicit empty eviction.levels", () => {
+		const cfg = mergeConfig({ eviction: { levels: [] } });
+		expect(cfg.eviction.levels).toEqual([]);
+	});
+
 	it("falls back to all levels when every level is unknown", () => {
 		const cfg = mergeConfig({ eviction: { levels: ["bogus"] } } as any);
 		expect(cfg.eviction.levels).toEqual([
