@@ -517,11 +517,11 @@ accepts `{ "choices": [{ "message": { "content": "…" } }] }`, `{ "response" }`
 as Ollama, llama.cpp, LM Studio or vLLM.
 
 **Provider `command`** — spawns `command` and writes `{ "model"?, "input": [...] }`
-(`embeddings`), `{ "model"?, "prompt": "…" }` (`judge`) or
-`{ "model"?, "text": "…" }` (`scorer`) on stdin. It reads the same response
-shapes as the HTTP provider on stdout; for `judge`, plain text stdout is
-accepted too. The process is non-interactive (stdin is closed) and killed on
-timeout.
+(`embeddings`), `{ "model"?, "messages": [{ "role": "user", "content": "…" }] }`
+(`judge`, same shape as HTTP) or `{ "model"?, "text": "…" }` (`scorer`) on stdin.
+It reads the same response shapes as the HTTP provider on stdout; for `judge`,
+plain text stdout is accepted too. The process is non-interactive (stdin is
+closed) and killed on timeout.
 
 **Provider `mcp`** — recognised but **not supported yet**; it logs a warning and
 uses the deterministic fallback. `mcp` requires SDK surface the plugin does not
@@ -554,7 +554,7 @@ bun run test:coverage
 # (OpenCode loads .ts files directly via Bun)
 ```
 
-Current coverage: **96.5% functions, 99.7% lines** (292 tests).
+Current coverage: **96.5% functions, 99.7% lines** (293 tests).
 
 ## File Structure
 
