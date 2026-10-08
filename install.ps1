@@ -45,17 +45,15 @@ if (-not (Test-Path $SrcDir)) {
 # Create plugin directory
 New-Item -ItemType Directory -Path $PluginDir -Force | Out-Null
 
-# Copy source files
-$files = Get-ChildItem -Path $SrcDir -Filter "*.ts" -File
-if ($files.Count -eq 0) {
+# Copy the source tree (preserve core/, config/, opencode/)
+$sources = Get-ChildItem -Path $SrcDir -Filter "*.ts" -File -Recurse
+if ($sources.Count -eq 0) {
     Write-Host "[error] No TypeScript sources found in $SrcDir" -ForegroundColor Red
     exit 1
 }
-foreach ($file in $files) {
-    Copy-Item $file.FullName (Join-Path $PluginDir $file.Name) -Force
-}
+Copy-Item -Path (Join-Path $SrcDir "*") -Destination $PluginDir -Recurse -Force
 
-$installed = (Get-ChildItem -Path $PluginDir -Filter "*.ts" -File).Count
+$installed = (Get-ChildItem -Path $PluginDir -Filter "*.ts" -File -Recurse).Count
 Write-Host "[ok]    Plugin installed to $PluginDir\ ($installed TypeScript files)" -ForegroundColor Green
 
 # Create entry point barrel file
@@ -79,6 +77,10 @@ if (Test-Path $ConfigFile) {
     }
 } else {
     Write-Host "[info]  No opencode.json found. The local plugin will be auto-loaded from .opencode\plugins\" -ForegroundColor Cyan
+}
+
+if ($TmpDir -and (Test-Path $TmpDir)) {
+    Remove-Item -Recurse -Force $TmpDir
 }
 
 Write-Host ""
