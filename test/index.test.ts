@@ -1808,4 +1808,34 @@ describe("LiveCompactionPlugin", () => {
 			expect(logs).not.toContain("pinned constraints missing from summary");
 		});
 	});
+
+	describe("adapter diagnostics", () => {
+		it("warns about a misconfigured adapter even when debug is off", async () => {
+			const logs: Array<{ level: string; message: string }> = [];
+			await LiveCompactionPlugin(
+				{
+					...mockCtx,
+					client: {
+						app: {
+							log: (input: {
+								body: { level: string; message: string };
+							}) => {
+								logs.push(input.body);
+								return Promise.resolve();
+							},
+						},
+					},
+					directory: TMP_DIR,
+				} as any,
+				{ adapters: { embeddings: { provider: "mcp" } } } as any,
+			);
+			expect(
+				logs.some(
+					(entry) =>
+						entry.level === "warn" &&
+						entry.message.includes("mcp provider is not supported"),
+				),
+			).toBe(true);
+		});
+	});
 });

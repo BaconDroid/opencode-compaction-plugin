@@ -7,9 +7,12 @@
  * not require it beyond the `tool` helper.
  */
 
-/** Minimal debug logger writing to OpenCode's app log. */
+/** Minimal logger writing to OpenCode's app log. */
 export interface Logger {
+	/** Debug-level diagnostic (gated by the `debug` config flag). */
 	info: (message: string, data?: unknown) => void;
+	/** Always-on diagnostic (adapter misconfig, swallowed hook errors). */
+	warn: (message: string, data?: unknown) => void;
 }
 
 export interface MessagePart {

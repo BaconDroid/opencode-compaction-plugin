@@ -28,7 +28,7 @@ function makeController(
 		},
 		...clientOver,
 	};
-	const logger = { info: () => {} };
+	const logger = { info: () => {}, warn: () => {} };
 	return new PreemptionController(client as never, "/tmp", config, logger);
 }
 
