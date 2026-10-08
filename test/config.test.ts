@@ -68,6 +68,61 @@ describe("mergeConfig()", () => {
 		});
 	});
 
+	it("keeps defaults when an override value is undefined", () => {
+		const cfg = mergeConfig({ dedup: { enabled: undefined } });
+		expect(cfg.dedup.enabled).toBe(true);
+	});
+
+	it("returns an independent copy of the defaults", () => {
+		const a = mergeConfig({});
+		a.dedup.protectedTools.push("x");
+		a.eviction.levels.push("episode");
+		expect(mergeConfig({}).dedup.protectedTools).toEqual([]);
+		expect(mergeConfig({}).eviction.levels).toHaveLength(4);
+	});
+
+	it("normalizes destructive or malformed values", () => {
+		const cfg = mergeConfig({
+			eviction: { thresholdTokens: -5, levels: ["bogus", "episode"] },
+			purgeErrors: { turns: -1 },
+			preemptiveCompaction: { threshold: 2, cooldownMs: -10 },
+			degradationMonitor: { threshold: 0 },
+		} as any);
+		expect(cfg.eviction.thresholdTokens).toBe(
+			DEFAULT_CONFIG.eviction.thresholdTokens,
+		);
+		expect(cfg.eviction.levels).toEqual(["episode"]);
+		expect(cfg.purgeErrors.turns).toBe(DEFAULT_CONFIG.purgeErrors.turns);
+		expect(cfg.preemptiveCompaction.threshold).toBe(
+			DEFAULT_CONFIG.preemptiveCompaction.threshold,
+		);
+		expect(cfg.preemptiveCompaction.cooldownMs).toBe(
+			DEFAULT_CONFIG.preemptiveCompaction.cooldownMs,
+		);
+		expect(cfg.degradationMonitor.threshold).toBe(
+			DEFAULT_CONFIG.degradationMonitor.threshold,
+		);
+	});
+
+	it("falls back to all levels when every level is unknown", () => {
+		const cfg = mergeConfig({ eviction: { levels: ["bogus"] } } as any);
+		expect(cfg.eviction.levels).toEqual([
+			"reasoning",
+			"bulk_output",
+			"intermediate",
+			"episode",
+		]);
+	});
+
+	it("coerces non-array list config to empty and drops non-strings", () => {
+		const cfg = mergeConfig({
+			dedup: { protectedTools: "bash" },
+			pinning: { patterns: [1, "keep", null] },
+		} as any);
+		expect(cfg.dedup.protectedTools).toEqual([]);
+		expect(cfg.pinning.patterns).toEqual(["keep"]);
+	});
+
 	it("overrides top-level and strategy settings", () => {
 		const cfg = mergeConfig({
 			enabled: false,

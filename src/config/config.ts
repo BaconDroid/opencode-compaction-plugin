@@ -332,6 +332,9 @@ export function deepMerge(
 ): LiveCompactionConfig {
 	const out: Record<string, unknown> = { ...base };
 	for (const [key, value] of Object.entries(override)) {
+		// `undefined` means "unset": keep the lower layer's value rather than
+		// clobbering a default with undefined.
+		if (value === undefined) continue;
 		const current = out[key];
 		out[key] =
 			isPlainObject(value) && isPlainObject(current)
@@ -344,14 +347,88 @@ export function deepMerge(
 	return out as LiveCompactionConfig;
 }
 
+const EVICTION_LEVELS: EvictionLevel[] = [
+	"reasoning",
+	"bulk_output",
+	"intermediate",
+	"episode",
+];
+
+/** A finite number >= 0, else the default. Non-numbers are rejected. */
+function nonNegative(value: unknown, fallback: number): number {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0
+		? value
+		: fallback;
+}
+
 /**
- * Merge user config over defaults. Deep-merges nested objects.
+ * Defensively normalize values that JSON config could set to destructive or
+ * nonsensical values (the loader casts `JSON.parse` output without validation).
+ */
+function normalizeConfig(cfg: ResolvedConfig): ResolvedConfig {
+	cfg.dedup.protectedTools = Array.isArray(cfg.dedup.protectedTools)
+		? cfg.dedup.protectedTools.filter((t) => typeof t === "string")
+		: [];
+
+	cfg.pinning.patterns = Array.isArray(cfg.pinning.patterns)
+		? cfg.pinning.patterns.filter((p) => typeof p === "string")
+		: [];
+
+	const levels = Array.isArray(cfg.eviction.levels)
+		? cfg.eviction.levels.filter((l): l is EvictionLevel =>
+				(EVICTION_LEVELS as string[]).includes(l as string),
+			)
+		: [];
+	cfg.eviction.levels = levels.length > 0 ? levels : [...EVICTION_LEVELS];
+
+	cfg.eviction.thresholdTokens = nonNegative(
+		cfg.eviction.thresholdTokens,
+		DEFAULT_CONFIG.eviction.thresholdTokens,
+	);
+	cfg.purgeErrors.turns = Math.floor(
+		nonNegative(cfg.purgeErrors.turns, DEFAULT_CONFIG.purgeErrors.turns),
+	);
+	cfg.preemptiveCompaction.cooldownMs = nonNegative(
+		cfg.preemptiveCompaction.cooldownMs,
+		DEFAULT_CONFIG.preemptiveCompaction.cooldownMs,
+	);
+	cfg.preemptiveCompaction.minTokensSinceLast = nonNegative(
+		cfg.preemptiveCompaction.minTokensSinceLast,
+		DEFAULT_CONFIG.preemptiveCompaction.minTokensSinceLast,
+	);
+	cfg.preemptiveCompaction.minMessagesSinceLast = nonNegative(
+		cfg.preemptiveCompaction.minMessagesSinceLast,
+		DEFAULT_CONFIG.preemptiveCompaction.minMessagesSinceLast,
+	);
+	const threshold = cfg.preemptiveCompaction.threshold;
+	if (typeof threshold !== "number" || !(threshold > 0 && threshold <= 1)) {
+		cfg.preemptiveCompaction.threshold =
+			DEFAULT_CONFIG.preemptiveCompaction.threshold;
+	}
+	const degThreshold = cfg.degradationMonitor.threshold;
+	if (typeof degThreshold !== "number" || !(degThreshold > 0)) {
+		cfg.degradationMonitor.threshold =
+			DEFAULT_CONFIG.degradationMonitor.threshold;
+	}
+	cfg.degradationMonitor.windowMs = nonNegative(
+		cfg.degradationMonitor.windowMs,
+		DEFAULT_CONFIG.degradationMonitor.windowMs,
+	);
+
+	return cfg;
+}
+
+/**
+ * Merge user config over defaults. Deep-merges nested objects. The defaults are
+ * cloned so a caller cannot mutate the shared `DEFAULT_CONFIG` through the
+ * result, and the merged result is normalized defensively.
  */
 export function mergeConfig(user: LiveCompactionConfig): ResolvedConfig {
-	return deepMerge(
-		DEFAULT_CONFIG as LiveCompactionConfig,
+	const merged = deepMerge(
+		structuredClone(DEFAULT_CONFIG) as LiveCompactionConfig,
 		user,
 	) as ResolvedConfig;
+	return normalizeConfig(merged);
 }
 
 /** The fully-resolved configuration (defaults merged with user config). */
