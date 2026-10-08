@@ -58,6 +58,18 @@ describe("FilesTouchedTracker", () => {
 		expect(manifest).toContain("src/staged.ts");
 	});
 
+	it("maps shell verbs to operations", () => {
+		const tracker = new FilesTouchedTracker();
+		tracker.processToolCall("bash", { command: "rm src/old.ts" });
+		tracker.processToolCall("bash", { command: "mv src/a.ts src/b.ts" });
+		tracker.processToolCall("bash", { command: "cp src/a.ts src/copy.ts" });
+		const manifest = tracker.renderManifest();
+		expect(manifest).toContain("- `src/old.ts` `D`");
+		expect(manifest).toContain("- `src/a.ts` `M` `W`");
+		expect(manifest).toContain("- `src/b.ts` `M`");
+		expect(manifest).toContain("- `src/copy.ts` `W`");
+	});
+
 	it("ignores unknown tools and malformed args", () => {
 		const tracker = new FilesTouchedTracker();
 		tracker.processToolCall("unknown_tool", { path: "src/a.ts" });
