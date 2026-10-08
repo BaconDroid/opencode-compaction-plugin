@@ -276,6 +276,29 @@ describe("PreemptionController", () => {
 		expect(listCalls).toBe(1);
 	});
 
+	it("does not commit gate/cooldown state when summarize fails", async () => {
+		let calls = 0;
+		let fail = true;
+		const controller = makeController(
+			{ contextLimit: 1000, cooldownMs: 60_000 },
+			{
+				session: {
+					summarize: async () => {
+						calls++;
+						if (fail) throw new Error("boom");
+					},
+				},
+			},
+		);
+		controller.recordUsage("s", "prov", "model-x", { input: 900 });
+		await controller.maybePreempt("s");
+		expect(calls).toBe(1);
+		// The failure must not set the cooldown, so a retry is allowed.
+		fail = false;
+		await controller.maybePreempt("s");
+		expect(calls).toBe(2);
+	});
+
 	it("re-checks a negative lookup after its TTL", async () => {
 		let listCalls = 0;
 		const controller = makeController(

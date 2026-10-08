@@ -196,7 +196,7 @@ export class PreemptionController {
 				sessionID,
 				effectiveInputTokens(
 					tokens,
-					this.config.preemptiveCompaction?.countCacheTokens ?? false,
+					this.config.preemptiveCompaction?.countCacheTokens ?? true,
 				),
 			);
 		}
@@ -222,7 +222,7 @@ export class PreemptionController {
 		if (limit === undefined) return true;
 		const effective = effectiveInputTokens(
 			usage.tokens,
-			cfg.countCacheTokens ?? false,
+			cfg.countCacheTokens ?? true,
 		);
 		return effective >= resolveTriggerThreshold(limit, cfg) * 0.5;
 	}
@@ -247,7 +247,7 @@ export class PreemptionController {
 			if (limit === undefined) return;
 			const effectiveTokens = effectiveInputTokens(
 				usage.tokens,
-				cfg.countCacheTokens ?? false,
+				cfg.countCacheTokens ?? true,
 			);
 			const thresholdTokens = resolveTriggerThreshold(limit, cfg);
 			const baseline = this.tokensAtLast.get(sessionID);
@@ -277,13 +277,6 @@ export class PreemptionController {
 			const summarize = this.client.session?.summarize;
 			if (!summarize) return;
 
-			this.last.set(sessionID, Date.now());
-			// Reset the deterministic gates. The token baseline is captured on the
-			// next usage report (post-compaction), not from the pre-compaction peak.
-			this.pendingBaseline.add(sessionID);
-			this.tokensAtLast.delete(sessionID);
-			this.toolCallsSince.set(sessionID, 0);
-			this.messagesSince.set(sessionID, 0);
 			try {
 				await summarize({
 					path: { id: sessionID },
@@ -294,15 +287,26 @@ export class PreemptionController {
 					},
 					query: { directory: this.directory },
 				});
-				this.logger.info("preemptive compaction triggered", {
-					sessionID,
-					ratio: effectiveTokens / limit,
-				});
 			} catch (error) {
-				this.logger.info("preemptive compaction failed", {
+				// Do not commit gate/cooldown state on failure, so a transient
+				// error does not suppress the next compaction attempt.
+				this.logger.warn("preemptive compaction failed", {
 					error: String(error),
 				});
+				return;
 			}
+			// Commit only after a successful compaction. The token baseline is
+			// captured on the next usage report (post-compaction), not from the
+			// pre-compaction peak.
+			this.last.set(sessionID, Date.now());
+			this.pendingBaseline.add(sessionID);
+			this.tokensAtLast.delete(sessionID);
+			this.toolCallsSince.set(sessionID, 0);
+			this.messagesSince.set(sessionID, 0);
+			this.logger.info("preemptive compaction triggered", {
+				sessionID,
+				ratio: effectiveTokens / limit,
+			});
 		} finally {
 			this.inProgress.delete(sessionID);
 		}
