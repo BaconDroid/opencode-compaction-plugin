@@ -49,8 +49,11 @@ describe("omo-slim compatibility contract", () => {
 	beforeEach(setupTmp);
 	afterEach(cleanupTmp);
 
-	it("registers no tool name that collides with omo-slim", () => {
-		for (const name of PLUGIN_TOOLS) {
+	it("registers no tool name that collides with omo-slim", async () => {
+		const hooks = await LiveCompactionPlugin(mockCtx as any);
+		const names = Object.keys((hooks as any).tool ?? {});
+		expect(names.length).toBeGreaterThan(0);
+		for (const name of names) {
 			expect(OMO_SLIM_EXACT).not.toContain(name);
 			for (const prefix of OMO_SLIM_PREFIXES) {
 				expect(name.startsWith(prefix)).toBe(false);

@@ -68,7 +68,7 @@ describe("extractPreviousSummary()", () => {
 	it("does not re-emit the summary already carried forward", () => {
 		const state: SlidingState = {
 			lastSummaryMessageId: "s1",
-			lastSummaryText: "first",
+			lastSummaryText: "carried",
 		};
 		const messages = [
 			{
@@ -76,8 +76,9 @@ describe("extractPreviousSummary()", () => {
 				parts: [{ type: "text", text: "first" }],
 			},
 		];
-		// Falls back to the carried text rather than returning a duplicate.
-		expect(extractPreviousSummary(messages, state)).toBe("first");
+		// The matching message is skipped, so it falls back to the carried text
+		// (a re-emit would return "first" and fail).
+		expect(extractPreviousSummary(messages, state)).toBe("carried");
 	});
 
 	it("prefers a newer summary over the carried one", () => {

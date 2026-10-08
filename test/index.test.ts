@@ -285,12 +285,24 @@ describe("LiveCompactionPlugin", () => {
 			}
 		});
 
-		it("ignores other event types", async () => {
-			const hooks = await getHooks();
-			// Should not throw
+		it("ignores other event types without logging", async () => {
+			const logs: string[] = [];
+			const hooks = await LiveCompactionPlugin({
+				...mockCtx,
+				client: {
+					app: {
+						log: (input: { body: { message: string } }) => {
+							logs.push(input.body.message);
+							return Promise.resolve();
+						},
+					},
+				},
+				directory: TMP_DIR,
+			} as any);
 			await hooks.event!({
 				event: { id: "evt-2", type: "session.updated", properties: {} },
 			});
+			expect(logs).toEqual([]);
 		});
 	});
 
@@ -327,7 +339,7 @@ describe("LiveCompactionPlugin", () => {
 			const hooks = await getHooks();
 			const longOutput = "x".repeat(5000);
 			// Build messages with the tool call outside the protected turn window (4 turns)
-			// Tool at index 1, followed by 5 user turns to push it out of the window
+			// Tool at index 0, followed by 5 user turns to push it out of the window
 			const messages = [
 				{
 					info: { role: "assistant" },
@@ -690,6 +702,9 @@ describe("LiveCompactionPlugin", () => {
 						},
 					],
 				},
+				// Push the tool out of the turn-protection window so trimming
+				// actually runs (otherwise the test is vacuous).
+				...userTurns(5),
 			];
 			await transform(hooks, messages);
 			// Should NOT be trimmed because AGENTS.md is protected
@@ -756,6 +771,7 @@ describe("LiveCompactionPlugin", () => {
 						},
 					],
 				},
+				...userTurns(5),
 			];
 			await transform(hooks, messages);
 			expect(messages[0].parts[0].state.output).toBe(longContent);
