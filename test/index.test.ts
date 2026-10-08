@@ -461,6 +461,31 @@ describe("LiveCompactionPlugin", () => {
 			expect(messages[1].parts[0].state.output).toBe("new content");
 		});
 
+		it("tolerates a message without parts and still runs later stages", async () => {
+			const hooks = await getHooks();
+			const tool = (output: string) => ({
+				info: { role: "assistant" },
+				parts: [
+					{
+						type: "tool",
+						tool: "read",
+						args: { filePath: "a.ts" },
+						state: { output },
+					},
+				],
+			});
+			// Index 0 has no `parts`; trim used to throw here, which (via the
+			// safe wrapper) skipped dedup/purge/eviction for the whole batch.
+			const messages = [
+				{ info: { role: "assistant" } },
+				tool("v1"),
+				tool("v2"),
+				...userTurns(5),
+			];
+			await transform(hooks, messages);
+			expect(messages[1].parts[0].state.output).toContain("deduped");
+		});
+
 		it("keeps dedup markers intact across passes with a small trim limit", async () => {
 			const hooks = await getHooks();
 			const tool = (output: string) => ({
