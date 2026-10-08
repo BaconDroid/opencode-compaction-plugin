@@ -68,10 +68,9 @@ export class FilesTouchedTracker {
 			case "bash":
 			case "shell": {
 				const cmd = typeof args.command === "string" ? args.command : "";
-				extractPathsFromCommand(cmd).forEach((p) => {
-					// Best-effort: record as read since we can't easily determine operation type
-					this.record(p, "R");
-				});
+				for (const { path, op } of commandOperations(cmd)) {
+					this.record(path, op);
+				}
 				break;
 			}
 			case "delete":
@@ -137,31 +136,47 @@ function extractPath(
 }
 
 /**
- * Best-effort extraction of file paths from shell commands.
- * Catches common patterns like `cat file.txt`, `vim file.ts`, etc.
+ * Best-effort extraction of file paths and their operation from a shell command
+ * (`cat`/`git` → read, `touch`/`cp`/`mkdir` → write, `vim` → edit, `mv` → move,
+ * `rm` → delete).
  */
-function extractPathsFromCommand(cmd: string): string[] {
-	const paths: string[] = [];
+function commandOperations(
+	cmd: string,
+): Array<{ path: string; op: FileOperation }> {
+	const results: Array<{ path: string; op: FileOperation }> = [];
+	const add = (candidate: string | undefined, op: FileOperation): void => {
+		if (candidate && !candidate.startsWith("-") && looksLikePath(candidate)) {
+			results.push({ path: candidate, op });
+		}
+	};
 
-	// Common file-related commands with their path positions
-	const patterns = [
-		/(?:cat|head|tail|less|more|touch|rm|cp|mv|chmod|chown|mkdir)\s+["']?([^\s"']+)["']?/g,
-		/(?:vim|nano|code|edit)\s+["']?([^\s"']+)["']?/g,
-		/(?:git)\s+(?:add|checkout|restore|diff)\s+["']?([^\s"']+)["']?/g,
-		/(?:grep|rg|find|ag)\s+.*["']?([^\s"']+\.\w+)["']?/g,
+	const single: Array<[RegExp, FileOperation]> = [
+		[/(?:cat|head|tail|less|more)\s+["']?([^\s"']+)["']?/g, "R"],
+		[/(?:touch|mkdir|chmod|chown)\s+["']?([^\s"']+)["']?/g, "W"],
+		[/(?:rm)\s+["']?([^\s"']+)["']?/g, "D"],
+		[/(?:vim|nano|code|edit)\s+["']?([^\s"']+)["']?/g, "E"],
+		[/(?:git)\s+(?:add|checkout|restore|diff)\s+["']?([^\s"']+)["']?/g, "R"],
+		[/(?:grep|rg|find|ag)\s+.*["']?([^\s"']+\.\w+)["']?/g, "R"],
 	];
+	for (const [pattern, op] of single) {
+		let match: RegExpExecArray | null;
+		while ((match = pattern.exec(cmd)) !== null) add(match[1], op);
+	}
 
-	for (const pattern of patterns) {
+	// `cp`/`mv` take a source and a destination.
+	const pairs: Array<[RegExp, FileOperation]> = [
+		[/(?:cp)\s+["']?([^\s"']+)["']?\s+["']?([^\s"']+)["']?/g, "W"],
+		[/(?:mv)\s+["']?([^\s"']+)["']?\s+["']?([^\s"']+)["']?/g, "M"],
+	];
+	for (const [pattern, op] of pairs) {
 		let match: RegExpExecArray | null;
 		while ((match = pattern.exec(cmd)) !== null) {
-			const candidate = match[1];
-			if (candidate && !candidate.startsWith("-") && looksLikePath(candidate)) {
-				paths.push(candidate);
-			}
+			add(match[1], op);
+			add(match[2], op);
 		}
 	}
 
-	return paths;
+	return results;
 }
 
 function looksLikePath(s: string): boolean {

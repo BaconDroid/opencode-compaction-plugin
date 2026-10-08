@@ -27,6 +27,11 @@ export function extractLatestUserAsk(
 	return text.length > maxLen ? `${text.slice(0, maxLen)}…` : text;
 }
 
+/** Remove a block's own tags from injected text so it cannot break out. */
+function stripTags(text: string, tag: string): string {
+	return text.split(`<${tag}>`).join("").split(`</${tag}>`).join("");
+}
+
 export function buildCompactionPrompt(input: {
 	filesTouched?: string;
 	previousSummary?: string;
@@ -39,19 +44,19 @@ export function buildCompactionPrompt(input: {
 		: "";
 
 	const previousBlock = input.previousSummary
-		? `\n\n<previous-summary>\n${input.previousSummary}\n</previous-summary>`
+		? `\n\n<previous-summary>\n${stripTags(input.previousSummary, "previous-summary")}\n</previous-summary>`
 		: "";
 
 	const taskStateBlock = input.taskState
-		? `\n\n<task-state>\n${input.taskState}\n</task-state>`
+		? `\n\n<task-state>\n${stripTags(input.taskState, "task-state")}\n</task-state>`
 		: "";
 
 	const focusBlock = input.focus
-		? `\n\n<latest-user-ask>\n${input.focus}\n</latest-user-ask>`
+		? `\n\n<latest-user-ask>\n${stripTags(input.focus, "latest-user-ask")}\n</latest-user-ask>`
 		: "";
 
 	const pinnedBlock = input.pinned
-		? `\n\n<pinned-constraints>\n${input.pinned}\n</pinned-constraints>`
+		? `\n\n<pinned-constraints>\n${stripTags(input.pinned, "pinned-constraints")}\n</pinned-constraints>`
 		: "";
 
 	return `You are an anchored context summarization assistant for coding sessions.
