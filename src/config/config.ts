@@ -366,6 +366,23 @@ function nonNegative(value: unknown, fallback: number): number {
  * nonsensical values (the loader casts `JSON.parse` output without validation).
  */
 function normalizeConfig(cfg: ResolvedConfig): ResolvedConfig {
+	// A malformed section (e.g. `"dedup": null`) would throw here; coerce it to
+	// the default section instead, matching the previous tolerant behavior.
+	for (const key of [
+		"dedup",
+		"pinning",
+		"eviction",
+		"purgeErrors",
+		"preemptiveCompaction",
+		"degradationMonitor",
+	] as const) {
+		if (!isPlainObject(cfg[key])) {
+			(cfg as Record<string, unknown>)[key] = structuredClone(
+				DEFAULT_CONFIG[key],
+			);
+		}
+	}
+
 	cfg.dedup.protectedTools = Array.isArray(cfg.dedup.protectedTools)
 		? cfg.dedup.protectedTools.filter((t) => typeof t === "string")
 		: [];
@@ -374,12 +391,15 @@ function normalizeConfig(cfg: ResolvedConfig): ResolvedConfig {
 		? cfg.pinning.patterns.filter((p) => typeof p === "string")
 		: [];
 
-	const levels = Array.isArray(cfg.eviction.levels)
-		? cfg.eviction.levels.filter((l): l is EvictionLevel =>
-				(EVICTION_LEVELS as string[]).includes(l as string),
-			)
-		: [];
-	cfg.eviction.levels = levels.length > 0 ? levels : [...EVICTION_LEVELS];
+	// Preserve an explicit empty array (a way to disable eviction via levels).
+	if (!Array.isArray(cfg.eviction.levels)) {
+		cfg.eviction.levels = [...EVICTION_LEVELS];
+	} else if (cfg.eviction.levels.length > 0) {
+		const levels = cfg.eviction.levels.filter((l): l is EvictionLevel =>
+			(EVICTION_LEVELS as string[]).includes(l as string),
+		);
+		cfg.eviction.levels = levels.length > 0 ? levels : [...EVICTION_LEVELS];
+	}
 
 	cfg.eviction.thresholdTokens = nonNegative(
 		cfg.eviction.thresholdTokens,
