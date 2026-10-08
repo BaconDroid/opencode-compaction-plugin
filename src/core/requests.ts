@@ -63,7 +63,7 @@ export function applyPendingRequests(
 	// originating conversation so one session's queue is never applied to
 	// another session's messages. Invariant across sessions: compute once.
 	const present = presentCallIds(messages);
-	const reversible = config.compress?.reversible ?? true;
+	const reversible = config.compress?.reversible ?? false;
 
 	for (const sid of deps.sessionIDs) {
 		// Compressions.
@@ -90,18 +90,7 @@ export function applyPendingRequests(
 				}
 			}
 
-			// Re-queue requests for a different conversation, unless stale.
-			const now = Date.now();
-			for (const req of deferred) {
-				if (now - req.timestamp < DEFERRED_COMPRESSION_MAX_AGE_MS) {
-					compressions.queue(sid, req);
-				} else {
-					logger.info("compress deferred request expired", {
-						sessionID: sid,
-						topic: req.topic,
-					});
-				}
-			}
+			requeueDeferred(compressions, sid, deferred, logger, "compress");
 		}
 
 		// Squash contiguous blocks.

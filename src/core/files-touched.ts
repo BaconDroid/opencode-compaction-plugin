@@ -150,13 +150,14 @@ function commandOperations(
 		}
 	};
 
+	// `\b` anchors the verb so e.g. `copycat` is not read as `cat`.
 	const single: Array<[RegExp, FileOperation]> = [
-		[/(?:cat|head|tail|less|more)\s+["']?([^\s"']+)["']?/g, "R"],
-		[/(?:touch|mkdir|chmod|chown)\s+["']?([^\s"']+)["']?/g, "W"],
-		[/(?:rm)\s+["']?([^\s"']+)["']?/g, "D"],
-		[/(?:vim|nano|code|edit)\s+["']?([^\s"']+)["']?/g, "E"],
-		[/(?:git)\s+(?:add|checkout|restore|diff)\s+["']?([^\s"']+)["']?/g, "R"],
-		[/(?:grep|rg|find|ag)\s+.*["']?([^\s"']+\.\w+)["']?/g, "R"],
+		[/\b(?:cat|head|tail|less|more)\s+["']?([^\s"']+)["']?/g, "R"],
+		[/\b(?:touch|mkdir|chmod|chown)\s+["']?([^\s"']+)["']?/g, "W"],
+		[/\b(?:rm)\s+["']?([^\s"']+)["']?/g, "D"],
+		[/\b(?:vim|nano|code|edit)\s+["']?([^\s"']+)["']?/g, "E"],
+		[/\b(?:git)\s+(?:add|checkout|restore|diff)\s+["']?([^\s"']+)["']?/g, "R"],
+		[/\b(?:grep|rg|find|ag)\s+.*["']?([^\s"']+\.\w+)["']?/g, "R"],
 	];
 	for (const [pattern, op] of single) {
 		let match: RegExpExecArray | null;
@@ -165,8 +166,8 @@ function commandOperations(
 
 	// `cp`/`mv` take a source and a destination.
 	const pairs: Array<[RegExp, FileOperation]> = [
-		[/(?:cp)\s+["']?([^\s"']+)["']?\s+["']?([^\s"']+)["']?/g, "W"],
-		[/(?:mv)\s+["']?([^\s"']+)["']?\s+["']?([^\s"']+)["']?/g, "M"],
+		[/\b(?:cp)\s+["']?([^\s"']+)["']?\s+["']?([^\s"']+)["']?/g, "W"],
+		[/\b(?:mv)\s+["']?([^\s"']+)["']?\s+["']?([^\s"']+)["']?/g, "M"],
 	];
 	for (const [pattern, op] of pairs) {
 		let match: RegExpExecArray | null;
