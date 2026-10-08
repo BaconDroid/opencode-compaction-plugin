@@ -35,6 +35,13 @@ export function trimToolOutput(
 	if (TRIMMED_MARKER.test(output)) return output;
 
 	const limit = trimMap[toolName] ?? defaultLimit;
+	// A non-positive limit means "keep nothing"; `slice(-0)` would otherwise
+	// return the whole output while still appending a (false) trim marker.
+	if (limit <= 0) {
+		return output.length === 0
+			? output
+			: `\n... [trimmed ${output.length}/${output.length} chars]`;
+	}
 	if (output.length <= limit) return output;
 
 	const indicator = `\n... [trimmed ${output.length - limit}/${output.length} chars]`;

@@ -10,22 +10,13 @@ function escapeRegExpChar(ch: string): string {
 	return /[\\.^$+{}()|[\]]/.test(ch) ? `\\${ch}` : ch;
 }
 
-// Test if inputPath matches a glob pattern.
-// Examples:
-//   matchesGlob("src/config.ts", "*.config.ts") => false
-//   matchesGlob("src/app.config.ts", "**/*.config.ts") => true
-//   matchesGlob("AGENTS.md", "AGENTS.md") => true (exact)
-//   matchesGlob("src/a.ts", "src/*.ts") => true
-export function matchesGlob(inputPath: string, pattern: string): boolean {
-	if (!pattern) return false;
+// Compiled regexes are cached by normalized pattern: `isFileProtected` runs the
+// same few patterns against every path on every transform.
+const regexCache = new Map<string, RegExp>();
 
-	const input = normalizePath(inputPath);
-	const pat = normalizePath(pattern);
-
-	// Exact match shortcut
-	if (!pat.includes("*") && !pat.includes("?")) {
-		return input === pat;
-	}
+function globToRegExp(pat: string): RegExp {
+	const cached = regexCache.get(pat);
+	if (cached) return cached;
 
 	let regex = "^";
 
@@ -67,7 +58,29 @@ export function matchesGlob(inputPath: string, pattern: string): boolean {
 
 	regex += "$";
 
-	return new RegExp(regex).test(input);
+	const compiled = new RegExp(regex);
+	regexCache.set(pat, compiled);
+	return compiled;
+}
+
+// Test if inputPath matches a glob pattern.
+// Examples:
+//   matchesGlob("src/config.ts", "*.config.ts") => false
+//   matchesGlob("src/app.config.ts", "**/*.config.ts") => true
+//   matchesGlob("AGENTS.md", "AGENTS.md") => true (exact)
+//   matchesGlob("src/a.ts", "src/*.ts") => true
+export function matchesGlob(inputPath: string, pattern: string): boolean {
+	if (!pattern) return false;
+
+	const input = normalizePath(inputPath);
+	const pat = normalizePath(pattern);
+
+	// Exact match shortcut
+	if (!pat.includes("*") && !pat.includes("?")) {
+		return input === pat;
+	}
+
+	return globToRegExp(pat).test(input);
 }
 
 /**
@@ -88,13 +101,9 @@ export function extractFilePaths(args: Record<string, unknown>): string[] {
 	// Multi-edit: edits array with nested filePath
 	if (Array.isArray(args.edits)) {
 		for (const edit of args.edits) {
-			if (
-				edit &&
-				typeof edit === "object" &&
-				typeof (edit as Record<string, unknown>).filePath === "string"
-			) {
-				paths.push((edit as Record<string, string>).filePath);
-			}
+			if (!edit || typeof edit !== "object") continue;
+			const val = (edit as Record<string, unknown>).filePath;
+			if (typeof val === "string" && val.trim()) paths.push(val.trim());
 		}
 	}
 

@@ -63,7 +63,7 @@ export function nthUserTurnFromEnd(
 	if (n <= 0) return undefined;
 	let seen = 0;
 	for (let i = messages.length - 1; i >= 0; i--) {
-		if (messages[i].info.role === "user") {
+		if (messages[i]?.info?.role === "user") {
 			seen++;
 			if (seen >= n) return i;
 		}

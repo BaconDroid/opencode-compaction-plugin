@@ -27,6 +27,12 @@ describe("toolCallKey()", () => {
 		expect(typeof toolCallKey("tool", undefined)).toBe("string");
 		expect(toolCallKey("tool", 42)).not.toBe(toolCallKey("tool", "hello"));
 	});
+
+	it("sorts keys nested inside arrays", () => {
+		expect(
+			toolCallKey("edit", { edits: [{ a: 1, b: 2 }] }),
+		).toBe(toolCallKey("edit", { edits: [{ b: 2, a: 1 }] }));
+	});
 });
 
 describe("applyDedup()", () => {
@@ -102,6 +108,18 @@ describe("applyDedup()", () => {
 		];
 		expect(applyDedup(msgs as never, cfg)).toBe(1);
 		expect(msgs[0].parts[0].state.output).toContain("deduped");
+	});
+
+	it("is idempotent across transform passes", () => {
+		const cfg = mergeConfig({});
+		const msgs = [
+			msg("bash", { command: "ls" }, "v1"),
+			msg("bash", { command: "ls" }, "v2"),
+		];
+		expect(applyDedup(msgs as never, cfg)).toBe(1);
+		const marker = msgs[0].parts[0].state.output;
+		expect(applyDedup(msgs as never, cfg)).toBe(0);
+		expect(msgs[0].parts[0].state.output).toBe(marker);
 	});
 });
 
