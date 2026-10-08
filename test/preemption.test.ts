@@ -1,9 +1,36 @@
 import { describe, it, expect } from "bun:test";
 import {
+	PreemptionController,
 	effectiveInputTokens,
 	resolveTriggerThreshold,
 	shouldTriggerPreemptiveCompaction,
 } from "../src/core/preemption.ts";
+import { mergeConfig } from "../src/config/config.ts";
+
+function makeController(
+	over: Record<string, unknown> = {},
+	clientOver: Record<string, unknown> = {},
+): PreemptionController {
+	const config = mergeConfig({
+		preemptiveCompaction: { enabled: true, cooldownMs: 0, ...over },
+	});
+	const client = {
+		app: { log: async () => {} },
+		session: { summarize: async () => {} },
+		provider: {
+			list: async () => ({
+				data: {
+					all: [
+						{ id: "prov", models: { "model-x": { limit: { context: 1000 } } } },
+					],
+				},
+			}),
+		},
+		...clientOver,
+	};
+	const logger = { info: () => {} };
+	return new PreemptionController(client as never, "/tmp", config, logger);
+}
 
 describe("token helpers", () => {
 	it("effectiveInputTokens excludes cache unless enabled", () => {
@@ -175,5 +202,77 @@ describe("shouldTriggerPreemptiveCompaction()", () => {
 				newToolCallsSinceLast: 0,
 			}),
 		).toBe(true);
+	});
+});
+
+describe("PreemptionController", () => {
+	it("summarizes once for overlapping calls", async () => {
+		let calls = 0;
+		let release: () => void = () => {};
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const controller = makeController(
+			{},
+			{
+				session: {
+					summarize: async () => {
+						calls++;
+						await gate;
+					},
+				},
+			},
+		);
+		controller.recordUsage("s", "prov", "model-x", { input: 900 });
+
+		const first = controller.maybePreempt("s");
+		const second = controller.maybePreempt("s");
+		release();
+		await Promise.all([first, second]);
+		expect(calls).toBe(1);
+	});
+
+	it("measures new tokens from the post-compaction baseline", async () => {
+		let calls = 0;
+		const controller = makeController(
+			{ contextLimit: 1000, minTokensSinceLast: 500 },
+			{
+				session: {
+					summarize: async () => {
+						calls++;
+					},
+				},
+			},
+		);
+		controller.recordUsage("s", "prov", "model-x", { input: 900 });
+		await controller.maybePreempt("s");
+		expect(calls).toBe(1);
+
+		// Post-compaction usage report sets the baseline to 100.
+		controller.recordUsage("s", "prov", "model-x", { input: 100 });
+		// 800 total = 700 new (>= 500) and 80% (>= 78%): triggers again.
+		controller.recordUsage("s", "prov", "model-x", { input: 800 });
+		await controller.maybePreempt("s");
+		expect(calls).toBe(2);
+	});
+
+	it("caches a negative context-limit lookup", async () => {
+		let listCalls = 0;
+		const controller = makeController(
+			{},
+			{
+				provider: {
+					list: async () => {
+						listCalls++;
+						return { data: { all: [] } };
+					},
+				},
+			},
+		);
+		controller.recordUsage("s", "prov", "unknown-model", { input: 900 });
+		await controller.maybePreempt("s");
+		await controller.maybePreempt("s");
+		await controller.isCompressEligible("s");
+		expect(listCalls).toBe(1);
 	});
 });

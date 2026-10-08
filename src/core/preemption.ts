@@ -145,7 +145,10 @@ export class PreemptionController {
 	private tokensAtLast = new Map<string, number>();
 	private toolCallsSince = new Map<string, number>();
 	private messagesSince = new Map<string, number>();
-	private contextLimitCache = new Map<string, number>();
+	// Sessions that compacted and are waiting for the next usage report to set
+	// the post-compaction token baseline.
+	private pendingBaseline = new Set<string>();
+	private contextLimitCache = new Map<string, number | null>();
 
 	constructor(
 		private readonly client: PluginInput["client"],
@@ -177,7 +180,21 @@ export class PreemptionController {
 		tokens: TokenInfo,
 	): void {
 		this.usage.set(sessionID, { providerID, modelID, tokens });
+		// First usage report after a compaction: capture the post-compaction
+		// baseline so the "new tokens since last" gate measures real growth.
+		if (this.pendingBaseline.has(sessionID)) {
+			this.pendingBaseline.delete(sessionID);
+			this.tokensAtLast.set(
+				sessionID,
+				effectiveInputTokens(
+					tokens,
+					this.config.preemptiveCompaction?.countCacheTokens ?? false,
+				),
+			);
+		}
 	}
+
+
 
 	/**
 	 * Eligibility gate for the model-driven `compress` tool: when proactive
@@ -206,71 +223,78 @@ export class PreemptionController {
 	async maybePreempt(sessionID: string): Promise<void> {
 		const cfg = this.config.preemptiveCompaction;
 		if (!cfg?.enabled) return;
-		const usage = this.usage.get(sessionID);
-		if (!usage) return;
+		if (!this.usage.has(sessionID)) return;
 		if (this.inProgress.has(sessionID)) return;
 
-		const limit = await this.resolveContextLimit(
-			usage.providerID,
-			usage.modelID,
-		);
-		if (limit === undefined) return;
-
-		const effectiveTokens = effectiveInputTokens(
-			usage.tokens,
-			cfg.countCacheTokens ?? false,
-		);
-		const thresholdTokens = resolveTriggerThreshold(limit, cfg);
-		const baseline = this.tokensAtLast.get(sessionID);
-
-		const trigger = shouldTriggerPreemptiveCompaction({
-			totalInputTokens: effectiveTokens,
-			contextLimit: limit,
-			threshold: cfg.threshold,
-			thresholdTokens,
-			minTokensSinceLast: cfg.minTokensSinceLast,
-			minMessagesSinceLast: cfg.minMessagesSinceLast,
-			tokensSinceLast:
-				baseline === undefined
-					? undefined
-					: Math.max(0, effectiveTokens - baseline),
-			messagesSinceLast: this.messagesSince.get(sessionID) ?? 0,
-			tailGuard: cfg.tailGuard,
-			newToolCallsSinceLast: this.toolCallsSince.get(sessionID) ?? 0,
-			cooldownMs: cfg.cooldownMs,
-			now: Date.now(),
-			lastCompactionAt: this.last.get(sessionID),
-			inProgress: false,
-		});
-		if (!trigger) return;
-
-		const summarize = this.client.session?.summarize;
-		if (!summarize) return;
-
+		// Claim the session before the first await so overlapping
+		// fire-and-forget calls cannot both summarize.
 		this.inProgress.add(sessionID);
-		this.last.set(sessionID, Date.now());
-		// Reset the deterministic gates for the next cycle.
-		this.tokensAtLast.set(sessionID, effectiveTokens);
-		this.toolCallsSince.set(sessionID, 0);
-		this.messagesSince.set(sessionID, 0);
 		try {
-			await summarize({
-				path: { id: sessionID },
-				body: {
-					providerID: usage.providerID,
-					modelID: usage.modelID,
-					auto: true,
-				},
-				query: { directory: this.directory },
+			const usage = this.usage.get(sessionID);
+			if (!usage) return;
+			const limit = await this.resolveContextLimit(
+				usage.providerID,
+				usage.modelID,
+			);
+			if (limit === undefined) return;
+			const effectiveTokens = effectiveInputTokens(
+				usage.tokens,
+				cfg.countCacheTokens ?? false,
+			);
+			const thresholdTokens = resolveTriggerThreshold(limit, cfg);
+			const baseline = this.tokensAtLast.get(sessionID);
+
+			const trigger = shouldTriggerPreemptiveCompaction({
+				totalInputTokens: effectiveTokens,
+				contextLimit: limit,
+				threshold: cfg.threshold,
+				thresholdTokens,
+				minTokensSinceLast: cfg.minTokensSinceLast,
+				minMessagesSinceLast: cfg.minMessagesSinceLast,
+				tokensSinceLast: this.pendingBaseline.has(sessionID)
+					? 0
+					: baseline === undefined
+						? undefined
+						: Math.max(0, effectiveTokens - baseline),
+				messagesSinceLast: this.messagesSince.get(sessionID) ?? 0,
+				tailGuard: cfg.tailGuard,
+				newToolCallsSinceLast: this.toolCallsSince.get(sessionID) ?? 0,
+				cooldownMs: cfg.cooldownMs,
+				now: Date.now(),
+				lastCompactionAt: this.last.get(sessionID),
+				inProgress: false,
 			});
-			this.logger.info("preemptive compaction triggered", {
-				sessionID,
-				ratio: effectiveTokens / limit,
-			});
-		} catch (error) {
-			this.logger.info("preemptive compaction failed", {
-				error: String(error),
-			});
+			if (!trigger) return;
+
+			const summarize = this.client.session?.summarize;
+			if (!summarize) return;
+
+			this.last.set(sessionID, Date.now());
+			// Reset the deterministic gates. The token baseline is captured on the
+			// next usage report (post-compaction), not from the pre-compaction peak.
+			this.pendingBaseline.add(sessionID);
+			this.tokensAtLast.delete(sessionID);
+			this.toolCallsSince.set(sessionID, 0);
+			this.messagesSince.set(sessionID, 0);
+			try {
+				await summarize({
+					path: { id: sessionID },
+					body: {
+						providerID: usage.providerID,
+						modelID: usage.modelID,
+						auto: true,
+					},
+					query: { directory: this.directory },
+				});
+				this.logger.info("preemptive compaction triggered", {
+					sessionID,
+					ratio: effectiveTokens / limit,
+				});
+			} catch (error) {
+				this.logger.info("preemptive compaction failed", {
+					error: String(error),
+				});
+			}
 		} finally {
 			this.inProgress.delete(sessionID);
 		}
@@ -283,6 +307,7 @@ export class PreemptionController {
 		this.tokensAtLast.delete(sessionID);
 		this.toolCallsSince.delete(sessionID);
 		this.messagesSince.delete(sessionID);
+		this.pendingBaseline.delete(sessionID);
 	}
 
 	clearAll(): void {
@@ -292,6 +317,7 @@ export class PreemptionController {
 		this.tokensAtLast.clear();
 		this.toolCallsSince.clear();
 		this.messagesSince.clear();
+		this.pendingBaseline.clear();
 		this.contextLimitCache.clear();
 	}
 
@@ -306,7 +332,7 @@ export class PreemptionController {
 
 		const key = `${providerID}/${modelID}`;
 		const cached = this.contextLimitCache.get(key);
-		if (cached !== undefined) return cached;
+		if (cached !== undefined) return cached ?? undefined;
 
 		const list = this.client.provider?.list;
 		if (!list) return undefined;
@@ -332,7 +358,11 @@ export class PreemptionController {
 				this.contextLimitCache.set(key, limit);
 				return limit;
 			}
+			// The catalog was fetched but has no such model: cache the negative
+			// result so the hot path does not refetch it on every turn.
+			this.contextLimitCache.set(key, null);
 		} catch (error) {
+			// Transient failure: do not cache, so a later call can retry.
 			this.logger.info("context limit resolution failed", {
 				error: String(error),
 			});
