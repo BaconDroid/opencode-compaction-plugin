@@ -72,6 +72,27 @@ describe("ExpansionSidecar", () => {
 		expect(sidecar.listForSession("empty")).toEqual([]);
 		expect(sidecar.search("login", 5, "empty")).toEqual([]);
 	});
+
+	it("keeps records separate when ids collide across sessions", () => {
+		const sidecar = new ExpansionSidecar();
+		sidecar.save("A", "u:100", [textMsg("user", "alpha")], { label: "b0" });
+		sidecar.save("B", "u:100", [textMsg("user", "beta")], { label: "b0" });
+		expect(sidecar.listForSession("A")).toHaveLength(1);
+		expect(
+			(sidecar.get("u:100", "A")?.original[0] as any).parts[0].text,
+		).toBe("alpha");
+		expect(
+			(sidecar.get("u:100", "B")?.original[0] as any).parts[0].text,
+		).toBe("beta");
+	});
+
+	it("delete() drops a single record", () => {
+		const sidecar = new ExpansionSidecar();
+		sidecar.save("s", "id-1", []);
+		sidecar.delete("s", "id-1");
+		expect(sidecar.get("id-1", "s")).toBeUndefined();
+		expect(sidecar.size).toBe(0);
+	});
 });
 
 describe("ExpandStore", () => {
@@ -121,6 +142,30 @@ describe("applyExpansions()", () => {
 		);
 		expect(result.expanded).toBe(0);
 		expect(result.unmatched).toEqual(["b9"]);
+	});
+
+	it("clones originals so a later mutation cannot corrupt the sidecar", () => {
+		const sidecar = new ExpansionSidecar();
+		sidecar.save("s", "id-1", [textMsg("user", "ORIGINAL")], { label: "b0" });
+
+		const first = [blockMsg("id-1", "b0", "[b0]\n\nsummary")];
+		applyExpansions(
+			first as any,
+			[{ block: "b0", mode: "once", timestamp: 1 }],
+			sidecar,
+			"s",
+		);
+		// Later stages mutate the restored message in place.
+		(first[0].parts[0] as any).text = "MUTATED";
+
+		const second = [blockMsg("id-1", "b0", "[b0]\n\nsummary")];
+		applyExpansions(
+			second as any,
+			[{ block: "b0", mode: "once", timestamp: 2 }],
+			sidecar,
+			"s",
+		);
+		expect((second[0].parts[0] as any).text).toBe("ORIGINAL");
 	});
 
 	it("restores a block once when requested twice", () => {

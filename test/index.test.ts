@@ -1341,6 +1341,12 @@ describe("LiveCompactionPlugin", () => {
 			});
 			await transform(hooks, messages);
 			expect(messages).toHaveLength(2); // merged, keep
+			// The merged-away block's record is dropped: inspect lists one block.
+			const report = await (hooks as any).tool.inspect.execute(
+				{},
+				{ sessionID: "s" },
+			);
+			expect(report.trim().split("\n")).toHaveLength(1);
 
 			await afterTool(hooks, "expand", "s", "c-exp", { block: "b0" });
 			await transform(hooks, messages);
