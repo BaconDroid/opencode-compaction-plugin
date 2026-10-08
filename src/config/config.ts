@@ -35,8 +35,6 @@ export interface CompressConfig {
 	protectedTurns?: number;
 	/** Keep compressed originals in memory for expand (default: false) */
 	reversible?: boolean;
-	/** Maximum hits returned by the `search` tool (default: 5) */
-	searchMaxResults?: number;
 }
 
 export interface EvictionSettings {
@@ -95,14 +93,6 @@ export interface AdapterTransportConfig {
 }
 
 /**
- * Optional semantic embedding/retrieval adapter (E2/E3/E4).
- */
-export interface EmbeddingsAdapterConfig extends AdapterTransportConfig {
-	/** Minimum cosine score for a semantic hit (default: 0) */
-	minScore?: number;
-}
-
-/**
  * Optional residual/perplexity scorer adapter (E5/E9). Refines the eviction
  * budget estimate; absent → heuristic.
  */
@@ -111,25 +101,10 @@ export interface ScorerAdapterConfig extends AdapterTransportConfig {
 	maxSamples?: number;
 }
 
-/**
- * Optional model reranker for the `search` tool: ranks stored blocks by
- * relevance instead of embedding cosine. `provider` defaults to "opencode"
- * (a model already configured in opencode); `model` defaults to the free
- * `opencode/big-pickle`, or "host" to reuse opencode's active model.
- */
-export interface RerankAdapterConfig extends AdapterTransportConfig {
-	/** Maximum candidate blocks sent to the model per search (default: 50) */
-	maxCandidates?: number;
-}
-
 /** Optional external adapters (all off by default). */
 export interface AdaptersConfig {
-	/** Semantic embedding/retrieval adapter */
-	embeddings?: EmbeddingsAdapterConfig;
 	/** Residual/perplexity scorer adapter (eviction budget) */
 	scorer?: ScorerAdapterConfig;
-	/** Model reranker for `search` (opencode provider) */
-	rerank?: RerankAdapterConfig;
 }
 
 export interface DegradationMonitorConfig {
@@ -208,7 +183,6 @@ export const DEFAULT_CONFIG: Required<
 	compress: {
 		protectedTurns: 3,
 		reversible: false,
-		searchMaxResults: 5,
 	},
 	eviction: {
 		enabled: true,
@@ -346,12 +320,6 @@ function normalizeConfig(cfg: ResolvedConfig): ResolvedConfig {
 			DEFAULT_CONFIG.compress.protectedTurns,
 		),
 	);
-	cfg.compress.searchMaxResults = Math.floor(
-		nonNegative(
-			cfg.compress.searchMaxResults,
-			DEFAULT_CONFIG.compress.searchMaxResults,
-		),
-	);
 	if (cfg.promptMode !== "replace" && cfg.promptMode !== "augment") {
 		cfg.promptMode = DEFAULT_CONFIG.promptMode;
 	}
@@ -404,11 +372,9 @@ function normalizeConfig(cfg: ResolvedConfig): ResolvedConfig {
 	// applies (a negative timeoutMs would fire immediately).
 	if (isPlainObject(cfg.adapters)) {
 		cfg.adapters = structuredClone(cfg.adapters);
-		const adapters = cfg.adapters as Record<string, unknown>;
-		for (const key of ["embeddings", "scorer", "rerank"]) {
-			const adapter = adapters[key];
-			if (!isPlainObject(adapter)) continue;
-			for (const field of ["timeoutMs", "maxSamples", "maxCandidates"] as const) {
+		const adapter = (cfg.adapters as Record<string, unknown>).scorer;
+		if (isPlainObject(adapter)) {
+			for (const field of ["timeoutMs", "maxSamples"] as const) {
 				const value = adapter[field];
 				if (
 					value !== undefined &&
@@ -416,13 +382,6 @@ function normalizeConfig(cfg: ResolvedConfig): ResolvedConfig {
 				) {
 					delete adapter[field];
 				}
-			}
-			const minScore = adapter.minScore;
-			if (
-				minScore !== undefined &&
-				!(typeof minScore === "number" && Number.isFinite(minScore) && minScore >= 0)
-			) {
-				delete adapter.minScore;
 			}
 			// A non-boolean `enabled` is dropped so the documented default (on
 			// when the block is present) applies.

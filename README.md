@@ -121,7 +121,7 @@ Enables the synthetic "continue" turn after compaction, except for the compactio
 
 ## Compression Tools
 
-The plugin exposes four model-driven tools for proactive context management: `compress` (fold), `expand` (restore, sticky or one-shot), `inspect` and `search` (browse/retrieve). The model decides when to compress and writes the summaries itself (it has full context).
+The plugin exposes three model-driven tools for proactive context management: `compress` (fold), `expand` (restore, sticky or one-shot) and `inspect` (browse). The model decides when to compress and writes the summaries itself (it has full context).
 
 ### `compress`
 
@@ -144,11 +144,9 @@ Restores a compressed block's original messages from the in-memory sidecar, refe
 | `block` | string | Block `[bN]` label or durable id to expand |
 | `mode` | `"sticky"` \| `"once"` *(optional)* | Expansion mode (default: `sticky`) |
 
-### `inspect` / `search`
+### `inspect`
 
-`inspect` lists the compressed blocks currently held in memory (labels, topics, sizes). `search` runs a **deterministic** keyword search over the stored originals (no embeddings): it splits the query into terms and ranks blocks by how many terms they contain, then by total occurrences. It returns matching `[bN]` labels with a snippet; use `expand` to restore a match. Both return their result directly; `search` is bounded by `compress.searchMaxResults`.
-
-When the optional [semantic retrieval adapter](#optional-adapters-) is configured, `search` runs semantic retrieval first — embedding similarity, or a model reranker when `adapters.rerank` is set — and falls back to the keyword search on any error or when it finds nothing.
+`inspect` lists the compressed blocks currently held in memory (labels, topics, sizes). It returns its result directly; use `expand` to restore a block.
 
 ## Feature reference
 
@@ -170,9 +168,7 @@ Each feature below lists **what** it does, its **config** keys and how it
 | Preemptive compaction | `preemptiveCompaction.*` | disabled |
 | Degradation monitor | `degradationMonitor.{enabled,threshold,windowMs}` | `false`, `4`, `120000` |
 | Auto-continue | — | — |
-| Compression tools | `compress.{protectedTurns,reversible,searchMaxResults}` | `3`, `false`, `5` |
-| Semantic retrieval (optional) | `adapters.embeddings.*` | disabled |
-| Model rerank for search (optional) | `adapters.rerank.*` | disabled |
+| Compression tools | `compress.{protectedTurns,reversible}` | `3`, `false` |
 | Residual/perplexity scoring (optional) | `adapters.scorer.*` | disabled |
 
 ### Structured compaction prompt
@@ -244,23 +240,10 @@ Each feature below lists **what** it does, its **config** keys and how it
 - **Config** — none.
 
 ### Compression tools
-- **What** — `compress` (fold), `expand` (restore), `inspect`/`search`
-  (browse/retrieve). See [Compression Tools](#compression-tools).
-- **Config** — `compress.{protectedTurns,reversible,searchMaxResults}`.
+- **What** — `compress` (fold), `expand` (restore), `inspect` (browse). See
+  [Compression Tools](#compression-tools).
+- **Config** — `compress.{protectedTurns,reversible}`.
 - **Interactions** — applied in the transform before dedup/purge/eviction.
-
-### Semantic retrieval (optional adapter)
-- **What** — when `adapters.embeddings` is configured, `search` ranks stored
-  blocks by embedding similarity (cosine) instead of keyword substring. When
-  `adapters.rerank` is configured instead, a model already available to OpenCode
-  ranks the blocks (no embedding endpoint needed).
-- **Config** — `adapters.embeddings.*` or `adapters.rerank.*` (opt-in; off when
-  absent). `embeddings` takes precedence when both are set.
-- **Interactions** — `embeddings` tries semantic retrieval first; `rerank` tries
-  the deterministic keyword search first and only spends a model call when the
-  keyword finds nothing (an exact-term match is already relevant and free). Any
-  error (timeout, bad response) or an empty result falls back to the keyword
-  search. Never changes the transform/compaction path.
 
 ### Residual/perplexity scoring (optional adapter)
 - **What** — eviction normally budgets with the heuristic `estimateTokens`
@@ -342,8 +325,7 @@ Precedence, low to high: **defaults → global file → plugin options → proje
     // Model-driven compression tools
     "compress": {
         "protectedTurns": 3,        // Trailing user turns excluded from deterministic selection
-        "reversible": false,        // Keep originals in memory for expand
-        "searchMaxResults": 5       // Max hits returned by the `search` tool
+        "reversible": false         // Keep originals in memory for expand
     },
 
     // Graduated, LLM-free eviction
@@ -383,37 +365,21 @@ Precedence, low to high: **defaults → global file → plugin options → proje
 
 ### Optional adapters 🔌
 
-The plugin is fully functional with **no adapter configured** — every ensemble
-has a deterministic internal version. Adapters are strictly **opt-in** and
-**fail-open**: they are disabled unless configured, and any error or timeout is
-logged and falls back to the internal behaviour, so a broken adapter can never
-break compaction. No dependency is added: adapters talk to an endpoint/command
-you already run.
+The plugin is fully functional with **no adapter configured** — the scorer has a
+deterministic internal version (the heuristic `estimateTokens`). Adapters are
+strictly **opt-in** and **fail-open**: they are disabled unless configured, and
+any error or timeout is logged and falls back to the internal behaviour, so a
+broken adapter can never break compaction. No dependency is added: adapters talk
+to an endpoint/command you already run.
 
-Three adapters exist today, each enabled by adding a block (there is no default
-value, so each is off unless present):
+One adapter exists today, enabled by adding its block (there is no default value,
+so it is off unless present):
 
-- **`adapters.embeddings`** — embedding-based semantic retrieval for `search` (E4).
-- **`adapters.rerank`** — model reranker for `search` (E4), via a model configured in OpenCode.
 - **`adapters.scorer`** — residual/perplexity estimate for the eviction budget (E5/E9).
 
 ```jsonc
 {
     "adapters": {
-        "embeddings": {
-            "enabled": true,                 // optional (default: true when present)
-            "provider": "http",              // "http" (default) | "command" | "mcp"
-            "url": "http://localhost:11434/v1/embeddings",
-            "model": "nomic-embed-text",     // optional, forwarded to the provider
-            "timeoutMs": 10000,              // optional request timeout
-            "minScore": 0.25                 // optional minimum cosine score for a hit
-        },
-        "rerank": {
-            "provider": "opencode",          // only "opencode" (default)
-            "model": "opencode/big-pickle",  // free OpenCode Zen model (default); "host" reuses the active model
-            "timeoutMs": 30000,
-            "maxCandidates": 50              // max blocks offered to the model per search
-        },
         "scorer": {
             "provider": "opencode",          // "opencode" | "http" | "command"
             "model": "opencode/big-pickle",  // free OpenCode Zen model (default); "host" reuses the active model
@@ -427,26 +393,19 @@ value, so each is off unless present):
 **Provider `opencode`** — reuses a model already configured in OpenCode through a
 sandboxed session, so OpenCode keeps handling provider auth and no key or
 endpoint is set here. `model` defaults to the free `opencode/big-pickle`; set it
-to `"host"` to reuse the model OpenCode is already using. Supported for `scorer`
-and `rerank` only — `embeddings` still needs a real embedding endpoint (use
-`rerank` for model-based retrieval). Calls are gated so the model is only used
-when it helps: the scorer runs only near the eviction budget and warms its cache
-in the background; the reranker runs only when keyword search finds nothing. A
+to `"host"` to reuse the model OpenCode is already using. The scorer is gated so
+the model is only used when it helps: it runs only near the eviction budget and
+warms its cache in the background, so a slow model never blocks a transform. A
 model call is never nested: while one adapter call is in flight, another falls
 back to its deterministic behaviour.
 
-**Provider `http`** — for `embeddings`, POSTs an OpenAI-style request
-(`{ "model"?, "input": ["text", …] }`) and accepts the response as a bare
-`number[][]`, `{ "embeddings": number[][] }` or OpenAI's
-`{ "data": [{ "embedding": number[] }] }`. For `scorer`, POSTs
-`{ "model"?, "text": "…" }` and accepts a bare number, a numeric string or
-`{ "score" | "value" | "tokens" | "residual" }`. This covers local servers such
-as Ollama, llama.cpp, LM Studio or vLLM.
+**Provider `http`** — POSTs `{ "model"?, "text": "…" }` and accepts a bare
+number, a numeric string or `{ "score" | "value" | "tokens" | "residual" }`. This
+covers local servers such as Ollama, llama.cpp, LM Studio or vLLM.
 
-**Provider `command`** — spawns `command` and writes `{ "model"?, "input": [...] }`
-(`embeddings`) or `{ "model"?, "text": "…" }` (`scorer`) on stdin. It reads the
-same response shapes as the HTTP provider on stdout. The process is
-non-interactive (stdin is closed) and killed on timeout.
+**Provider `command`** — spawns `command` and writes `{ "model"?, "text": "…" }`
+on stdin. It reads the same response shapes as the HTTP provider on stdout. The
+process is non-interactive (stdin is closed) and killed on timeout.
 
 **Provider `mcp`** — recognised but **not supported yet**; it logs a warning and
 uses the deterministic fallback. `mcp` requires SDK surface the plugin does not
@@ -479,7 +438,7 @@ bun run test:coverage
 # (OpenCode loads .ts files directly via Bun)
 ```
 
-Current coverage: **95.9% functions, 99.6% lines** (289 tests).
+Current coverage: **95.3% functions, 99.3% lines** (247 tests).
 
 ## File Structure
 
@@ -495,8 +454,8 @@ src/
     requests.ts         — queued compress/expand application
     compress.ts         — compress domain + block rendering
     blocks.ts           — durable block ids + deterministic span selection
-    expand.ts           — reversible sidecar + inspection/search
-    adapters.ts         — optional adapter contracts + in-memory/rerank indexes
+    expand.ts           — reversible sidecar + inspection
+    adapters.ts         — optional adapter contract (scorer)
     scorer.ts           — optional scorer-calibrated token estimator
     strategies.ts       — dedup, error purge, cascade purge
     eviction.ts         — graduated, LLM-free eviction
@@ -513,7 +472,7 @@ src/
     config-loader.ts    — JSON/JSONC file loading
   opencode/
     tools.ts            — model-driven tool definitions (SDK boundary)
-    model.ts            — shared opencode-model runner (scorer/rerank adapters)
+    model.ts            — opencode-model runner (scorer adapter)
     adapters.ts         — optional adapter provider resolution (http/command/opencode)
 test/
   index.test.ts     — Plugin integration tests
@@ -530,7 +489,6 @@ test/
   preemption.test.ts — Trigger, token gate and preemptive tests
   degradation-monitor.test.ts — Degradation monitor tests
   previous-summary.test.ts — Previous summary and sliding-state tests
-  adapters.test.ts  — Optional embedding/rerank adapter contracts, providers and fallback
   scorer.test.ts    — Optional scorer adapter, estimator and eviction integration
   model.test.ts     — Optional opencode-model runner (host/default model, fail-open)
   messages.test.ts  — Message helper tests
@@ -549,8 +507,8 @@ Compatible with [`oh-my-opencode-slim`](https://github.com/alvinunreal/oh-my-ope
 
 - `experimental.session.compacting` — omo-slim only marks the session (it does not touch `output.prompt`/`output.context`), so this plugin's prompt handling is unaffected.
 - `experimental.chat.messages.transform` — omo-slim rewrites user text and image parts; this plugin dedups/purges tool parts and applies compressions. Load omo-slim **before** this plugin so its in-place rewrites run before this plugin's structural compression.
-- `config` — omo-slim manages agents, MCPs and commands; this plugin only ensures permissions for its own tools (`compress`, `expand`, `inspect`, `search`) and leaves a global permission string untouched.
-- No shared tool names (omo-slim: `task*`, `waitForUser`, `acpRun`, `webfetch`, `ast_grep_*`, `marketplace_*`; this plugin: `compress`, `expand`, `inspect`, `search`).
+- `config` — omo-slim manages agents, MCPs and commands; this plugin only ensures permissions for its own tools (`compress`, `expand`, `inspect`) and leaves a global permission string untouched.
+- No shared tool names (omo-slim: `task*`, `waitForUser`, `acpRun`, `webfetch`, `ast_grep_*`, `marketplace_*`; this plugin: `compress`, `expand`, `inspect`).
 - omo-slim does not use `experimental.compaction.autocontinue` and does not mutate `permission`.
 
 Recommended `plugin` order in `opencode.json`:

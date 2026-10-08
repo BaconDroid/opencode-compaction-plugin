@@ -24,7 +24,6 @@ describe("mergeConfig()", () => {
 		expect(cfg.compress).toEqual({
 			protectedTurns: 3,
 			reversible: false,
-			searchMaxResults: 5,
 		});
 		expect(cfg.eviction).toMatchObject({
 			enabled: true,
@@ -92,18 +91,16 @@ describe("mergeConfig()", () => {
 	it("drops invalid adapter numerics", () => {
 		const cfg = mergeConfig({
 			adapters: {
-				embeddings: {
-					provider: "http",
-					url: "u",
+				scorer: {
+					provider: "command",
+					command: "c",
+					maxSamples: 0,
 					timeoutMs: -5,
-					minScore: -1,
 				},
-				scorer: { provider: "command", command: "c", maxSamples: 0 },
 			},
 		} as any);
-		expect(cfg.adapters?.embeddings?.timeoutMs).toBeUndefined();
-		expect(cfg.adapters?.embeddings?.minScore).toBeUndefined();
 		expect(cfg.adapters?.scorer?.maxSamples).toBeUndefined();
+		expect(cfg.adapters?.scorer?.timeoutMs).toBeUndefined();
 	});
 
 	it("tolerates malformed non-object sections", () => {
@@ -128,7 +125,7 @@ describe("mergeConfig()", () => {
 			promptMode: "weird",
 			dedup: { enabled: "nope" },
 			purgeErrors: { cascade: "true", wholeAttempt: 0, turns: 3.9 },
-			compress: { reversible: "no", protectedTurns: -2, searchMaxResults: 3.7 },
+			compress: { reversible: "no", protectedTurns: -2 },
 			eviction: { enabled: "y", protectPrologue: null },
 			preemptiveCompaction: { enabled: "yes", countCacheTokens: 0 },
 			degradationMonitor: { enabled: "on" },
@@ -142,7 +139,6 @@ describe("mergeConfig()", () => {
 		expect(cfg.purgeErrors.turns).toBe(3);
 		expect(cfg.compress.reversible).toBe(false);
 		expect(cfg.compress.protectedTurns).toBe(3);
-		expect(cfg.compress.searchMaxResults).toBe(3);
 		expect(cfg.eviction.enabled).toBe(true);
 		expect(cfg.eviction.protectPrologue).toBe(true);
 		expect(cfg.preemptiveCompaction.enabled).toBe(false);
@@ -152,9 +148,9 @@ describe("mergeConfig()", () => {
 
 	it("drops a non-boolean adapter enabled flag", () => {
 		const cfg = mergeConfig({
-			adapters: { embeddings: { provider: "http", url: "u", enabled: "yes" } },
+			adapters: { scorer: { provider: "http", url: "u", enabled: "yes" } },
 		} as any);
-		expect(cfg.adapters?.embeddings?.enabled).toBeUndefined();
+		expect(cfg.adapters?.scorer?.enabled).toBeUndefined();
 	});
 
 	it("links eviction.thresholdTokens to contextLimit when preemption is on", () => {
@@ -242,13 +238,8 @@ describe("mergeConfig()", () => {
 		expect(mergeConfig({}).adapters).toBeUndefined();
 		const cfg = mergeConfig({
 			adapters: {
-				embeddings: { provider: "http", url: "http://e", minScore: 0.3 },
 				scorer: { provider: "http", url: "http://s", maxSamples: 10 },
 			},
-		});
-		expect(cfg.adapters?.embeddings).toMatchObject({
-			url: "http://e",
-			minScore: 0.3,
 		});
 		expect(cfg.adapters?.scorer).toMatchObject({
 			url: "http://s",
@@ -256,35 +247,16 @@ describe("mergeConfig()", () => {
 		});
 	});
 
-	it("preserves the opencode provider and the rerank block", () => {
+	it("preserves the opencode provider on the scorer", () => {
 		const cfg = mergeConfig({
 			adapters: {
 				scorer: { provider: "opencode", model: "host" },
-				rerank: {
-					provider: "opencode",
-					model: "opencode/big-pickle",
-					maxCandidates: 10,
-				},
 			},
 		} as any);
 		expect(cfg.adapters?.scorer).toMatchObject({
 			provider: "opencode",
 			model: "host",
 		});
-		expect(cfg.adapters?.rerank).toMatchObject({
-			provider: "opencode",
-			maxCandidates: 10,
-		});
-	});
-
-	it("drops invalid rerank numerics", () => {
-		const cfg = mergeConfig({
-			adapters: {
-				rerank: { provider: "opencode", maxCandidates: 0, timeoutMs: -1 },
-			},
-		} as any);
-		expect(cfg.adapters?.rerank?.maxCandidates).toBeUndefined();
-		expect(cfg.adapters?.rerank?.timeoutMs).toBeUndefined();
 	});
 
 	it("overrides compress, eviction, preemptive and degradation settings", () => {
@@ -303,7 +275,6 @@ describe("mergeConfig()", () => {
 		expect(cfg.compress).toEqual({
 			protectedTurns: 5,
 			reversible: false,
-			searchMaxResults: 5,
 		});
 		expect(cfg.eviction).toMatchObject({
 			enabled: true,
@@ -416,10 +387,10 @@ describe("loadConfig()", () => {
 		writeFileSync(
 			join(TMP_DIR, ".opencode", "live-compaction.json"),
 			JSON.stringify({
-				adapters: { embeddings: { provider: "http", url: "http://x" } },
+				adapters: { scorer: { provider: "http", url: "http://x" } },
 			}),
 		);
-		expect(loadConfig(TMP_DIR).adapters?.embeddings?.url).toBe("http://x");
+		expect(loadConfig(TMP_DIR).adapters?.scorer?.url).toBe("http://x");
 	});
 
 	it("applies precedence: defaults < global < plugin options < project", () => {

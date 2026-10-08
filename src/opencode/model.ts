@@ -1,5 +1,5 @@
 /**
- * The opencode-model runtime for the optional `scorer`/`rerank` adapters. It
+ * The opencode-model runtime for the optional `scorer` adapter. It
  * consumes a model already configured in opencode through a sandboxed session
  * (no provider/auth handling here — keys and endpoints stay in opencode), like
  * the LLM judge pattern used elsewhere. Fail-open: any error yields "".

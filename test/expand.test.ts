@@ -4,13 +4,11 @@ import {
 	ExpandStore,
 	applyExpansions,
 	renderInspector,
-	renderSearch,
 	type ExpandRequest,
 } from "../src/core/expand.ts";
 import {
 	buildExpandToolDef,
 	buildInspectToolDef,
-	buildSearchToolDef,
 } from "../src/opencode/tools.ts";
 
 function blockMsg(id: string, label: string, body: string) {
@@ -48,7 +46,7 @@ describe("ExpansionSidecar", () => {
 		expect(sidecar.size).toBe(0);
 	});
 
-	it("scopes list and search to a session", () => {
+	it("scopes the list to a session", () => {
 		const sidecar = new ExpansionSidecar();
 		sidecar.save("a", "id-a", [textMsg("user", "alpha login")], {
 			label: "b0",
@@ -57,10 +55,9 @@ describe("ExpansionSidecar", () => {
 			label: "b0",
 		});
 		expect(sidecar.listForSession("a").map((r) => r.id)).toEqual(["id-a"]);
-		expect(sidecar.search("login", 5, "a").map((h) => h.id)).toEqual(["id-a"]);
-		expect(sidecar.search("login", 5, "b").map((h) => h.id)).toEqual(["id-b"]);
+		expect(sidecar.listForSession("b").map((r) => r.id)).toEqual(["id-b"]);
 		// Without a session id every record is returned (backward compatible).
-		expect(sidecar.search("login", 5)).toHaveLength(2);
+		expect(sidecar.listForSession()).toHaveLength(2);
 	});
 
 	it("returns nothing for a known session with no records", () => {
@@ -69,7 +66,6 @@ describe("ExpansionSidecar", () => {
 			label: "b0",
 		});
 		expect(sidecar.listForSession("empty")).toEqual([]);
-		expect(sidecar.search("login", 5, "empty")).toEqual([]);
 	});
 
 	it("keeps records separate when ids collide across sessions", () => {
@@ -208,7 +204,7 @@ describe("applyExpansions()", () => {
 	});
 });
 
-describe("inspection & deterministic search", () => {
+describe("inspection", () => {
 	it("lists stored blocks and renders an inspector", () => {
 		const sidecar = new ExpansionSidecar();
 		sidecar.save("s", "id-1", [textMsg("user", "alpha")], {
@@ -222,39 +218,9 @@ describe("inspection & deterministic search", () => {
 			"No compressed blocks",
 		);
 	});
-
-	it("searches stored originals by keyword", () => {
-		const sidecar = new ExpansionSidecar();
-		sidecar.save("s", "id-1", [textMsg("user", "fix the login bug")], {
-			label: "b0",
-		});
-		sidecar.save("s", "id-2", [textMsg("user", "unrelated")], { label: "b1" });
-		expect(sidecar.search("LOGIN", 5)).toHaveLength(1);
-		expect(sidecar.search("login", 5)[0].label).toBe("b0");
-		expect(sidecar.search("missing", 5)).toHaveLength(0);
-		expect(renderSearch(sidecar, "login", 5)).toContain("[b0]");
-		expect(renderSearch(sidecar, "missing", 5)).toContain(
-			"No stored block matches",
-		);
-	});
-
-	it("ranks blocks by how many query terms they contain", () => {
-		const sidecar = new ExpansionSidecar();
-		sidecar.save("s", "id-1", [textMsg("user", "login flow only")], {
-			label: "b0",
-		});
-		sidecar.save("s", "id-2", [textMsg("user", "login and token refresh")], {
-			label: "b1",
-		});
-		const hits = sidecar.search("login token", 5);
-		expect(hits.map((h) => h.id)).toEqual(["id-2", "id-1"]);
-		expect(hits[0].snippet).toContain("login");
-		// A single-character / punctuation-only query matches nothing.
-		expect(sidecar.search("a !", 5)).toEqual([]);
-	});
 });
 
-describe("expand/inspect/search tool definitions", () => {
+describe("expand/inspect tool definitions", () => {
 	it("exposes block + mode arguments and executes in either mode", async () => {
 		const expand = buildExpandToolDef();
 		expect(expand.args).toHaveProperty("block");
@@ -267,7 +233,7 @@ describe("expand/inspect/search tool definitions", () => {
 		).toContain("once");
 	});
 
-	it("scopes inspect/search by the tool context session", async () => {
+	it("scopes inspect by the tool context session", async () => {
 		const sidecar = new ExpansionSidecar();
 		sidecar.save("a", "id-a", [textMsg("user", "hello alpha")], {
 			label: "b0",
@@ -282,14 +248,5 @@ describe("expand/inspect/search tool definitions", () => {
 		expect(report).not.toContain("id-b");
 		// Without a session context every record is listed.
 		expect(await inspect.execute({}, {} as any)).toContain("id-a");
-
-		const search = buildSearchToolDef(sidecar, 5);
-		expect(search.args).toHaveProperty("query");
-		const hits = await search.execute(
-			{ query: "hello" },
-			{ sessionID: "b" } as any,
-		);
-		expect(hits).toContain("hello beta");
-		expect(hits).not.toContain("hello alpha");
 	});
 });

@@ -4,26 +4,7 @@
  */
 
 import { tool } from "@opencode-ai/plugin";
-import {
-	renderHits,
-	renderInspector,
-	renderSearch,
-	semanticHits,
-	type ExpansionSidecar,
-} from "../core/expand.js";
-import type { VectorIndex } from "../core/adapters.js";
-import type { Logger } from "../types.js";
-
-/** Optional semantic retrieval backing for the `search` tool. */
-export interface SemanticSearchDeps {
-	index: VectorIndex;
-	logger: Logger;
-	/**
-	 * "semantic" (default) tries the index first; "rerank" tries the deterministic
-	 * keyword search first and only spends a model call when it finds nothing.
-	 */
-	mode?: "semantic" | "rerank";
-}
+import { renderInspector, type ExpansionSidecar } from "../core/expand.js";
 
 /**
  * Build the `compress` tool definition: replace a range of messages with a
@@ -122,59 +103,6 @@ Use this to see which [bN] blocks exist and can be expanded.`,
 		args: {},
 		async execute(_args, context) {
 			return renderInspector(sidecar, context?.sessionID);
-		},
-	});
-}
-
-/**
- * Build the `search` tool: keyword search over the originals of the compressed
- * blocks. When a semantic `VectorIndex` is supplied it is tried first; any error
- * falls back to the deterministic keyword search (fail-open).
- */
-export function buildSearchToolDef(
-	sidecar: ExpansionSidecar,
-	maxResults: number,
-	semantic?: SemanticSearchDeps,
-) {
-	return tool({
-		description: `Search the originals of the compressed blocks.
-
-By default this is a deterministic case-insensitive keyword search. When a
-semantic adapter is configured, embedding-based retrieval runs first. Returns
-matching [bN] labels and a snippet; use expand to restore a match.`,
-		args: {
-			query: tool.schema.string().describe("Keyword to search for"),
-		},
-		async execute(args, context) {
-			const sessionID = context?.sessionID;
-			// Rerank gating: an exact-term match is already relevant and free, so
-			// only ask the (model-backed) index when the keyword search finds
-			// nothing.
-			if (semantic?.mode === "rerank") {
-				const keywordHits = sidecar.search(args.query, maxResults, sessionID);
-				if (keywordHits.length > 0) {
-					return renderHits(keywordHits, args.query, "keyword");
-				}
-			}
-			if (semantic) {
-				try {
-					const hits = await semantic.index.search(
-						args.query,
-						maxResults,
-						sessionID,
-					);
-					const enriched = semanticHits(sidecar, hits, undefined, sessionID);
-					if (enriched.length > 0) {
-						return renderHits(enriched, args.query, "semantic");
-					}
-				} catch (error) {
-					semantic.logger.warn(
-						"semantic search failed; using keyword search",
-						{ error: String(error) },
-					);
-				}
-			}
-			return renderSearch(sidecar, args.query, maxResults, sessionID);
 		},
 	});
 }

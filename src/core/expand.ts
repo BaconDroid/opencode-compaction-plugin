@@ -11,9 +11,7 @@ import {
 	type BlockMessage,
 	type CompressBlock,
 } from "./blocks.js";
-import { partsText } from "./messages.js";
 import { KeyedQueue } from "./store.js";
-import type { VectorHit } from "./adapters.js";
 
 export interface ExpansionRecord {
 	id: string;
@@ -25,51 +23,6 @@ export interface ExpansionRecord {
 
 /** Separator for the per-session record key (never appears in block ids). */
 const KEY_SEP = "\u0000";
-
-export interface SearchHit {
-	id: string;
-	label?: string;
-	topic?: string;
-	snippet: string;
-}
-
-// A record's originals never change after save, so its flattened text is cached.
-const recordTextCache = new WeakMap<ExpansionRecord, string>();
-
-/** Flatten a stored record's original messages into searchable text. */
-export function recordText(record: ExpansionRecord): string {
-	const cached = recordTextCache.get(record);
-	if (cached !== undefined) return cached;
-	const text = (record.original as Array<{ parts?: unknown }>)
-		.map((message) => partsText(message?.parts))
-		.filter(Boolean)
-		.join("\n");
-	recordTextCache.set(record, text);
-	return text;
-}
-
-/** Lowercase query terms (letters/numbers/underscore), length >= 2, de-duped. */
-function queryTerms(query: string): string[] {
-	return [
-		...new Set(
-			query
-				.toLowerCase()
-				.split(/[^\p{L}\p{N}_]+/u)
-				.filter((term) => term.length >= 2),
-		),
-	];
-}
-
-/** A short context window around a match of `length` chars at `index`. */
-function snippetAround(text: string, index: number, length: number): string {
-	const start = Math.max(0, index - 40);
-	const end = Math.min(text.length, index + length + 80);
-	return (
-		(start > 0 ? "…" : "") +
-		text.slice(start, end).replace(/\s+/g, " ") +
-		(end < text.length ? "…" : "")
-	);
-}
 
 export type ExpandMode = "sticky" | "once";
 
@@ -139,64 +92,6 @@ export class ExpansionSidecar {
 						.map((key) => this.records.get(key))
 						.filter((record): record is ExpansionRecord => record !== undefined);
 		return records.sort((a, b) => b.createdAt - a.createdAt);
-	}
-
-	/**
-	 * Deterministic keyword search over the stored originals: rank blocks by how
-	 * many query terms they contain (then total occurrences, then earliest
-	 * match). Case-insensitive, no embeddings.
-	 */
-	search(query: string, maxResults: number, sessionID?: string): SearchHit[] {
-		if (maxResults <= 0) return [];
-		const terms = queryTerms(query);
-		if (terms.length === 0) return [];
-
-		const ranked: Array<{
-			record: ExpansionRecord;
-			matched: number;
-			occurrences: number;
-			first: number;
-			firstTerm: string;
-		}> = [];
-
-		for (const record of this.listForSession(sessionID)) {
-			const text = recordText(record);
-			const lower = text.toLowerCase();
-			let matched = 0;
-			let occurrences = 0;
-			let first = -1;
-			let firstTerm = "";
-			for (const term of terms) {
-				const at = lower.indexOf(term);
-				if (at === -1) continue;
-				matched++;
-				if (first === -1 || at < first) {
-					first = at;
-					firstTerm = term;
-				}
-				let index = at;
-				while (index !== -1) {
-					occurrences++;
-					index = lower.indexOf(term, index + term.length);
-				}
-			}
-			if (matched === 0) continue;
-			ranked.push({ record, matched, occurrences, first, firstTerm });
-		}
-
-		ranked.sort(
-			(a, b) =>
-				b.matched - a.matched ||
-				b.occurrences - a.occurrences ||
-				a.first - b.first,
-		);
-
-		return ranked.slice(0, maxResults).map(({ record, first, firstTerm }) => ({
-			id: record.id,
-			label: record.label,
-			topic: record.topic,
-			snippet: snippetAround(recordText(record), first, firstTerm.length),
-		}));
 	}
 
 	clear(sessionID: string): void {
@@ -329,65 +224,3 @@ export function renderInspector(
 		})
 		.join("\n");
 }
-
-/** Format a list of hits, keyword or semantic, as a bullet report. */
-export function renderHits(
-	hits: SearchHit[],
-	query: string,
-	mode: "keyword" | "semantic" = "keyword",
-): string {
-	if (hits.length === 0) {
-		return mode === "semantic"
-			? `No stored block matches "${query}" semantically.`
-			: `No stored block matches "${query}".`;
-	}
-	const suffix = mode === "semantic" ? " (semantic)" : "";
-	return hits
-		.map((hit) => {
-			const label = hit.label ?? hit.id;
-			const topic = hit.topic ? ` — ${hit.topic}` : "";
-			return `- [${label}]${topic}${suffix}: ${hit.snippet}`;
-		})
-		.join("\n");
-}
-
-/** Search the stored blocks by keyword and format the hits. */
-export function renderSearch(
-	sidecar: ExpansionSidecar,
-	query: string,
-	maxResults: number,
-	sessionID?: string,
-): string {
-	return renderHits(
-		sidecar.search(query, maxResults, sessionID),
-		query,
-		"keyword",
-	);
-}
-
-/**
- * Enrich ranked vector hits with the sidecar's metadata (label/topic) and a
- * leading snippet of the stored text. Unknown ids are dropped.
- */
-export function semanticHits(
-	sidecar: ExpansionSidecar,
-	hits: VectorHit[],
-	snippetLength = 160,
-	sessionID?: string,
-): SearchHit[] {
-	const out: SearchHit[] = [];
-	for (const hit of hits) {
-		const record = sidecar.get(hit.id, sessionID);
-		if (!record) continue;
-		const text = recordText(record);
-		const snippet = text.slice(0, snippetLength).replace(/\s+/g, " ");
-		out.push({
-			id: record.id,
-			label: record.label,
-			topic: record.topic,
-			snippet: text.length > snippetLength ? `${snippet}…` : snippet,
-		});
-	}
-	return out;
-}
-

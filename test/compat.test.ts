@@ -15,7 +15,6 @@ const PLUGIN_TOOLS = [
 	"compress",
 	"expand",
 	"inspect",
-	"search",
 ];
 
 // Documented omo-slim tool names/prefixes.

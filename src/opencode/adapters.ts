@@ -1,25 +1,24 @@
 /**
- * Provider implementations for the optional external adapters (the SDK/OS
- * boundary). This module turns config into concrete `Embedder`/`Scorer`
- * objects; the pure contracts live in `../core/adapters.ts`.
+ * Provider implementations for the optional external adapter (the SDK/OS
+ * boundary). This module turns config into a concrete `Scorer`; the pure
+ * contract lives in `../core/adapters.ts`.
  *
- * Both families share one transport abstraction: an `http` POST or a
- * spawned `command` that reads a JSON payload on stdin. No dependency is added
- * (platform `fetch` + `node:child_process`). Resolution never throws — when a
- * provider is unusable (missing field, unsupported transport) `undefined` is
- * returned and the caller keeps its deterministic fallback; runtime errors are
- * caught by the caller (fail-open).
+ * The scorer shares one transport abstraction: an `http` POST or a spawned
+ * `command` that reads a JSON payload on stdin. The `opencode` provider reuses
+ * a model already configured in opencode through a sandboxed session. No
+ * dependency is added (platform `fetch` + `node:child_process`). Resolution
+ * never throws — when a provider is unusable (missing field, unsupported
+ * transport) `undefined` is returned and the caller keeps its deterministic
+ * fallback; runtime errors are caught by the caller (fail-open).
  *
  * Secrets: URLs and commands are user-supplied and are never logged; only the
  * provider name and the reason for disabling are.
  */
 
 import { spawn } from "node:child_process";
-import type { Embedder, Reranker, Scorer, VectorHit } from "../core/adapters.js";
+import type { Scorer } from "../core/adapters.js";
 import type {
 	AdapterTransportConfig,
-	EmbeddingsAdapterConfig,
-	RerankAdapterConfig,
 	ScorerAdapterConfig,
 } from "../config/config.js";
 import type { Logger } from "../types.js";
@@ -36,8 +35,6 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MODEL_TIMEOUT_MS = 30_000;
 /** Cap on command stdout, to bound memory for a misbehaving command. */
 const MAX_COMMAND_STDOUT = 8 * 1024 * 1024;
-/** Per-candidate text cap sent to a model reranker. */
-const RERANK_SNIPPET = 400;
 
 export interface AdapterResolutionDeps {
 	logger: Logger;
@@ -60,49 +57,6 @@ interface Transport {
 interface ResolvedAdapter {
 	transport: Transport;
 	model?: string;
-}
-
-/**
- * Normalise the many embedding response shapes into `number[][]`.
- * Accepts a bare array, `{ embeddings: number[][] }` or the OpenAI
- * `{ data: [{ embedding: number[] }] }`.
- */
-export function parseEmbeddings(
-	payload: unknown,
-	expected: number,
-): number[][] {
-	const rows = extractRows(payload);
-	if (!rows) throw new Error("embedding response has no vectors");
-	if (rows.length !== expected) {
-		throw new Error(
-			`embedding response has ${rows.length} vectors, expected ${expected}`,
-		);
-	}
-	for (const row of rows) {
-		if (
-			!Array.isArray(row) ||
-			!row.every((value) => typeof value === "number")
-		) {
-			throw new Error("embedding response contains a non-numeric vector");
-		}
-	}
-	return rows as number[][];
-}
-
-function extractRows(payload: unknown): unknown[] | undefined {
-	if (Array.isArray(payload)) return payload;
-	if (payload && typeof payload === "object") {
-		const obj = payload as Record<string, unknown>;
-		if (Array.isArray(obj.embeddings)) return obj.embeddings;
-		if (Array.isArray(obj.data)) {
-			return obj.data.map((entry) =>
-				entry && typeof entry === "object"
-					? (entry as Record<string, unknown>).embedding
-					: entry,
-			);
-		}
-	}
-	return undefined;
 }
 
 /**
@@ -253,18 +207,6 @@ function runCommand(
 	});
 }
 
-function buildEmbedder({ transport, model }: ResolvedAdapter): Embedder {
-	return {
-		async embed(texts) {
-			const payload = await transport.send(
-				model ? { model, input: texts } : { input: texts },
-				"embedding",
-			);
-			return parseEmbeddings(payload, texts.length);
-		},
-	};
-}
-
 function buildScorer({ transport, model }: ResolvedAdapter): Scorer {
 	return {
 		async score(text) {
@@ -303,8 +245,6 @@ function warnOnBadModel(
 
 const SCORER_SYSTEM =
 	"You estimate token counts. Reply with JSON only. Do not call any tool.";
-const RERANK_SYSTEM =
-	"You rank stored context blocks by relevance to a query. Reply with JSON only. Do not call any tool.";
 
 /** Extract the first JSON array from a model reply, or throw. */
 function parseJsonArray(raw: string, label: string): unknown[] {
@@ -403,65 +343,6 @@ function buildModelScorer(runner: ModelRunner, cfg: ScorerAdapterConfig): Scorer
 	};
 }
 
-/** Keep only ids the model returned that are real, de-duplicated, capped at k. */
-export function parseRankedIds(raw: string, allowed: Set<string>, k: number): string[] {
-	const parsed = parseJsonArray(raw, "rerank");
-	const out: string[] = [];
-	for (const entry of parsed) {
-		const id =
-			typeof entry === "string"
-				? entry
-				: entry && typeof entry === "object"
-					? (entry as { id?: unknown }).id
-					: undefined;
-		if (typeof id !== "string" || !allowed.has(id) || out.includes(id)) continue;
-		out.push(id);
-		if (out.length >= k) break;
-	}
-	return out;
-}
-
-/**
- * A `Reranker` backed by the opencode model runner: it offers the candidate
- * blocks (id + snippet) and asks the model to return the relevant ids, best
- * first. Any error propagates so the `search` tool falls back to keyword search.
- */
-function buildModelReranker(
-	runner: ModelRunner,
-	cfg: RerankAdapterConfig,
-): Reranker {
-	const model = cfg.model ?? DEFAULT_ADAPTER_MODEL;
-	const timeoutMs = cfg.timeoutMs ?? DEFAULT_MODEL_TIMEOUT_MS;
-	const maxCandidates = cfg.maxCandidates ?? 50;
-
-	return {
-		async rank(query, items, k): Promise<VectorHit[]> {
-			const candidates = items.slice(0, Math.max(1, maxCandidates));
-			const allowed = new Set(candidates.map((item) => item.id));
-			const listing = candidates.map((item) => ({
-				id: item.id,
-				text:
-					item.text.length > RERANK_SNIPPET
-						? `${item.text.slice(0, RERANK_SNIPPET)}…`
-						: item.text,
-			}));
-			const prompt = [
-				"Rank the stored context blocks below by relevance to the query.",
-				`Return ONLY a JSON array of the relevant block ids, best first, at most ${k}.`,
-				"Omit irrelevant blocks; return [] when none are relevant.",
-				`Query: ${query}`,
-				JSON.stringify(listing),
-			].join("\n\n");
-			const raw = await runner(prompt, { model, system: RERANK_SYSTEM, timeoutMs });
-			const ids = parseRankedIds(raw, allowed, k);
-			return ids.map((id, index) => ({
-				id,
-				score: 1 - index / Math.max(1, ids.length),
-			}));
-		},
-	};
-}
-
 /** Resolve a shared transport from an adapter config, or `undefined`. */
 function resolveAdapter(
 	cfg: AdapterTransportConfig | undefined,
@@ -504,36 +385,10 @@ function resolveAdapter(
 		return undefined;
 	}
 
-	if (provider === "opencode") {
-		deps.logger.warn(
-			`adapters.${kind}: opencode provider is not supported here; adapter disabled`,
-		);
-		return undefined;
-	}
-
 	deps.logger.warn(
 		`adapters.${kind}: unknown provider "${String(provider)}"; adapter disabled`,
 	);
 	return undefined;
-}
-
-/**
- * Resolve an `Embedder` from config, or `undefined` when the adapter is off or
- * unusable. Never throws. The "opencode" provider is not an embedder: use
- * `adapters.rerank` for model-based retrieval instead.
- */
-export function resolveEmbedder(
-	cfg: EmbeddingsAdapterConfig | undefined,
-	deps: AdapterResolutionDeps,
-): Embedder | undefined {
-	if (cfg?.enabled !== false && (cfg?.provider ?? "http") === "opencode") {
-		deps.logger.warn(
-			"adapters.embeddings: opencode is not an embedding provider; use adapters.rerank; adapter disabled",
-		);
-		return undefined;
-	}
-	const resolved = resolveAdapter(cfg, deps, "embeddings");
-	return resolved ? buildEmbedder(resolved) : undefined;
 }
 
 /**
@@ -559,32 +414,4 @@ export function resolveScorer(
 	}
 	const resolved = resolveAdapter(cfg, deps, "scorer");
 	return resolved ? buildScorer(resolved) : undefined;
-}
-
-/**
- * Resolve a `Reranker` from config, or `undefined` when the adapter is off or
- * unusable. Never throws. Only the "opencode" provider (the default) is
- * supported; it reuses a model configured in opencode.
- */
-export function resolveReranker(
-	cfg: RerankAdapterConfig | undefined,
-	deps: AdapterResolutionDeps,
-): Reranker | undefined {
-	if (!cfg || cfg.enabled === false) return undefined;
-	const provider = cfg.provider ?? "opencode";
-	if (provider !== "opencode") {
-		deps.logger.warn(
-			`adapters.rerank: provider "${String(provider)}" is not supported; adapter disabled`,
-		);
-		return undefined;
-	}
-	const runner = resolveModelRunner(deps);
-	if (!runner) {
-		deps.logger.warn(
-			"adapters.rerank: opencode provider requires an SDK client; adapter disabled",
-		);
-		return undefined;
-	}
-	warnOnBadModel(cfg.model, deps, "rerank");
-	return buildModelReranker(runner, cfg);
 }

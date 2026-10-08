@@ -403,3 +403,33 @@ describe("scorer command provider & transform integration", () => {
 		expect((messages[0].parts[0] as any).text).toBe("x".repeat(100));
 	});
 });
+
+describe("resolveScorer() with the opencode provider", () => {
+	it("warms the model scorer cache in the background (non-blocking)", async () => {
+		let calls = 0;
+		const modelRunner = async (prompt: string): Promise<string> => {
+			calls++;
+			const texts = JSON.parse(prompt.slice(prompt.lastIndexOf("[")));
+			return JSON.stringify(texts.map(() => 10));
+		};
+		const scorer = resolveScorer(
+			{ provider: "opencode" },
+			{ logger: recordingLogger().logger, modelRunner },
+		);
+		expect(scorer).toBeDefined();
+		// The first call returns nothing yet (heuristic) and schedules a fill.
+		const first = await scorer!.scoreMany!(["a", "b"]);
+		expect(first.every((value) => Number.isNaN(value))).toBe(true);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(calls).toBe(1);
+		// The warmed cache is used on the next call.
+		expect(await scorer!.scoreMany!(["a", "b"])).toEqual([10, 10]);
+		expect(await scorer!.score("a")).toBe(10);
+	});
+
+	it("disables the opencode scorer without a runner", () => {
+		const { logger, messages } = recordingLogger();
+		expect(resolveScorer({ provider: "opencode" }, { logger })).toBeUndefined();
+		expect(messages.some((m) => m.includes("requires an SDK client"))).toBe(true);
+	});
+});

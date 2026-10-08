@@ -562,7 +562,6 @@ describe("LiveCompactionPlugin", () => {
 				compress: "allow",
 				expand: "allow",
 				inspect: "allow",
-				search: "allow",
 			});
 		});
 
@@ -576,7 +575,6 @@ describe("LiveCompactionPlugin", () => {
 				compress: "deny",
 				expand: "allow",
 				inspect: "allow",
-				search: "allow",
 			});
 		});
 
@@ -1286,7 +1284,7 @@ describe("LiveCompactionPlugin", () => {
 				} as any,
 				{
 					debug,
-					adapters: { embeddings: { provider: "mcp" } },
+					adapters: { scorer: { provider: "mcp" } },
 				} as any,
 			);
 			return logs;

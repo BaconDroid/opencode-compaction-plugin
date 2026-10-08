@@ -32,16 +32,13 @@ import { CompressionStore } from "./core/compress.js";
 import {
 	ExpansionSidecar,
 	ExpandStore,
-	recordText,
 } from "./core/expand.js";
-import { EmbeddingVectorIndex, RerankVectorIndex, type VectorIndex } from "./core/adapters.js";
-import { resolveEmbedder, resolveReranker, resolveScorer } from "./opencode/adapters.js";
+import { resolveScorer } from "./opencode/adapters.js";
 import { createModelRunner } from "./opencode/model.js";
 import {
 	buildCompressToolDef,
 	buildExpandToolDef,
 	buildInspectToolDef,
-	buildSearchToolDef,
 } from "./opencode/tools.js";
 import {
 	TodoPreserver,
@@ -67,7 +64,6 @@ const PLUGIN_TOOL_NAMES = [
 	"compress",
 	"expand",
 	"inspect",
-	"search",
 ] as const;
 
 function makeLogger(
@@ -180,50 +176,12 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		logger,
 	);
 
-	// Optional retrieval + scorer adapters (opt-in). The model runner is shared
-	// by the opencode-provider adapters so their calls cannot nest.
+	// Optional scorer adapter (opt-in) for the eviction budget (E5). The model
+	// runner backs its opencode provider.
 	const adapterDeps = {
 		logger,
 		modelRunner: createModelRunner(ctx.client, ctx.directory),
 	};
-	const corpus = (sessionID?: string) =>
-		expansions.listForSession(sessionID).map((record) => ({
-			id: record.id,
-			text: recordText(record),
-		}));
-
-	// Semantic retrieval: vector embeddings first, else a model reranker. When
-	// absent or unusable the `search` tool keeps its deterministic keyword search.
-	const embeddingCfg = config.adapters?.embeddings;
-	const rerankCfg = config.adapters?.rerank;
-	const embedder = resolveEmbedder(embeddingCfg, adapterDeps);
-	let semanticIndex: VectorIndex | undefined;
-	let semanticMode: "semantic" | "rerank" = "semantic";
-	if (embedder) {
-		semanticIndex = new EmbeddingVectorIndex(
-			embedder,
-			corpus,
-			embeddingCfg?.minScore ?? 0,
-		);
-		logger.info("semantic search adapter enabled", {
-			provider: embeddingCfg?.provider ?? "http",
-		});
-	} else {
-		const reranker = resolveReranker(rerankCfg, adapterDeps);
-		if (reranker) {
-			semanticIndex = new RerankVectorIndex(
-				reranker,
-				corpus,
-				rerankCfg?.maxCandidates,
-			);
-			semanticMode = "rerank";
-			logger.info("rerank search adapter enabled", {
-				model: rerankCfg?.model ?? "opencode/big-pickle",
-			});
-		}
-	}
-
-	// Optional residual/perplexity scorer (opt-in) for the eviction budget (E5).
 	const scorer = resolveScorer(config.adapters?.scorer, adapterDeps);
 
 	const getTracker = (sessionID: string): FilesTouchedTracker => {
@@ -468,8 +426,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 					compressions.clear(sessionID);
 					expansions.clear(sessionID);
 					expandStore.clear(sessionID);
-					// Drop this session's cached embeddings (not every session's).
-					semanticIndex?.clearSession?.(sessionID);
 					todoPreserver.clear(sessionID);
 					slidingState.delete(sessionID);
 					preemption.clear(sessionID);
@@ -551,7 +507,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			compressions.clearAll();
 			expansions.clearAll();
 			expandStore.clearAll();
-			semanticIndex?.clear?.();
 			todoPreserver.clearAll();
 			slidingState.clear();
 			preemption.clearAll();
@@ -584,13 +539,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			compress: buildCompressToolDef(),
 			expand: buildExpandToolDef(),
 			inspect: buildInspectToolDef(expansions),
-			search: buildSearchToolDef(
-				expansions,
-				config.compress?.searchMaxResults ?? 5,
-				semanticIndex
-					? { index: semanticIndex, logger, mode: semanticMode }
-					: undefined,
-			),
 		},
 	};
 
