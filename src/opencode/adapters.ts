@@ -15,22 +15,40 @@
  */
 
 import { spawn } from "node:child_process";
-import type { Embedder, Scorer } from "../core/adapters.js";
+import type { Embedder, Reranker, Scorer, VectorHit } from "../core/adapters.js";
 import type {
 	AdapterTransportConfig,
 	EmbeddingsAdapterConfig,
+	RerankAdapterConfig,
 	ScorerAdapterConfig,
 } from "../config/config.js";
 import type { Logger } from "../types.js";
+import {
+	DEFAULT_ADAPTER_MODEL,
+	HOST_MODEL,
+	createModelRunner,
+	resolveModelRef,
+	type ModelRunner,
+} from "./model.js";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
+/** Default timeout for a model-backed adapter call (models are slower). */
+const DEFAULT_MODEL_TIMEOUT_MS = 30_000;
 /** Cap on command stdout, to bound memory for a misbehaving command. */
 const MAX_COMMAND_STDOUT = 8 * 1024 * 1024;
+/** Per-candidate text cap sent to a model reranker. */
+const RERANK_SNIPPET = 400;
 
 export interface AdapterResolutionDeps {
 	logger: Logger;
 	/** Injectable fetch for tests (defaults to the platform fetch). */
 	fetcher?: typeof fetch;
+	/** opencode SDK client (required by the "opencode" provider). */
+	client?: unknown;
+	/** Workspace directory passed to sandboxed model calls. */
+	directory?: string;
+	/** Injectable model runner for tests (defaults to one built from `client`). */
+	modelRunner?: ModelRunner;
 }
 
 /** Send a JSON payload and return the parsed response. */
@@ -259,6 +277,158 @@ function buildScorer({ transport, model }: ResolvedAdapter): Scorer {
 	};
 }
 
+/**
+ * Resolve the shared model runner, or `undefined` when no client is available.
+ * A caller-supplied runner (tests) wins.
+ */
+function resolveModelRunner(deps: AdapterResolutionDeps): ModelRunner | undefined {
+	if (deps.modelRunner) return deps.modelRunner;
+	if (deps.client === undefined || deps.directory === undefined) return undefined;
+	return createModelRunner(deps.client, deps.directory);
+}
+
+/** Warn when an explicit model string is neither "host" nor a valid ref. */
+function warnOnBadModel(
+	model: string | undefined,
+	deps: AdapterResolutionDeps,
+	kind: string,
+): void {
+	if (model === undefined || model === HOST_MODEL) return;
+	if (resolveModelRef(model) === undefined) {
+		deps.logger.warn(
+			`adapters.${kind}: model "${model}" is not provider/model; using the host model`,
+		);
+	}
+}
+
+const SCORER_SYSTEM =
+	"You estimate token counts. Reply with JSON only. Do not call any tool.";
+const RERANK_SYSTEM =
+	"You rank stored context blocks by relevance to a query. Reply with JSON only. Do not call any tool.";
+
+/** Extract the first JSON array from a model reply, or throw. */
+function parseJsonArray(raw: string, label: string): unknown[] {
+	const start = raw.indexOf("[");
+	const end = raw.lastIndexOf("]");
+	if (start < 0 || end <= start) {
+		throw new Error(`${label} response has no JSON array`);
+	}
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw.slice(start, end + 1));
+	} catch {
+		throw new Error(`${label} response is not valid JSON`);
+	}
+	if (!Array.isArray(parsed)) throw new Error(`${label} response is not an array`);
+	return parsed;
+}
+
+/**
+ * Normalise a scorer reply into one estimate per text, in order. A missing or
+ * mis-sized array throws; a non-numeric entry yields `NaN` so the estimator
+ * keeps the heuristic for that text.
+ */
+export function parseTokenEstimates(raw: string, expected: number): number[] {
+	const parsed = parseJsonArray(raw, "scorer");
+	if (parsed.length !== expected) {
+		throw new Error(
+			`scorer returned ${parsed.length} estimates for ${expected} texts`,
+		);
+	}
+	return parsed.map((value) => {
+		if (typeof value === "number") return value;
+		if (typeof value === "string" && value.trim() !== "") return Number(value);
+		return Number.NaN;
+	});
+}
+
+/**
+ * A `Scorer` backed by the opencode model runner. It batches all texts into a
+ * single call (one round-trip per transform) and asks for token estimates.
+ */
+function buildModelScorer(runner: ModelRunner, cfg: ScorerAdapterConfig): Scorer {
+	const model = cfg.model ?? DEFAULT_ADAPTER_MODEL;
+	const timeoutMs = cfg.timeoutMs ?? DEFAULT_MODEL_TIMEOUT_MS;
+
+	const scoreMany = async (texts: string[]): Promise<number[]> => {
+		if (texts.length === 0) return [];
+		const prompt = [
+			"Estimate the number of LLM tokens (contiguous BPE tokens) each text below would consume.",
+			`Return ONLY a JSON array of ${texts.length} integers, one per text, in the same order.`,
+			JSON.stringify(texts),
+		].join("\n\n");
+		const raw = await runner(prompt, { system: SCORER_SYSTEM, model, timeoutMs });
+		return parseTokenEstimates(raw, texts.length);
+	};
+
+	return {
+		async score(text) {
+			const [value] = await scoreMany([text]);
+			return value;
+		},
+		scoreMany,
+	};
+}
+
+/** Keep only ids the model returned that are real, de-duplicated, capped at k. */
+export function parseRankedIds(raw: string, allowed: Set<string>, k: number): string[] {
+	const parsed = parseJsonArray(raw, "rerank");
+	const out: string[] = [];
+	for (const entry of parsed) {
+		const id =
+			typeof entry === "string"
+				? entry
+				: entry && typeof entry === "object"
+					? (entry as { id?: unknown }).id
+					: undefined;
+		if (typeof id !== "string" || !allowed.has(id) || out.includes(id)) continue;
+		out.push(id);
+		if (out.length >= k) break;
+	}
+	return out;
+}
+
+/**
+ * A `Reranker` backed by the opencode model runner: it offers the candidate
+ * blocks (id + snippet) and asks the model to return the relevant ids, best
+ * first. Any error propagates so the `search` tool falls back to keyword search.
+ */
+function buildModelReranker(
+	runner: ModelRunner,
+	cfg: RerankAdapterConfig,
+): Reranker {
+	const model = cfg.model ?? DEFAULT_ADAPTER_MODEL;
+	const timeoutMs = cfg.timeoutMs ?? DEFAULT_MODEL_TIMEOUT_MS;
+	const maxCandidates = cfg.maxCandidates ?? 50;
+
+	return {
+		async rank(query, items, k): Promise<VectorHit[]> {
+			const candidates = items.slice(0, Math.max(1, maxCandidates));
+			const allowed = new Set(candidates.map((item) => item.id));
+			const listing = candidates.map((item) => ({
+				id: item.id,
+				text:
+					item.text.length > RERANK_SNIPPET
+						? `${item.text.slice(0, RERANK_SNIPPET)}…`
+						: item.text,
+			}));
+			const prompt = [
+				"Rank the stored context blocks below by relevance to the query.",
+				`Return ONLY a JSON array of the relevant block ids, best first, at most ${k}.`,
+				"Omit irrelevant blocks; return [] when none are relevant.",
+				`Query: ${query}`,
+				JSON.stringify(listing),
+			].join("\n\n");
+			const raw = await runner(prompt, { model, system: RERANK_SYSTEM, timeoutMs });
+			const ids = parseRankedIds(raw, allowed, k);
+			return ids.map((id, index) => ({
+				id,
+				score: 1 - index / Math.max(1, ids.length),
+			}));
+		},
+	};
+}
+
 /** Resolve a shared transport from an adapter config, or `undefined`. */
 function resolveAdapter(
 	cfg: AdapterTransportConfig | undefined,
@@ -301,6 +471,13 @@ function resolveAdapter(
 		return undefined;
 	}
 
+	if (provider === "opencode") {
+		deps.logger.warn(
+			`adapters.${kind}: opencode provider is not supported here; adapter disabled`,
+		);
+		return undefined;
+	}
+
 	deps.logger.warn(
 		`adapters.${kind}: unknown provider "${String(provider)}"; adapter disabled`,
 	);
@@ -309,24 +486,72 @@ function resolveAdapter(
 
 /**
  * Resolve an `Embedder` from config, or `undefined` when the adapter is off or
- * unusable. Never throws.
+ * unusable. Never throws. The "opencode" provider is not an embedder: use
+ * `adapters.rerank` for model-based retrieval instead.
  */
 export function resolveEmbedder(
 	cfg: EmbeddingsAdapterConfig | undefined,
 	deps: AdapterResolutionDeps,
 ): Embedder | undefined {
+	if (cfg?.enabled !== false && (cfg?.provider ?? "http") === "opencode") {
+		deps.logger.warn(
+			"adapters.embeddings: opencode is not an embedding provider; use adapters.rerank; adapter disabled",
+		);
+		return undefined;
+	}
 	const resolved = resolveAdapter(cfg, deps, "embeddings");
 	return resolved ? buildEmbedder(resolved) : undefined;
 }
 
 /**
  * Resolve a `Scorer` from config, or `undefined` when the adapter is off or
- * unusable. Never throws.
+ * unusable. Never throws. Provider "opencode" reuses a model configured in
+ * opencode (default `opencode/big-pickle`; "host" reuses the active model).
  */
 export function resolveScorer(
 	cfg: ScorerAdapterConfig | undefined,
 	deps: AdapterResolutionDeps,
 ): Scorer | undefined {
+	if (!cfg || cfg.enabled === false) return undefined;
+	if ((cfg.provider ?? "http") === "opencode") {
+		const runner = resolveModelRunner(deps);
+		if (!runner) {
+			deps.logger.warn(
+				"adapters.scorer: opencode provider requires an SDK client; adapter disabled",
+			);
+			return undefined;
+		}
+		warnOnBadModel(cfg.model, deps, "scorer");
+		return buildModelScorer(runner, cfg);
+	}
 	const resolved = resolveAdapter(cfg, deps, "scorer");
 	return resolved ? buildScorer(resolved) : undefined;
+}
+
+/**
+ * Resolve a `Reranker` from config, or `undefined` when the adapter is off or
+ * unusable. Never throws. Only the "opencode" provider (the default) is
+ * supported; it reuses a model configured in opencode.
+ */
+export function resolveReranker(
+	cfg: RerankAdapterConfig | undefined,
+	deps: AdapterResolutionDeps,
+): Reranker | undefined {
+	if (!cfg || cfg.enabled === false) return undefined;
+	const provider = cfg.provider ?? "opencode";
+	if (provider !== "opencode") {
+		deps.logger.warn(
+			`adapters.rerank: provider "${String(provider)}" is not supported; adapter disabled`,
+		);
+		return undefined;
+	}
+	const runner = resolveModelRunner(deps);
+	if (!runner) {
+		deps.logger.warn(
+			"adapters.rerank: opencode provider requires an SDK client; adapter disabled",
+		);
+		return undefined;
+	}
+	warnOnBadModel(cfg.model, deps, "rerank");
+	return buildModelReranker(runner, cfg);
 }

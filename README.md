@@ -148,7 +148,7 @@ Restores a compressed block's original messages from the in-memory sidecar, refe
 
 `inspect` lists the compressed blocks currently held in memory (labels, topics, sizes). `search` runs a **deterministic** case-insensitive keyword search over the stored originals (no embeddings) and returns matching `[bN]` labels with a snippet; use `expand` to restore a match. Both return their result directly; `search` is bounded by `compress.searchMaxResults`.
 
-When the optional [semantic retrieval adapter](#optional-adapters-) is configured, `search` runs embedding-based retrieval first and falls back to the keyword search on any error or when it finds nothing.
+When the optional [semantic retrieval adapter](#optional-adapters-) is configured, `search` runs semantic retrieval first — embedding similarity, or a model reranker when `adapters.rerank` is set — and falls back to the keyword search on any error or when it finds nothing.
 
 ## Feature reference
 
@@ -172,6 +172,7 @@ Each feature below lists **what** it does, its **config** keys and how it
 | Auto-continue | — | — |
 | Compression tools | `compress.{protectedTurns,reversible,searchMaxResults}` | `3`, `false`, `5` |
 | Semantic retrieval (optional) | `adapters.embeddings.*` | disabled |
+| Model rerank for search (optional) | `adapters.rerank.*` | disabled |
 | Residual/perplexity scoring (optional) | `adapters.scorer.*` | disabled |
 
 ### Structured compaction prompt
@@ -250,8 +251,11 @@ Each feature below lists **what** it does, its **config** keys and how it
 
 ### Semantic retrieval (optional adapter)
 - **What** — when `adapters.embeddings` is configured, `search` ranks stored
-  blocks by embedding similarity (cosine) instead of keyword substring.
-- **Config** — `adapters.embeddings.*` (opt-in; off when absent).
+  blocks by embedding similarity (cosine) instead of keyword substring. When
+  `adapters.rerank` is configured instead, a model already available to OpenCode
+  ranks the blocks (no embedding endpoint needed).
+- **Config** — `adapters.embeddings.*` or `adapters.rerank.*` (opt-in; off when
+  absent). `embeddings` takes precedence when both are set.
 - **Interactions** — semantic hits are tried first; any error (timeout, bad
   response) or an empty result falls back to the deterministic keyword search.
   Never changes the transform/compaction path.
@@ -260,6 +264,8 @@ Each feature below lists **what** it does, its **config** keys and how it
 - **What** — eviction normally budgets with the heuristic `estimateTokens`
   (chars ÷ 4). When `adapters.scorer` is configured, each distinct text part is
   scored once and its residual estimate replaces the heuristic for that text.
+  The `opencode` provider reuses a model already configured in OpenCode (no
+  endpoint or credentials handled by the plugin).
 - **Config** — `adapters.scorer.*` (opt-in; off when absent).
 - **Interactions** — only affects the eviction budget estimate; tool outputs and
   unscored texts keep the heuristic; any scorer error falls back to it.
@@ -377,10 +383,11 @@ logged and falls back to the internal behaviour, so a broken adapter can never
 break compaction. No dependency is added: adapters talk to an endpoint/command
 you already run.
 
-Two adapters exist today, each enabled by adding a block (there is no default
+Three adapters exist today, each enabled by adding a block (there is no default
 value, so each is off unless present):
 
-- **`adapters.embeddings`** — semantic retrieval for `search` (E4).
+- **`adapters.embeddings`** — embedding-based semantic retrieval for `search` (E4).
+- **`adapters.rerank`** — model reranker for `search` (E4), via a model configured in OpenCode.
 - **`adapters.scorer`** — residual/perplexity estimate for the eviction budget (E5/E9).
 
 ```jsonc
@@ -394,15 +401,29 @@ value, so each is off unless present):
             "timeoutMs": 10000,              // optional request timeout
             "minScore": 0.25                 // optional minimum cosine score for a hit
         },
+        "rerank": {
+            "provider": "opencode",          // only "opencode" (default)
+            "model": "opencode/big-pickle",  // free OpenCode Zen model (default); "host" reuses the active model
+            "timeoutMs": 30000,
+            "maxCandidates": 50              // max blocks offered to the model per search
+        },
         "scorer": {
-            "provider": "http",
-            "url": "http://localhost:8080/score",
-            "timeoutMs": 10000,
+            "provider": "opencode",          // "opencode" | "http" | "command"
+            "model": "opencode/big-pickle",  // free OpenCode Zen model (default); "host" reuses the active model
+            "timeoutMs": 30000,
             "maxSamples": 200                // max distinct texts scored per transform
         }
     }
 }
 ```
+
+**Provider `opencode`** — reuses a model already configured in OpenCode through a
+sandboxed session, so OpenCode keeps handling provider auth and no key or
+endpoint is set here. `model` defaults to the free `opencode/big-pickle`; set it
+to `"host"` to reuse the model OpenCode is already using. Supported for `scorer`
+and `rerank` only — `embeddings` still needs a real embedding endpoint (use
+`rerank` for model-based retrieval). A model call is never nested: while one
+adapter call is in flight, another falls back to its deterministic behaviour.
 
 **Provider `http`** — for `embeddings`, POSTs an OpenAI-style request
 (`{ "model"?, "input": ["text", …] }`) and accepts the response as a bare
@@ -448,7 +469,7 @@ bun run test:coverage
 # (OpenCode loads .ts files directly via Bun)
 ```
 
-Current coverage: **95.4% functions, 99.6% lines** (260 tests).
+Current coverage: **95.9% functions, 99.6% lines** (283 tests).
 
 ## File Structure
 
@@ -465,7 +486,7 @@ src/
     compress.ts         — compress domain + block rendering
     blocks.ts           — durable block ids + deterministic span selection
     expand.ts           — reversible sidecar + inspection/search
-    adapters.ts         — optional adapter contracts + in-memory vector index
+    adapters.ts         — optional adapter contracts + in-memory/rerank indexes
     scorer.ts           — optional scorer-calibrated token estimator
     strategies.ts       — dedup, error purge, cascade purge
     eviction.ts         — graduated, LLM-free eviction
@@ -482,7 +503,8 @@ src/
     config-loader.ts    — JSON/JSONC file loading
   opencode/
     tools.ts            — model-driven tool definitions (SDK boundary)
-    adapters.ts         — optional adapter provider resolution (http/command)
+    model.ts            — shared opencode-model runner (scorer/rerank adapters)
+    adapters.ts         — optional adapter provider resolution (http/command/opencode)
 test/
   index.test.ts     — Plugin integration tests
   compat.test.ts    — omo-slim compatibility contract
@@ -498,8 +520,9 @@ test/
   preemption.test.ts — Trigger, token gate and preemptive tests
   degradation-monitor.test.ts — Degradation monitor tests
   previous-summary.test.ts — Previous summary and sliding-state tests
-  adapters.test.ts  — Optional embedding adapter contracts, providers and fallback
+  adapters.test.ts  — Optional embedding/rerank adapter contracts, providers and fallback
   scorer.test.ts    — Optional scorer adapter, estimator and eviction integration
+  model.test.ts     — Optional opencode-model runner (host/default model, fail-open)
   messages.test.ts  — Message helper tests
   requests.test.ts  — Queued request scoping tests
   helpers.ts        — Shared test setup + recording logger

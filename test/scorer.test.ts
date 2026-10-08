@@ -160,6 +160,44 @@ describe("buildScorerEstimator()", () => {
 			buildScorerEstimator(scorer, messages as any),
 		).rejects.toThrow("boom");
 	});
+
+	it("prefers a batched scoreMany over repeated score calls", async () => {
+		let calls = 0;
+		const batches: string[][] = [];
+		const scorer: Scorer = {
+			async score() {
+				throw new Error("score should not be called");
+			},
+			async scoreMany(texts) {
+				calls++;
+				batches.push(texts);
+				return texts.map((text) => text.length);
+			},
+		};
+		const messages = [
+			textMsg("assistant", "alpha"),
+			textMsg("assistant", "beta"),
+		];
+		const estimate = await buildScorerEstimator(scorer, messages as any);
+		expect(calls).toBe(1);
+		expect(batches[0]).toEqual(["alpha", "beta"]);
+		expect(estimate(messages as any)).toBe(9);
+	});
+
+	it("rejects when scoreMany returns the wrong count", async () => {
+		const scorer: Scorer = {
+			async score() {
+				return 1;
+			},
+			async scoreMany() {
+				return [1];
+			},
+		};
+		const messages = [textMsg("assistant", "a"), textMsg("assistant", "b")];
+		await expect(
+			buildScorerEstimator(scorer, messages as any),
+		).rejects.toThrow("scores for");
+	});
 });
 
 describe("applyEviction() with a text resolver", () => {

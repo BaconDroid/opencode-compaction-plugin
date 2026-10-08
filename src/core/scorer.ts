@@ -19,14 +19,24 @@ export const DEFAULT_SCORER_MAX_SAMPLES = 200;
 export const SCORER_CONCURRENCY = 8;
 
 /**
- * Score every text with at most `limit` requests in flight. Resolves in input
- * order; rejects with the first error once the in-flight requests settle.
+ * Score every text, in input order. A scorer that exposes `scoreMany` is used
+ * in one batch; otherwise requests are issued with at most `limit` in flight.
+ * Rejects with the first error (the caller falls back to the heuristic).
  */
 async function scoreAll(
 	scorer: Scorer,
 	texts: string[],
 	limit: number,
 ): Promise<number[]> {
+	if (typeof scorer.scoreMany === "function") {
+		const values = await scorer.scoreMany(texts);
+		if (values.length !== texts.length) {
+			throw new Error(
+				`scorer returned ${values.length} scores for ${texts.length} texts`,
+			);
+		}
+		return values;
+	}
 	const results: number[] = new Array(texts.length);
 	let next = 0;
 	let failure: unknown;

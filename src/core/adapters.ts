@@ -24,6 +24,10 @@ export interface VectorHit {
 /** Semantic retrieval over a caller-supplied corpus. */
 export interface VectorIndex {
 	search(query: string, k: number, sessionID?: string): Promise<VectorHit[]>;
+	/** Drop any cached state (indexes with no cache may omit this). */
+	clear?(): void;
+	/** Drop one session's cached state (indexes with no cache may omit this). */
+	clearSession?(sessionID: string): void;
 }
 
 /**
@@ -33,6 +37,20 @@ export interface VectorIndex {
  */
 export interface Scorer {
 	score(text: string): Promise<number>;
+	/**
+	 * Optional batch form. When present it is preferred over repeated `score`
+	 * calls (one round-trip), which a model-backed scorer relies on.
+	 */
+	scoreMany?(texts: string[]): Promise<number[]>;
+}
+
+/**
+ * Optional reranker: orders corpus items by relevance to a query, best first.
+ * Used by the `search` tool as an alternative to vector embeddings when the
+ * ranker is a model rather than an embedding endpoint.
+ */
+export interface Reranker {
+	rank(query: string, items: CorpusItem[], k: number): Promise<VectorHit[]>;
 }
 
 /** A corpus entry fed to an in-memory vector index. */
@@ -140,5 +158,40 @@ export class EmbeddingVectorIndex implements VectorIndex {
 		for (const key of [...this.cache.keys()]) {
 			if (key.startsWith(prefix)) this.cache.delete(key);
 		}
+	}
+}
+
+/** Default cap on the candidates sent to a model reranker per search. */
+export const DEFAULT_RERANK_MAX_CANDIDATES = 50;
+
+/**
+ * A `VectorIndex` backed by an optional `Reranker` (no embeddings, no cache).
+ * The corpus is re-read on every search; only the first `maxCandidates` items
+ * are offered to the ranker, and unknown ids are dropped.
+ */
+export class RerankVectorIndex implements VectorIndex {
+	constructor(
+		private readonly reranker: Reranker,
+		private readonly corpus: (sessionID?: string) => CorpusItem[],
+		private readonly maxCandidates = DEFAULT_RERANK_MAX_CANDIDATES,
+	) {}
+
+	async search(
+		query: string,
+		k: number,
+		sessionID?: string,
+	): Promise<VectorHit[]> {
+		const needle = query.trim();
+		if (!needle || k <= 0) return [];
+
+		const items = this.corpus(sessionID).filter(
+			(item) => item.text.trim().length > 0,
+		);
+		if (items.length === 0) return [];
+
+		const candidates = items.slice(0, Math.max(1, this.maxCandidates));
+		const known = new Set(candidates.map((item) => item.id));
+		const hits = await this.reranker.rank(needle, candidates, k);
+		return hits.filter((hit) => known.has(hit.id)).slice(0, k);
 	}
 }

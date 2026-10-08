@@ -72,7 +72,7 @@ export interface PreemptiveCompactionConfig {
 }
 
 /** Transport for an optional external adapter. */
-export type AdapterProvider = "http" | "command" | "mcp";
+export type AdapterProvider = "http" | "command" | "mcp" | "opencode";
 
 /**
  * Fields shared by every optional adapter. Opt-in: an adapter is disabled
@@ -111,12 +111,25 @@ export interface ScorerAdapterConfig extends AdapterTransportConfig {
 	maxSamples?: number;
 }
 
+/**
+ * Optional model reranker for the `search` tool: ranks stored blocks by
+ * relevance instead of embedding cosine. `provider` defaults to "opencode"
+ * (a model already configured in opencode); `model` defaults to the free
+ * `opencode/big-pickle`, or "host" to reuse opencode's active model.
+ */
+export interface RerankAdapterConfig extends AdapterTransportConfig {
+	/** Maximum candidate blocks sent to the model per search (default: 50) */
+	maxCandidates?: number;
+}
+
 /** Optional external adapters (all off by default). */
 export interface AdaptersConfig {
 	/** Semantic embedding/retrieval adapter */
 	embeddings?: EmbeddingsAdapterConfig;
 	/** Residual/perplexity scorer adapter (eviction budget) */
 	scorer?: ScorerAdapterConfig;
+	/** Model reranker for `search` (opencode provider) */
+	rerank?: RerankAdapterConfig;
 }
 
 export interface DegradationMonitorConfig {
@@ -392,10 +405,10 @@ function normalizeConfig(cfg: ResolvedConfig): ResolvedConfig {
 	if (isPlainObject(cfg.adapters)) {
 		cfg.adapters = structuredClone(cfg.adapters);
 		const adapters = cfg.adapters as Record<string, unknown>;
-		for (const key of ["embeddings", "scorer"]) {
+		for (const key of ["embeddings", "scorer", "rerank"]) {
 			const adapter = adapters[key];
 			if (!isPlainObject(adapter)) continue;
-			for (const field of ["timeoutMs", "maxSamples"] as const) {
+			for (const field of ["timeoutMs", "maxSamples", "maxCandidates"] as const) {
 				const value = adapter[field];
 				if (
 					value !== undefined &&

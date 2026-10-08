@@ -4,8 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	EmbeddingVectorIndex,
+	RerankVectorIndex,
 	cosineSimilarity,
+	type CorpusItem,
 	type Embedder,
+	type Reranker,
 } from "../src/core/adapters.ts";
 import {
 	ExpansionSidecar,
@@ -16,7 +19,11 @@ import {
 import { buildSearchToolDef } from "../src/opencode/tools.ts";
 import {
 	parseEmbeddings,
+	parseRankedIds,
+	parseTokenEstimates,
 	resolveEmbedder,
+	resolveReranker,
+	resolveScorer,
 } from "../src/opencode/adapters.ts";
 import { LiveCompactionPlugin } from "../src/index.ts";
 import { makeTmpSetup, recordingLogger } from "./helpers.ts";
@@ -477,6 +484,235 @@ describe("plugin wiring: semantic search adapter", () => {
 			{ messages } as any,
 		);
 		expect(logs).toContain("semantic search adapter enabled");
+
+		const search = (hooks as any).tool.search;
+		const result = await search.execute({ query: "login" }, {});
+		expect(result).toContain("(semantic)");
+		expect(result).toContain("[b0]");
+	});
+});
+
+describe("RerankVectorIndex", () => {
+	const corpus: CorpusItem[] = [
+		{ id: "a", text: "fix the login bug" },
+		{ id: "b", text: "write the changelog" },
+	];
+
+	it("delegates to the reranker and caps to k", async () => {
+		const seen: CorpusItem[][] = [];
+		const reranker: Reranker = {
+			async rank(_query, items) {
+				seen.push(items);
+				return [
+					{ id: "b", score: 1 },
+					{ id: "a", score: 0.5 },
+				];
+			},
+		};
+		const index = new RerankVectorIndex(reranker, () => corpus);
+		expect((await index.search("login", 5)).map((h) => h.id)).toEqual(["b", "a"]);
+		expect(await index.search("login", 1)).toHaveLength(1);
+		expect(seen[0]).toEqual(corpus);
+	});
+
+	it("returns [] for an empty query, k <= 0 or an empty corpus", async () => {
+		const reranker: Reranker = {
+			async rank() {
+				return [{ id: "a", score: 1 }];
+			},
+		};
+		const index = new RerankVectorIndex(reranker, () => corpus);
+		expect(await index.search("", 5)).toEqual([]);
+		expect(await index.search("  ", 5)).toEqual([]);
+		expect(await index.search("q", 0)).toEqual([]);
+		expect(
+			await new RerankVectorIndex(reranker, () => []).search("q", 5),
+		).toEqual([]);
+	});
+
+	it("drops invented ids and caps the candidates offered to the model", async () => {
+		const reranker: Reranker = {
+			async rank(_query, items) {
+				return [
+					{ id: "ghost", score: 1 },
+					{ id: items[0].id, score: 0.5 },
+				];
+			},
+		};
+		const index = new RerankVectorIndex(reranker, () => corpus, 1);
+		expect((await index.search("q", 5)).map((h) => h.id)).toEqual(["a"]);
+	});
+});
+
+describe("parseTokenEstimates() / parseRankedIds()", () => {
+	it("parses a numeric array and maps unusable entries to NaN", () => {
+		expect(parseTokenEstimates("[5, 7]", 2)).toEqual([5, 7]);
+		expect(parseTokenEstimates('here: ["3", 4]', 2)).toEqual([3, 4]);
+		expect(Number.isNaN(parseTokenEstimates("[5, null]", 2)[1])).toBe(true);
+	});
+
+	it("throws on a missing or mis-sized array", () => {
+		expect(() => parseTokenEstimates("nope", 1)).toThrow("no JSON array");
+		expect(() => parseTokenEstimates("[1]", 2)).toThrow("estimates for 2");
+	});
+
+	it("keeps only known, unique ids in order", () => {
+		const allowed = new Set(["a", "b"]);
+		expect(parseRankedIds('["b","a"]', allowed, 5)).toEqual(["b", "a"]);
+		expect(
+			parseRankedIds('[{"id":"a"},{"id":"x"},{"id":"a"}]', allowed, 5),
+		).toEqual(["a"]);
+		expect(parseRankedIds('["b","a"]', allowed, 1)).toEqual(["b"]);
+	});
+});
+
+describe("resolveScorer() / resolveReranker() with the opencode provider", () => {
+	const echoCounts = async (prompt: string): Promise<string> => {
+		const texts = JSON.parse(prompt.slice(prompt.lastIndexOf("[")));
+		return JSON.stringify(texts.map(() => 10));
+	};
+
+	it("builds a batched model scorer from an injected runner", async () => {
+		const scorer = resolveScorer(
+			{ provider: "opencode" },
+			{ logger: recordingLogger().logger, modelRunner: echoCounts },
+		);
+		expect(scorer).toBeDefined();
+		expect(await scorer!.scoreMany!(["a", "b"])).toEqual([10, 10]);
+		expect(await scorer!.score("a")).toBe(10);
+	});
+
+	it("disables the opencode scorer without a runner", () => {
+		const { logger, messages } = recordingLogger();
+		expect(resolveScorer({ provider: "opencode" }, { logger })).toBeUndefined();
+		expect(messages.some((m) => m.includes("requires an SDK client"))).toBe(true);
+	});
+
+	it("builds a model reranker and filters ids", async () => {
+		const reranker = resolveReranker(
+			{ provider: "opencode" },
+			{
+				logger: recordingLogger().logger,
+				modelRunner: async () => '["b"]',
+			},
+		);
+		expect(reranker).toBeDefined();
+		const hits = await reranker!.rank(
+			"q",
+			[
+				{ id: "a", text: "alpha" },
+				{ id: "b", text: "beta" },
+			],
+			5,
+		);
+		expect(hits.map((h) => h.id)).toEqual(["b"]);
+	});
+
+	it("defaults the rerank provider to opencode and rejects others", () => {
+		expect(
+			resolveReranker(
+				{},
+				{ logger: recordingLogger().logger, modelRunner: async () => "[]" },
+			),
+		).toBeDefined();
+		const { logger, messages } = recordingLogger();
+		expect(resolveReranker({ provider: "http" }, { logger })).toBeUndefined();
+		expect(messages.some((m) => m.includes("not supported"))).toBe(true);
+	});
+});
+
+describe("resolveEmbedder() rejects the opencode provider", () => {
+	it("warns and disables", () => {
+		const { logger, messages } = recordingLogger();
+		expect(resolveEmbedder({ provider: "opencode" }, { logger })).toBeUndefined();
+		expect(messages.some((m) => m.includes("not an embedding provider"))).toBe(
+			true,
+		);
+	});
+});
+
+describe("plugin wiring: rerank search adapter", () => {
+	const TMP_DIR = join(import.meta.dirname, "__tmp_rerank_test");
+	const { setup, cleanup } = makeTmpSetup(TMP_DIR);
+	beforeEach(setup);
+	afterEach(cleanup);
+
+	it("reranks stored blocks through the opencode model", async () => {
+		const logs: string[] = [];
+		const ctx = {
+			client: {
+				app: {
+					log: (input: { body: { message: string } }) => {
+						logs.push(input.body.message);
+						return Promise.resolve();
+					},
+				},
+				session: {
+					async create() {
+						return { data: { id: "j1" } };
+					},
+					async prompt(input: { body: { parts: Array<{ text: string }> } }) {
+						const text = input.body.parts[0].text;
+						const items = JSON.parse(text.slice(text.lastIndexOf("[")));
+						return {
+							data: {
+								parts: [
+									{
+										type: "text",
+										text: JSON.stringify(items.map((i: { id: string }) => i.id)),
+									},
+								],
+							},
+						};
+					},
+					async delete() {
+						return {};
+					},
+				},
+			},
+			project: { id: "p", name: "p" },
+			directory: TMP_DIR,
+			worktree: TMP_DIR,
+			serverUrl: new URL("http://localhost:4096"),
+		};
+		const hooks = await LiveCompactionPlugin(ctx as any, {
+			debug: true,
+			compress: { reversible: true },
+			adapters: { rerank: { model: "host" } },
+		} as any);
+
+		await hooks["tool.execute.after"]!(
+			{
+				tool: "compress",
+				sessionID: "s1",
+				callID: "c1",
+				args: { topic: "Auth", start: 0, end: 3, summary: "login flow" },
+			},
+			{ title: "", output: "", metadata: {} },
+		);
+		const messages = [
+			{ info: { role: "user" }, parts: [{ type: "text", text: "fix auth" }] },
+			{ info: { role: "assistant" }, parts: [{ type: "text", text: "investigating" }] },
+			{ info: { role: "user" }, parts: [{ type: "text", text: "try this" }] },
+			{ info: { role: "assistant" }, parts: [{ type: "text", text: "done" }] },
+			{
+				info: { role: "user" },
+				parts: [
+					{ type: "text", text: "next" },
+					{
+						type: "tool",
+						tool: "compress",
+						callID: "c1",
+						state: { output: "compressed" },
+					},
+				],
+			},
+		];
+		await hooks["experimental.chat.messages.transform"]!(
+			{} as any,
+			{ messages } as any,
+		);
+		expect(logs).toContain("rerank search adapter enabled");
 
 		const search = (hooks as any).tool.search;
 		const result = await search.execute({ query: "login" }, {});

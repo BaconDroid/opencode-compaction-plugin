@@ -61,6 +61,24 @@ export interface PluginInput {
 				body: { providerID: string; modelID: string; auto?: boolean };
 				query: { directory: string };
 			}) => Promise<unknown>;
+			create?: (input: {
+				body?: { parentID?: string; title?: string };
+				query?: { directory?: string };
+			}) => Promise<{ data?: { id?: string } }>;
+			prompt?: (input: {
+				path: { id: string };
+				query?: { directory?: string };
+				body: {
+					model?: { providerID: string; modelID: string };
+					system?: string;
+					tools?: Record<string, boolean>;
+					parts: Array<{ type: string; text?: string }>;
+				};
+			}) => Promise<{ data?: { parts?: Array<{ type?: string; text?: string }> } }>;
+			delete?: (input: {
+				path: { id: string };
+				query?: { directory?: string };
+			}) => Promise<unknown>;
 		};
 		provider?: {
 			list?: (input?: Record<string, unknown>) => Promise<unknown>;

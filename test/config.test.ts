@@ -256,6 +256,37 @@ describe("mergeConfig()", () => {
 		});
 	});
 
+	it("preserves the opencode provider and the rerank block", () => {
+		const cfg = mergeConfig({
+			adapters: {
+				scorer: { provider: "opencode", model: "host" },
+				rerank: {
+					provider: "opencode",
+					model: "opencode/big-pickle",
+					maxCandidates: 10,
+				},
+			},
+		} as any);
+		expect(cfg.adapters?.scorer).toMatchObject({
+			provider: "opencode",
+			model: "host",
+		});
+		expect(cfg.adapters?.rerank).toMatchObject({
+			provider: "opencode",
+			maxCandidates: 10,
+		});
+	});
+
+	it("drops invalid rerank numerics", () => {
+		const cfg = mergeConfig({
+			adapters: {
+				rerank: { provider: "opencode", maxCandidates: 0, timeoutMs: -1 },
+			},
+		} as any);
+		expect(cfg.adapters?.rerank?.maxCandidates).toBeUndefined();
+		expect(cfg.adapters?.rerank?.timeoutMs).toBeUndefined();
+	});
+
 	it("overrides compress, eviction, preemptive and degradation settings", () => {
 		const cfg = mergeConfig({
 			compress: { protectedTurns: 5, reversible: false },
