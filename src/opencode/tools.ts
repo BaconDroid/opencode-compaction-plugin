@@ -157,8 +157,8 @@ export function buildInspectToolDef(sidecar: ExpansionSidecar) {
 
 Use this to see which [bN] blocks exist and can be recalled or expanded.`,
 		args: {},
-		async execute() {
-			return renderInspector(sidecar);
+		async execute(_args, context) {
+			return renderInspector(sidecar, context?.sessionID);
 		},
 	});
 }
@@ -182,10 +182,15 @@ matching [bN] labels and a snippet; use expand or recall to restore a match.`,
 		args: {
 			query: tool.schema.string().describe("Keyword to search for"),
 		},
-		async execute(args) {
+		async execute(args, context) {
+			const sessionID = context?.sessionID;
 			if (semantic) {
 				try {
-					const hits = await semantic.index.search(args.query, maxResults);
+					const hits = await semantic.index.search(
+						args.query,
+						maxResults,
+						sessionID,
+					);
 					const enriched = semanticHits(sidecar, hits);
 					if (enriched.length > 0) {
 						return renderHits(enriched, args.query, "semantic");
@@ -197,7 +202,7 @@ matching [bN] labels and a snippet; use expand or recall to restore a match.`,
 					);
 				}
 			}
-			return renderSearch(sidecar, args.query, maxResults);
+			return renderSearch(sidecar, args.query, maxResults, sessionID);
 		},
 	});
 }

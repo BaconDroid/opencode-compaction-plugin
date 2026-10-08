@@ -131,6 +131,19 @@ describe("EmbeddingVectorIndex", () => {
 		await expect(index.search("q", 5)).rejects.toThrow("vectors for");
 	});
 
+	it("scopes the corpus by session id", async () => {
+		const bySession: Record<string, { id: string; text: string }[]> = {
+			a: [{ id: "a1", text: "alpha" }],
+			b: [{ id: "b1", text: "beta" }],
+		};
+		const index = new EmbeddingVectorIndex(
+			keywordEmbedder({}),
+			(sessionID) => bySession[sessionID ?? ""] ?? [],
+		);
+		expect((await index.search("q", 5, "a")).map((h) => h.id)).toEqual(["a1"]);
+		expect((await index.search("q", 5, "b")).map((h) => h.id)).toEqual(["b1"]);
+	});
+
 	it("clear() forces re-embedding", async () => {
 		let calls = 0;
 		const embedder: Embedder = {

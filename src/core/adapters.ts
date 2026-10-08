@@ -23,7 +23,7 @@ export interface VectorHit {
 
 /** Semantic retrieval over a caller-supplied corpus. */
 export interface VectorIndex {
-	search(query: string, k: number): Promise<VectorHit[]>;
+	search(query: string, k: number, sessionID?: string): Promise<VectorHit[]>;
 }
 
 /**
@@ -75,16 +75,20 @@ export class EmbeddingVectorIndex implements VectorIndex {
 
 	constructor(
 		private readonly embedder: Embedder,
-		private readonly corpus: () => CorpusItem[],
+		private readonly corpus: (sessionID?: string) => CorpusItem[],
 		/** Hits below this cosine score are dropped (default: 0). */
 		private readonly minScore = 0,
 	) {}
 
-	async search(query: string, k: number): Promise<VectorHit[]> {
+	async search(
+		query: string,
+		k: number,
+		sessionID?: string,
+	): Promise<VectorHit[]> {
 		const needle = query.trim();
 		if (!needle || k <= 0) return [];
 
-		const items = this.corpus();
+		const items = this.corpus(sessionID);
 		if (items.length === 0) return [];
 
 		const missing = items.filter(

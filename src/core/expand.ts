@@ -78,20 +78,29 @@ export class ExpansionSidecar {
 
 	/** All stored records, newest first. */
 	list(): ExpansionRecord[] {
-		return [...this.records.values()].sort(
-			(a, b) => b.createdAt - a.createdAt,
-		);
+		return this.listForSession(undefined);
+	}
+
+	/**
+	 * Stored records for a session, newest first. Without a session id, every
+	 * record is returned (backward compatible; the SDK always supplies one).
+	 */
+	listForSession(sessionID?: string): ExpansionRecord[] {
+		const ids = sessionID === undefined ? undefined : this.bySession.get(sessionID);
+		return [...this.records.values()]
+			.filter((record) => ids === undefined || ids.has(record.id))
+			.sort((a, b) => b.createdAt - a.createdAt);
 	}
 
 	/**
 	 * Deterministic keyword search over the stored originals (case-insensitive
 	 * substring, no embeddings). Returns up to `maxResults` hits with a snippet.
 	 */
-	search(query: string, maxResults: number): SearchHit[] {
+	search(query: string, maxResults: number, sessionID?: string): SearchHit[] {
 		const needle = query.trim().toLowerCase();
 		if (!needle || maxResults <= 0) return [];
 		const hits: SearchHit[] = [];
-		for (const record of this.list()) {
+		for (const record of this.listForSession(sessionID)) {
 			const text = recordText(record);
 			const index = text.toLowerCase().indexOf(needle);
 			if (index === -1) continue;
@@ -195,8 +204,11 @@ export function applyExpansions(
 }
 
 /** List the stored blocks as a short human-readable report. */
-export function renderInspector(sidecar: ExpansionSidecar): string {
-	const records = sidecar.list();
+export function renderInspector(
+	sidecar: ExpansionSidecar,
+	sessionID?: string,
+): string {
+	const records = sidecar.listForSession(sessionID);
 	if (records.length === 0) return "No compressed blocks are stored.";
 	return records
 		.map((record) => {
@@ -233,8 +245,13 @@ export function renderSearch(
 	sidecar: ExpansionSidecar,
 	query: string,
 	maxResults: number,
+	sessionID?: string,
 ): string {
-	return renderHits(sidecar.search(query, maxResults), query, "keyword");
+	return renderHits(
+		sidecar.search(query, maxResults, sessionID),
+		query,
+		"keyword",
+	);
 }
 
 /**
