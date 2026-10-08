@@ -86,7 +86,11 @@ export class ExpansionSidecar {
 	 * record is returned (backward compatible; the SDK always supplies one).
 	 */
 	listForSession(sessionID?: string): ExpansionRecord[] {
-		const ids = sessionID === undefined ? undefined : this.bySession.get(sessionID);
+		// A known session with no records must return nothing, not everything.
+		const ids =
+			sessionID === undefined
+				? undefined
+				: (this.bySession.get(sessionID) ?? new Set<string>());
 		return [...this.records.values()]
 			.filter((record) => ids === undefined || ids.has(record.id))
 			.sort((a, b) => b.createdAt - a.createdAt);
