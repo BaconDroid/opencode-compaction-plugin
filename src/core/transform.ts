@@ -27,18 +27,15 @@ export async function applyTransform(
 	messages: Message[],
 	deps: TransformDeps,
 ): Promise<void> {
-	// 0. Apply pending compression/expand requests.
 	applyPendingRequests(messages, deps);
 
 	const { config, logger } = deps;
 
-	// 1. Dedup repeated tool calls.
 	if (config.dedup?.enabled) {
 		const deduped = applyDedup(messages, config);
 		if (deduped > 0) logger.info("dedup applied", { count: deduped });
 	}
 
-	// 2. Purge errored tool inputs (older than purgeErrors.turns).
 	if (config.purgeErrors?.enabled) {
 		const purgeTurns = config.purgeErrors.turns ?? 4;
 		const purgeProtected = getRecentTurnIndices(messages, purgeTurns);
@@ -51,7 +48,6 @@ export async function applyTransform(
 		);
 		if (purged > 0) logger.info("error purge applied", { count: purged });
 
-		// 2b. Cascade the purge to work depending on purged calls.
 		if ((config.purgeErrors.cascade ?? true) && purgedCallIds.size > 0) {
 			const cascaded = applyCascadePurge(
 				messages,
@@ -64,7 +60,7 @@ export async function applyTransform(
 		}
 	}
 
-	// 3. Graduated eviction (runs last; content-addressed, never user turns).
+	// Runs last: content-addressed, never evicts user turns or the prologue.
 	if (config.eviction?.enabled) {
 		// Optional scorer adapter (E5): calibrate the budget estimate. Any error
 		// falls back to the heuristic `estimateTokens` (fail-open).
@@ -87,7 +83,6 @@ export async function applyTransform(
 			thresholdTokens: config.eviction.thresholdTokens ?? 200000,
 			levels: config.eviction.levels,
 			protectPrologue: config.eviction.protectPrologue ?? true,
-			estimate: scorerEstimator,
 			resolveText: scorerEstimator?.resolveText,
 		});
 		if (removed > 0) {

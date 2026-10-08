@@ -59,25 +59,10 @@ describe("CompressionStore", () => {
 		expect(drained).toHaveLength(1);
 		expect(drained[0].topic).toBe("Test");
 		expect(drained[0].summary).toBe("Summary of messages 0-5");
-	});
 
-	it("drain clears the queue", () => {
-		store.queue("sess-2", {
-			topic: "Test",
-			start: 0,
-			end: 3,
-			summary: "Summary",
-			timestamp: 1000,
-		});
-
-		store.drain("sess-2");
-		const second = store.drain("sess-2");
-		expect(second).toHaveLength(0);
-	});
-
-	it("returns empty array for unknown session", () => {
-		const drained = store.drain("unknown");
-		expect(drained).toHaveLength(0);
+		// A drain clears the queue; an unknown session drains empty.
+		expect(store.drain("sess-1")).toHaveLength(0);
+		expect(store.drain("unknown")).toHaveLength(0);
 	});
 
 	it("drains in reverse order by start index", () => {

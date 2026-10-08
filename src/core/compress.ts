@@ -1,16 +1,6 @@
 /**
- * Compress tool for opencode-live-compaction.
- *
- * Exposes a "compress" tool to the model that replaces a range of messages
- * with a summary written by the model itself. The model has full context,
- * so it can write high-quality summaries. The plugin handles the mechanical
- * replacement in the messages array.
- *
- * Flow:
- *   1. Model calls compress({ topic, start, end, summary })
- *   2. Tool stores the pending compression request
- *   3. On next message transform, the range is replaced with a synthetic
- *      summary message
+ * The model-driven `compress` domain: a queued request replaces a range of
+ * messages with a model-written summary on the next message transform.
  */
 
 import type { Message } from "../types.js";
@@ -154,6 +144,10 @@ export function applyCompressions(
 		.sort((a, b) => (b.start as number) - (a.start as number));
 	const auto = requests.filter((req) => !hasIndex(req));
 
+	// Counting parsed blocks (not distinct ids) keeps labels unique even if two
+	// blocks share an id. Each applied request inserts exactly one block.
+	let blockCount = parseCompressBlocks(messages).length;
+
 	for (const req of [...explicit, ...auto]) {
 		let start: number;
 		let end: number;
@@ -172,7 +166,6 @@ export function applyCompressions(
 
 		if (start > end || start >= messages.length) continue;
 
-		// Count how many messages we're replacing
 		const count = end - start + 1;
 
 		// Choose a role that does not collide with the preceding message, so the
@@ -180,11 +173,8 @@ export function applyCompressions(
 		const prevRole = messages[start - 1]?.info?.role;
 		const role = prevRole === "user" ? "assistant" : "user";
 
-		// Assign a durable id and the next positional label. Counting parsed
-		// blocks (not distinct ids) keeps labels unique even if two blocks share
-		// an id.
 		const id = blockId(messages[start]);
-		const label = `b${parseCompressBlocks(messages).length}`;
+		const label = `b${blockCount}`;
 
 		// Capture the originals before they are replaced (for expand).
 		if (opts.record) {
@@ -196,7 +186,6 @@ export function applyCompressions(
 			});
 		}
 
-		// Create a synthetic summary message
 		const scaleAttr = req.scale ? ` scale="${escapeAttr(req.scale)}"` : "";
 		const summaryMessage: Message = {
 			info: { role },
@@ -208,8 +197,8 @@ export function applyCompressions(
 			],
 		};
 
-		// Replace the range with the summary
 		messages.splice(start, count, summaryMessage);
+		blockCount++;
 		totalReplaced += count;
 	}
 

@@ -3,7 +3,6 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-	DEFAULT_SCORER_MAX_SAMPLES,
 	SCORER_CONCURRENCY,
 	buildScorerEstimator,
 } from "../src/core/scorer.ts";
@@ -66,7 +65,6 @@ describe("buildScorerEstimator()", () => {
 		// occurrences, "beta" (3 chars → 1) keeps the heuristic.
 		expect(seen).toEqual(["alpha"]);
 		expect(estimate(messages as any)).toBe(21);
-		expect(DEFAULT_SCORER_MAX_SAMPLES).toBe(200);
 	});
 
 	it("keeps a cached current text when trimming the cache", async () => {
@@ -164,25 +162,24 @@ describe("buildScorerEstimator()", () => {
 	});
 });
 
-describe("applyEviction() with a custom estimator", () => {
-	it("triggers on the estimator result instead of the heuristic", () => {
+describe("applyEviction() with a text resolver", () => {
+	it("triggers on the resolver result instead of the heuristic", () => {
 		const messages = [
 			{ info: { role: "assistant" }, parts: [{ type: "reasoning", text: "x" }] },
 		] as any;
-		// Heuristic is tiny (1 token) but the estimator says 999.
-		const estimate = () => 999;
+		// Heuristic is tiny (1 token) but the resolver says 999.
 		const result = applyEviction(messages, {
 			enabled: true,
 			thresholdTokens: 50,
 			levels: ["reasoning"],
 			protectPrologue: false,
-			estimate,
+			resolveText: () => 999,
 		});
 		expect(result.removed).toBe(1);
 		expect(messages[0].parts[0].text).toBe("[evicted reasoning]");
 	});
 
-	it("skips eviction when the estimator is below budget", () => {
+	it("skips eviction when the resolver is below budget", () => {
 		const messages = [
 			{
 				info: { role: "assistant" },
@@ -194,7 +191,7 @@ describe("applyEviction() with a custom estimator", () => {
 			thresholdTokens: 50,
 			levels: ["reasoning"],
 			protectPrologue: false,
-			estimate: () => 10,
+			resolveText: () => 10,
 		});
 		expect(result.removed).toBe(0);
 	});

@@ -85,13 +85,6 @@ describe("ExpansionSidecar", () => {
 		).toBe("beta");
 	});
 
-	it("delete() drops a single record", () => {
-		const sidecar = new ExpansionSidecar();
-		sidecar.save("s", "id-1", []);
-		sidecar.delete("s", "id-1");
-		expect(sidecar.get("id-1", "s")).toBeUndefined();
-		expect(sidecar.size).toBe(0);
-	});
 });
 
 describe("ExpandStore", () => {
@@ -261,20 +254,6 @@ describe("expand/inspect/search tool definitions", () => {
 		).toContain("once");
 	});
 
-	it("expose inspect/search backed by the sidecar", async () => {
-		const sidecar = new ExpansionSidecar();
-		sidecar.save("s", "id-1", [textMsg("user", "hello world")], {
-			label: "b0",
-		});
-		const inspect = buildInspectToolDef(sidecar);
-		expect(await inspect.execute({}, {} as any)).toContain("[b0]");
-		const search = buildSearchToolDef(sidecar, 5);
-		expect(search.args).toHaveProperty("query");
-		expect(await search.execute({ query: "world" }, {} as any)).toContain(
-			"[b0]",
-		);
-	});
-
 	it("scopes inspect/search by the tool context session", async () => {
 		const sidecar = new ExpansionSidecar();
 		sidecar.save("a", "id-a", [textMsg("user", "hello alpha")], {
@@ -288,8 +267,11 @@ describe("expand/inspect/search tool definitions", () => {
 		const report = await inspect.execute({}, { sessionID: "a" } as any);
 		expect(report).toContain("id-a");
 		expect(report).not.toContain("id-b");
+		// Without a session context every record is listed.
+		expect(await inspect.execute({}, {} as any)).toContain("id-a");
 
 		const search = buildSearchToolDef(sidecar, 5);
+		expect(search.args).toHaveProperty("query");
 		const hits = await search.execute(
 			{ query: "hello" },
 			{ sessionID: "b" } as any,

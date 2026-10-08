@@ -94,42 +94,34 @@ export function applyPendingRequests(
 		}
 
 		// Expand runs after compressions; it does not change tool callIDs, so a
-		// single present-set scan suffices.
+		// single present-set scan suffices. `drain` retains sticky requests;
+		// deferred one-shot requests are requeued.
 		const expandRequests = expandStore.drain(sid);
 		if (expandRequests.length === 0) continue;
 		const present = presentCallIds(messages);
 
-		// Expand compressed blocks back to their originals. `drain` retains
-		// sticky requests; deferred one-shot requests are requeued here.
-		if (expandRequests.length > 0) {
-			const applicable = expandRequests.filter((req) =>
-				belongsToBatch(req.callID, present),
-			);
-			const { expanded, unmatched } = applyExpansions(
-				messages,
-				applicable,
-				expansions,
-				sid,
-			);
-			if (expanded > 0) {
-				logger.info("expand applied", { sessionID: sid, expanded });
-			}
-			if (unmatched.length > 0) {
-				logger.info("expand unmatched", { sessionID: sid, blocks: unmatched });
-			}
-			// Drop retained sticky requests for blocks that no longer exist, so
-			// they do not accumulate/re-log every transform.
-			expandStore.prune(sid, unmatched);
-			requeueDeferred(
-				expandStore,
-				sid,
-				expandRequests.filter(
-					(req) =>
-						req.mode === "once" && !belongsToBatch(req.callID, present),
-				),
-				logger,
-				"expand",
-			);
+		const applicable: typeof expandRequests = [];
+		const deferredOnce: typeof expandRequests = [];
+		for (const req of expandRequests) {
+			if (belongsToBatch(req.callID, present)) applicable.push(req);
+			else if (req.mode === "once") deferredOnce.push(req);
 		}
+
+		const { expanded, unmatched } = applyExpansions(
+			messages,
+			applicable,
+			expansions,
+			sid,
+		);
+		if (expanded > 0) {
+			logger.info("expand applied", { sessionID: sid, expanded });
+		}
+		if (unmatched.length > 0) {
+			logger.info("expand unmatched", { sessionID: sid, blocks: unmatched });
+		}
+		// Drop retained sticky requests for blocks that no longer exist, so they
+		// do not accumulate/re-log every transform.
+		expandStore.prune(sid, unmatched);
+		requeueDeferred(expandStore, sid, deferredOnce, logger, "expand");
 	}
 }

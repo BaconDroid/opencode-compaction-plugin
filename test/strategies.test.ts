@@ -64,7 +64,7 @@ describe("applyDedup()", () => {
 		expect(msgs[2].parts[0].state.output).toBe("v3");
 	});
 
-	it("does not dedup different tools/args, protected tools or pinned indices", () => {
+	it("does not dedup different tools/args or protected tools", () => {
 		const diff = [
 			msg("read", { filePath: "a.ts" }, "1"),
 			msg("write", { filePath: "a.ts" }, "2"),
@@ -79,13 +79,6 @@ describe("applyDedup()", () => {
 		expect(
 			applyDedup(prot as never, mergeConfig({ dedup: { protectedTools: ["bash"] } })),
 		).toBe(0);
-
-		const pinned = [
-			msg("read", { filePath: "a.ts" }, "v1"),
-			msg("read", { filePath: "a.ts" }, "v2"),
-		];
-		expect(applyDedup(pinned as never, mergeConfig({}), new Set([0]))).toBe(0);
-		expect(pinned[0].parts[0].state.output).toBe("v1");
 	});
 
 	it("ignores parts without output, non-tool parts and errored calls", () => {

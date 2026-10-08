@@ -250,9 +250,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 	};
 
 	const hooks: Hooks = {
-		// -----------------------------------------------------------------------
-		// Track file operations + capture compress/expand tool calls
-		// -----------------------------------------------------------------------
 		"tool.execute.after": async (input) => {
 			const { tool, sessionID, args } = input;
 			if (!sessionID || !args) return;
@@ -315,9 +312,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			void preemption.maybePreempt(sessionID).catch(() => {});
 		},
 
-		// -----------------------------------------------------------------------
-		// Enhanced compaction: replace or augment the default compaction prompt
-		// -----------------------------------------------------------------------
 		"experimental.session.compacting": async (input, output) => {
 			const { sessionID } = input;
 
@@ -389,10 +383,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			});
 		},
 
-		// -----------------------------------------------------------------------
-		// Compress + dedup + purge + eviction (runs before OpenCode's own
-		// 2000-char truncation).
-		// -----------------------------------------------------------------------
+		// Runs before OpenCode's own 2000-char truncation.
 		"experimental.chat.messages.transform": async (_input, output) => {
 			await applyTransform(output.messages, {
 				config,
@@ -405,10 +396,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			});
 		},
 
-		// -----------------------------------------------------------------------
-		// Auto-continue: enabled after compaction, except for the compaction agent
-		// and duplicate triggers.
-		// -----------------------------------------------------------------------
 		"experimental.compaction.autocontinue": async (input, output) => {
 			if (
 				typeof input.agent === "string" &&
@@ -432,9 +419,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			output.enabled = true;
 		},
 
-		// -----------------------------------------------------------------------
-		// Cleanup on session events
-		// -----------------------------------------------------------------------
 		event: async ({ event }) => {
 			// The SDK carries the session under `info.id` for some events,
 			// `info.sessionID` for messages, and `sessionID` for others.
@@ -539,9 +523,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			}
 		},
 
-		// -----------------------------------------------------------------------
-		// Dispose: clean up all state
-		// -----------------------------------------------------------------------
 		dispose: async () => {
 			sessionTrackers.clear();
 			compressions.clearAll();
@@ -555,9 +536,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			autocontinue.clearAll();
 		},
 
-		// -----------------------------------------------------------------------
-		// Config: ensure the plugin's model-driven tools are permitted
-		// -----------------------------------------------------------------------
 		config: async (opencodeConfig) => {
 			// Without clobbering a global permission string (e.g. "allow") or any
 			// explicit per-tool rule (deny, ask, or a pattern object): only fill in

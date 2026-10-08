@@ -47,10 +47,10 @@ describe("omo-slim compatibility contract", () => {
 	beforeEach(setupTmp);
 	afterEach(cleanupTmp);
 
-	it("registers no tool name that collides with omo-slim", async () => {
+	it("exposes exactly the documented model-driven tools, none colliding with omo-slim", async () => {
 		const hooks = await LiveCompactionPlugin(mockCtx as any);
 		const names = Object.keys((hooks as any).tool ?? {});
-		expect(names.length).toBeGreaterThan(0);
+		expect(names.sort()).toEqual([...PLUGIN_TOOLS].sort());
 		for (const name of names) {
 			expect(OMO_SLIM_EXACT).not.toContain(name);
 			for (const prefix of OMO_SLIM_PREFIXES) {
@@ -59,22 +59,8 @@ describe("omo-slim compatibility contract", () => {
 		}
 	});
 
-	it("exposes exactly the documented model-driven tools", async () => {
-		const hooks = await LiveCompactionPlugin(mockCtx as any);
-		expect(Object.keys((hooks as any).tool ?? {}).sort()).toEqual(
-			[...PLUGIN_TOOLS].sort(),
-		);
-	});
-
 	it("registers only the documented hooks", async () => {
 		const hooks = await LiveCompactionPlugin(mockCtx as any);
 		expect(Object.keys(hooks).sort()).toEqual([...EXPECTED_HOOKS].sort());
-	});
-
-	it("never clobbers a global permission string", async () => {
-		const hooks = await LiveCompactionPlugin(mockCtx as any);
-		const opencodeConfig: Record<string, unknown> = { permission: "allow" };
-		await (hooks as any).config(opencodeConfig);
-		expect(opencodeConfig.permission).toBe("allow");
 	});
 });

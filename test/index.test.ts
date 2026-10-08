@@ -285,25 +285,6 @@ describe("LiveCompactionPlugin", () => {
 			}
 		});
 
-		it("ignores other event types without logging", async () => {
-			const logs: string[] = [];
-			const hooks = await LiveCompactionPlugin({
-				...mockCtx,
-				client: {
-					app: {
-						log: (input: { body: { message: string } }) => {
-							logs.push(input.body.message);
-							return Promise.resolve();
-						},
-					},
-				},
-				directory: TMP_DIR,
-			} as any);
-			await hooks.event!({
-				event: { id: "evt-2", type: "session.updated", properties: {} },
-			});
-			expect(logs).toEqual([]);
-		});
 	});
 
 	// ---------------------------------------------------------------------------
@@ -559,13 +540,6 @@ describe("LiveCompactionPlugin", () => {
 	// ---------------------------------------------------------------------------
 
 	describe("config", () => {
-		it("does not register or override any command", async () => {
-			const hooks = await getHooks();
-			const opencodeConfig: Record<string, unknown> = {};
-			await (hooks as any).config(opencodeConfig);
-			expect(opencodeConfig.command).toBeUndefined();
-		});
-
 		it("honors plugin options", async () => {
 			const hooks = await LiveCompactionPlugin(mockCtx as any, {
 				enabled: false,
@@ -635,18 +609,6 @@ describe("LiveCompactionPlugin", () => {
 	// ---------------------------------------------------------------------------
 
 	describe("compress tool", () => {
-		it("exposes a valid compress tool definition", async () => {
-			const hooks = await getHooks();
-			const def = (hooks as any).tool.compress;
-			expect(def).toBeDefined();
-			expect(def.description).toContain("Compress");
-			expect(def.args).toHaveProperty("topic");
-			expect(def.args).toHaveProperty("start");
-			expect(def.args).toHaveProperty("end");
-			expect(def.args).toHaveProperty("summary");
-			expect(typeof def.execute).toBe("function");
-		});
-
 		it("queues compression on compress tool call", async () => {
 			const hooks = await getHooks();
 

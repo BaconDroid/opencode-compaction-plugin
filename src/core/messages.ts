@@ -1,8 +1,8 @@
 /**
  * Pure helpers to read text, tool input and user turns from messages.
  *
- * No imports beyond the shared types, so this module can be used by the
- * lower-level modules (blocks, trim, strategies, …) without pulling in config.
+ * No imports beyond the shared types, so the lower-level modules (blocks,
+ * strategies, …) can use it without pulling in config.
  */
 
 import type { Message, MessagePart } from "../types.js";
@@ -22,7 +22,13 @@ export function partsText(parts: unknown): string {
 
 /** Whether a message has any non-empty text part. */
 export function hasText(parts: unknown): boolean {
-	return partsText(parts).length > 0;
+	if (!Array.isArray(parts)) return false;
+	return parts.some(
+		(part) =>
+			part?.type === "text" &&
+			typeof part.text === "string" &&
+			part.text.trim().length > 0,
+	);
 }
 
 /** A tool part's input: `args`, else `state.input` (may be a JSON string). */

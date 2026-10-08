@@ -48,17 +48,14 @@ function sortKeys(value: unknown): unknown {
 export function applyDedup(
 	messages: Message[],
 	config: LiveCompactionConfig,
-	protectedIndices?: Set<number>,
 ): number {
 	if (!config.dedup?.enabled) return 0;
 
 	const protectedTools = new Set(config.dedup.protectedTools ?? []);
 
-	// Collect all tool call keys and their positions (in order)
 	const seen = new Map<string, { msgIdx: number; partIdx: number }[]>();
 
 	for (let mi = 0; mi < messages.length; mi++) {
-		if (protectedIndices?.has(mi)) continue;
 		const parts = messages[mi]?.parts ?? [];
 		for (let pi = 0; pi < parts.length; pi++) {
 			const part = parts[pi];
@@ -83,7 +80,6 @@ export function applyDedup(
 	for (const [_key, positions] of seen) {
 		if (positions.length <= 1) continue;
 
-		// Keep the last occurrence, replace earlier ones with a marker
 		for (let i = 0; i < positions.length - 1; i++) {
 			const { msgIdx, partIdx } = positions[i];
 			const part = messages[msgIdx].parts[partIdx];
@@ -182,10 +178,7 @@ export function applyPurgeErrors(
 			continue;
 		}
 
-		// Real tool parts carry `state.input` as an object; a string is kept for
-		// compatibility with older payloads.
-		const inputLen =
-			typeof input === "string" ? input.length : JSON.stringify(input).length;
+		const inputLen = serializeInput(part).length;
 		if (inputLen > 100) {
 			setPartInput(part, {
 				purged: `${inputLen} chars of errored input removed`,
@@ -248,7 +241,6 @@ export function applyCascadePurge(
 ): number {
 	if (purgedCallIds.size === 0) return 0;
 
-	// Index tool parts by callID.
 	const partsByCall = new Map<string, { msgIdx: number; partIdx: number }>();
 	for (let mi = 0; mi < messages.length; mi++) {
 		const parts = messages[mi]?.parts ?? [];
@@ -301,10 +293,13 @@ export function applyCascadePurge(
 		changed = false;
 		for (const call of contaminated) {
 			if (purgedNow.has(call)) continue;
-			const dependents = reverseDeps.get(call) ?? new Set<string>();
-			const allPurged = [...dependents].every(
-				(dep) => purgedCallIds.has(dep) || purgedNow.has(dep),
-			);
+			let allPurged = true;
+			for (const dep of reverseDeps.get(call) ?? []) {
+				if (!purgedCallIds.has(dep) && !purgedNow.has(dep)) {
+					allPurged = false;
+					break;
+				}
+			}
 			if (!allPurged) continue;
 
 			const pos = partsByCall.get(call);

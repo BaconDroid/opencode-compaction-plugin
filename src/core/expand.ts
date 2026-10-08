@@ -9,6 +9,7 @@ import {
 	orderCompressBlocks,
 	parseCompressBlocks,
 	type BlockMessage,
+	type CompressBlock,
 } from "./blocks.js";
 import { partsText } from "./messages.js";
 import { KeyedQueue } from "./store.js";
@@ -16,8 +17,6 @@ import type { VectorHit } from "./adapters.js";
 
 export interface ExpansionRecord {
 	id: string;
-	/** Owning session (records are keyed per session to avoid id collisions). */
-	sessionID?: string;
 	label?: string;
 	topic?: string;
 	original: unknown[];
@@ -34,12 +33,19 @@ export interface SearchHit {
 	snippet: string;
 }
 
+// A record's originals never change after save, so its flattened text is cached.
+const recordTextCache = new WeakMap<ExpansionRecord, string>();
+
 /** Flatten a stored record's original messages into searchable text. */
 export function recordText(record: ExpansionRecord): string {
-	return (record.original as Array<{ parts?: unknown }>)
+	const cached = recordTextCache.get(record);
+	if (cached !== undefined) return cached;
+	const text = (record.original as Array<{ parts?: unknown }>)
 		.map((message) => partsText(message?.parts))
 		.filter(Boolean)
 		.join("\n");
+	recordTextCache.set(record, text);
+	return text;
 }
 
 export type ExpandMode = "sticky" | "once";
@@ -71,7 +77,6 @@ export class ExpansionSidecar {
 		const key = this.key(sessionID, id);
 		this.records.set(key, {
 			id,
-			sessionID,
 			label: meta?.label,
 			topic: meta?.topic,
 			original,
@@ -96,17 +101,6 @@ export class ExpansionSidecar {
 			if (record.id === id) return record;
 		}
 		return undefined;
-	}
-
-	/** Remove a single record (e.g. a block superseded by another). */
-	delete(sessionID: string, id: string): void {
-		const key = this.key(sessionID, id);
-		if (this.records.delete(key)) this.bySession.get(sessionID)?.delete(key);
-	}
-
-	/** All stored records, newest first. */
-	list(): ExpansionRecord[] {
-		return this.listForSession(undefined);
 	}
 
 	/**
@@ -204,8 +198,9 @@ export class ExpandStore extends KeyedQueue<ExpandRequest> {
 	/** Drop retained sticky requests for blocks that no longer resolve. */
 	prune(sessionID: string, blocks: string[]): void {
 		if (blocks.length === 0) return;
+		const gone = new Set(blocks);
 		const remaining = this.take(sessionID).filter(
-			(req) => !(req.mode === "sticky" && blocks.includes(req.block)),
+			(req) => !(req.mode === "sticky" && gone.has(req.block)),
 		);
 		this.retain(sessionID, remaining);
 	}
@@ -230,15 +225,18 @@ export function applyExpansions(
 	if (requests.length === 0) return { expanded: 0, unmatched: [] };
 
 	const blocks = orderCompressBlocks(parseCompressBlocks(messages));
+	const byRef = new Map<string, CompressBlock>();
+	for (const block of blocks) {
+		if (block.label !== undefined) byRef.set(block.label, block);
+		byRef.set(block.id, block);
+	}
 	// Dedupe by target index: two requests for the same block (e.g. a sticky
 	// plus a one-shot expand) must restore it once, not twice.
 	const planned = new Map<number, unknown[]>();
 	const unmatched: string[] = [];
 
 	for (const req of requests) {
-		const block = blocks.find(
-			(b) => b.label === req.block || b.id === req.block,
-		);
+		const block = byRef.get(req.block);
 		if (!block) {
 			unmatched.push(req.block);
 			continue;
@@ -254,8 +252,8 @@ export function applyExpansions(
 	let expanded = 0;
 	for (const [index, original] of [...planned].sort((a, b) => b[0] - a[0])) {
 		if (index < 0 || index >= messages.length) continue;
-		// Clone so later trim/dedup/purge/eviction cannot mutate the stored
-		// originals (which would make a second expand restore corrupted text).
+		// Clone so later dedup/purge/eviction cannot mutate the stored originals
+		// (which would make a second expand restore corrupted text).
 		messages.splice(index, 1, ...(structuredClone(original) as BlockMessage[]));
 		expanded++;
 	}

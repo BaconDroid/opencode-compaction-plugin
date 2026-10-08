@@ -29,9 +29,7 @@ const OP_LABELS: Record<FileOperation, string> = {
 export class FilesTouchedTracker {
 	private files = new Map<string, FileEntry>();
 
-	/** Record a file operation */
 	record(filePath: string, operation: FileOperation): void {
-		// Normalize path: strip leading ./ and collapse //
 		const normalized = filePath.replace(/^\.\/+/, "").replace(/\/+/g, "/");
 		if (!normalized) return;
 
@@ -43,7 +41,6 @@ export class FilesTouchedTracker {
 		entry.operations.add(operation);
 	}
 
-	/** Parse tool calls and record file operations */
 	processToolCall(tool: string, args: Record<string, unknown>): void {
 		switch (tool) {
 			case "read":
@@ -75,7 +72,6 @@ export class FilesTouchedTracker {
 		}
 	}
 
-	/** Render the files-touched manifest as a Markdown block */
 	renderManifest(): string {
 		if (this.files.size === 0) return "";
 
@@ -104,12 +100,10 @@ export class FilesTouchedTracker {
 		].join("\n");
 	}
 
-	/** Get the number of tracked files */
 	get size(): number {
 		return this.files.size;
 	}
 
-	/** Reset the tracker */
 	clear(): void {
 		this.files.clear();
 	}

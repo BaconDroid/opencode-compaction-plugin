@@ -62,7 +62,7 @@ describe("compressed block detection", () => {
 });
 
 describe("parseCompressBlocks() and orderCompressBlocks()", () => {
-	it("parses blocks and strips a leading [bN] label", () => {
+	it("parses blocks and reads their ids", () => {
 		const blocks = parseCompressBlocks([
 			textMsg(
 				"assistant",
@@ -71,8 +71,6 @@ describe("parseCompressBlocks() and orderCompressBlocks()", () => {
 		]);
 		expect(blocks).toHaveLength(1);
 		expect(blocks[0].id).toBe("b1");
-		expect(blocks[0].topic).toBe("T");
-		expect(blocks[0].summary).toBe("summary text");
 	});
 
 	it("parses multiple blocks in a single text part", () => {
@@ -83,25 +81,16 @@ describe("parseCompressBlocks() and orderCompressBlocks()", () => {
 			) as BlockMessage,
 		]);
 		expect(blocks.map((b) => b.id)).toEqual(["a", "b"]);
-		expect(blocks.map((b) => b.summary)).toEqual(["A", "B"]);
 	});
 
 	it("orders by anchor and renumbers labels", () => {
 		const blocks = parseCompressBlocks([
 			textMsg("user", "u0") as BlockMessage,
-			textMsg(
-				"assistant",
-				'<compressed-block id="x" topic="A">A</compressed-block>',
-			) as BlockMessage,
+			textMsg("assistant", '<compressed-block id="x">A</compressed-block>') as BlockMessage,
 			textMsg("user", "u1") as BlockMessage,
-			textMsg(
-				"assistant",
-				'<compressed-block id="y" topic="B">B</compressed-block>',
-			) as BlockMessage,
+			textMsg("assistant", '<compressed-block id="y">B</compressed-block>') as BlockMessage,
 		]);
-		const ordered = orderCompressBlocks(blocks);
-		expect(ordered.map((b) => b.label)).toEqual(["b0", "b1"]);
-		expect(ordered.map((b) => b.topic)).toEqual(["A", "B"]);
+		expect(orderCompressBlocks(blocks).map((b) => b.label)).toEqual(["b0", "b1"]);
 	});
 
 	it("renders the block body with the label", () => {

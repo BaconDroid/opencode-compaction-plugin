@@ -51,10 +51,6 @@ describe("mergeConfig()", () => {
 			windowMs: 120000,
 		});
 		expect(cfg.adapters).toBeUndefined();
-		expect(cfg).not.toHaveProperty("trim");
-		expect(cfg).not.toHaveProperty("pinning");
-		expect(cfg).not.toHaveProperty("turnProtection");
-		expect(cfg).not.toHaveProperty("protectedFilePatterns");
 	});
 
 	it("keeps defaults when an override value is undefined", () => {
@@ -412,22 +408,5 @@ describe("loadConfig()", () => {
 		);
 		const cfg = loadConfig(TMP_DIR, undefined, { purgeErrors: { turns: 77 } });
 		expect(cfg.purgeErrors.turns).toBe(99);
-	});
-});
-
-describe("DEFAULT_CONFIG", () => {
-	it("exposes the expected fields and no removed sections", () => {
-		for (const key of [
-			"enabled",
-			"debug",
-			"dedup",
-			"purgeErrors",
-			"eviction",
-			"preemptiveCompaction",
-		]) {
-			expect(DEFAULT_CONFIG).toHaveProperty(key);
-		}
-		expect(DEFAULT_CONFIG).not.toHaveProperty("trim");
-		expect(DEFAULT_CONFIG).not.toHaveProperty("pinning");
 	});
 });

@@ -36,8 +36,6 @@ export interface CompressBlock {
 	index: number;
 	/** Durable id of the block (`id="..."` attribute or derived). */
 	id: string;
-	topic?: string;
-	summary: string;
 	/** Stable `bN` label assigned by {@link orderCompressBlocks}. */
 	label?: string;
 }
@@ -66,15 +64,9 @@ export function parseCompressBlocks(messages: BlockMessage[]): CompressBlock[] {
 			let match: RegExpExecArray | null;
 			while ((match = COMPRESSED_BLOCK_RE.exec(part.text)) !== null) {
 				const attrs = match[1] ?? "";
-				// Strip a leading `[bN]` label so re-rendering stays stable.
-				const summary = (match[2] ?? "")
-					.replace(/^\s*\[b\d+\]\s*/, "")
-					.trim();
 				blocks.push({
 					index: i,
 					id: readAttr(attrs, "id") ?? blockId(messages[i]),
-					topic: readAttr(attrs, "topic"),
-					summary,
 				});
 			}
 		}
@@ -163,10 +155,7 @@ export function selectDeterministicSpan(
 	}
 
 	const eligible: number[] = [];
-	for (let i = newestBlockIndex + 1; i < tailStart; i++) {
-		if (isCompressedBlockMessage(messages[i])) continue;
-		eligible.push(i);
-	}
+	for (let i = newestBlockIndex + 1; i < tailStart; i++) eligible.push(i);
 
 	if (eligible.length === 0) return undefined;
 	return { start: eligible[0], end: eligible[eligible.length - 1] };
