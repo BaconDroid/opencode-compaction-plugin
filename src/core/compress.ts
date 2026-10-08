@@ -17,7 +17,6 @@ import type { Message } from "../types.js";
 import { KeyedQueue } from "./store.js";
 import {
 	blockId,
-	collectExistingBlockIds,
 	orderCompressBlocks,
 	parseCompressBlocks,
 	renderBlockBody,
@@ -168,10 +167,11 @@ export function applyCompressions(
 		const prevRole = messages[start - 1]?.info?.role;
 		const role = prevRole === "user" ? "assistant" : "user";
 
-		// Assign a durable id and a stable label based on existing blocks.
+		// Assign a durable id and the next positional label. Counting parsed
+		// blocks (not distinct ids) keeps labels unique even if two blocks share
+		// an id.
 		const id = blockId(messages[start]);
-		const existingCount = collectExistingBlockIds(messages).size;
-		const label = `b${existingCount}`;
+		const label = `b${parseCompressBlocks(messages).length}`;
 
 		// Capture the originals before they are replaced (for expand).
 		if (opts.record) {

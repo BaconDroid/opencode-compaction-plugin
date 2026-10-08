@@ -74,6 +74,17 @@ describe("parseCompressBlocks() and orderCompressBlocks()", () => {
 		expect(blocks[0].summary).toBe("summary text");
 	});
 
+	it("parses multiple blocks in a single text part", () => {
+		const blocks = parseCompressBlocks([
+			textMsg(
+				"assistant",
+				'<compressed-block id="a">A</compressed-block><compressed-block id="b">B</compressed-block>',
+			) as BlockMessage,
+		]);
+		expect(blocks.map((b) => b.id)).toEqual(["a", "b"]);
+		expect(blocks.map((b) => b.summary)).toEqual(["A", "B"]);
+	});
+
 	it("orders by anchor and renumbers labels", () => {
 		const blocks = parseCompressBlocks([
 			textMsg("user", "u0") as BlockMessage,
