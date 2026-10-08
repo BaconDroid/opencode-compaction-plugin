@@ -470,6 +470,31 @@ describe("applySquash()", () => {
 		expect(msgs[0].parts[0].text).toContain('squashed="true"');
 	});
 
+	it("reports the merged id and constituent ids", () => {
+		const msgs = [
+			blockMsg("a", "A", "[b0]\n\nfirst"),
+			blockMsg("b", "B", "[b1]\n\nsecond"),
+		];
+		const records: Array<{ id: string; constituentIds: string[] }> = [];
+		applySquash(
+			msgs as any,
+			[
+				{
+					from: "b0",
+					to: "b1",
+					topic: "Merged",
+					summary: "combined",
+					timestamp: 1,
+				},
+			],
+			{
+				record: (info) =>
+					records.push({ id: info.id, constituentIds: info.constituentIds }),
+			},
+		);
+		expect(records).toEqual([{ id: "a", constituentIds: ["a", "b"] }]);
+	});
+
 	it("refuses ambiguous requests (single, non-contiguous, unknown, over max)", () => {
 		const single = [blockMsg("a", "A", "[b0]\n\nfirst")];
 		const nonContiguous = [

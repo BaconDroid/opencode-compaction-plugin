@@ -1266,6 +1266,78 @@ describe("LiveCompactionPlugin", () => {
 			expect(messages[1].parts[0].text).toBe("orig2");
 		});
 
+		it("expands a squashed reversible block to all originals", async () => {
+			const hooks = await LiveCompactionPlugin(mockCtx as any, {
+				compress: { reversible: true },
+			} as any);
+			const messages = [
+				{
+					info: { role: "user", timestamp: 1 },
+					parts: [{ type: "text", text: "u0" }],
+				},
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "a1" }] },
+				{
+					info: { role: "user", timestamp: 2 },
+					parts: [{ type: "text", text: "u2" }],
+				},
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "a3" }] },
+				{
+					info: { role: "user" },
+					parts: [
+						{ type: "text", text: "keep" },
+						{
+							type: "tool",
+							tool: "squash",
+							callID: "c-sq",
+							state: { output: "ok" },
+						},
+						{
+							type: "tool",
+							tool: "expand",
+							callID: "c-exp",
+							state: { output: "ok" },
+						},
+					],
+				},
+			];
+
+			await afterTool(hooks, "compress", "s", "", {
+				topic: "A",
+				start: 0,
+				end: 1,
+				summary: "first",
+			});
+			await transform(hooks, messages);
+			await afterTool(hooks, "compress", "s", "", {
+				topic: "B",
+				start: 1,
+				end: 2,
+				summary: "second",
+			});
+			await transform(hooks, messages);
+			expect(messages).toHaveLength(3); // blockA, blockB, keep
+
+			await afterTool(hooks, "squash", "s", "c-sq", {
+				from: "b0",
+				to: "b1",
+				topic: "M",
+				summary: "merged",
+			});
+			await transform(hooks, messages);
+			expect(messages).toHaveLength(2); // merged, keep
+
+			await afterTool(hooks, "expand", "s", "c-exp", { block: "b0" });
+			await transform(hooks, messages);
+			expect(messages).toHaveLength(5);
+			expect(messages.map((m) => (m.parts[0] as any).text)).toEqual([
+				"u0",
+				"a1",
+				"u2",
+				"a3",
+				"keep",
+			]);
+		});
+
 		it("drops stale deferred compressions", async () => {
 			const hooks = await getHooks();
 			await afterTool(hooks, "compress", "sess-stale", "c-stale", { topic: "Old", start: 0, end: 1, summary: "old" });
