@@ -15,7 +15,6 @@ const PLUGIN_TOOLS = [
 	"compress",
 	"squash",
 	"expand",
-	"recall",
 	"inspect",
 	"search",
 ];

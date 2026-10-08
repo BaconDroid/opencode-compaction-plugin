@@ -29,7 +29,7 @@ OpenCode's built-in compaction produces a 7-section summary. This plugin replace
 | **Todo list** | Not managed | **Captured before compaction and restored after** (best-effort) |
 | **Compress tool** | None | Model-driven **compress** tool (deterministic span selection — no indices needed) |
 | **Block folding** | None | Stable `[bN]` block labels + **squash** tool to merge contiguous blocks |
-| **Reversible compression** | None | **expand** (sticky) / **recall** (one-shot) restore the original messages from an in-memory sidecar |
+| **Reversible compression** | None | **expand** (sticky or one-shot) restores the original messages from an in-memory sidecar |
 | **Trigger threshold** | Fixed | Hybrid `min(contextLimit × ratio, absolute)`; cache tokens counted by default |
 | **Deterministic gates** | None | Optional minimum new tokens/messages since the last compaction + tail guard |
 | **Graduated eviction** | None | LLM-free `reasoning → bulk output → intermediate → episode` (never evicts `user` turns) |
@@ -99,7 +99,7 @@ Runs on every message batch sent to the LLM. Applies the following strategies in
 
 1. **Pending compressions** — Applies queued `compress` calls (deterministic span selection) as `<compressed-block>` messages with stable `[bN]` labels.
 2. **Squash** — Merges contiguous compressed blocks requested via the `squash` tool (fail-closed on ambiguous requests).
-3. **Expand / recall** — Restores a block's original messages from the in-memory sidecar (`expand` is sticky, `recall` is one-shot).
+3. **Expand** — Restores a block's original messages from the in-memory sidecar (`mode: "sticky"` keeps it expanded, `mode: "once"` restores it for one transform).
 4. **Tool output trimming** — Truncates long tool outputs (bash, read, grep, etc.) to configurable limits. Keeps the *end* of the output (usually has the result/error).
 5. **Deduplication** — When the same tool is called with the same args multiple times, only the latest output is kept. Earlier duplicates are replaced with a short marker.
 6. **Error purge** — Purges the whole failed attempt (input + output, with a compact error extract) from errored tool calls older than N turns; the opt-in `cascade` (default off) extends the purge to calls that depend on a purged call.
@@ -129,7 +129,7 @@ Enables the synthetic "continue" turn after compaction, except for the compactio
 
 ## Compression Tools
 
-The plugin exposes six model-driven tools for proactive context management: `compress` and `squash` (fold), `expand` and `recall` (restore), `inspect` and `search` (browse/retrieve). The model decides when to compress and writes the summaries itself (it has full context).
+The plugin exposes five model-driven tools for proactive context management: `compress` and `squash` (fold), `expand` (restore, sticky or one-shot), `inspect` and `search` (browse/retrieve). The model decides when to compress and writes the summaries itself (it has full context).
 
 ### `compress`
 
@@ -147,13 +147,18 @@ When `start`/`end` are omitted, the plugin selects the range **deterministically
 
 Merges two or more **contiguous** compressed blocks (referenced by `[bN]` labels) into a single block: `{ from, to, topic, summary }`. Ambiguous requests (unknown labels, fewer than two blocks, non-contiguous, or more than `compress.maxBlocksPerSquash`) are refused.
 
-### `expand` / `recall`
+### `expand`
 
-Restore a compressed block's original messages from the in-memory sidecar, referenced by `[bN]` label or durable id. `expand` is **sticky** (stays expanded on later turns); `recall` is **one-shot**. Both are applied on the next message transform cycle.
+Restores a compressed block's original messages from the in-memory sidecar, referenced by `[bN]` label or durable id. The optional `mode` selects **sticky** (default — stays expanded on later turns) or **one-shot** (restored for one transform, then re-compressed). Applied on the next message transform cycle.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `block` | string | Block `[bN]` label or durable id to expand |
+| `mode` | `"sticky"` \| `"once"` *(optional)* | Expansion mode (default: `sticky`) |
 
 ### `inspect` / `search`
 
-`inspect` lists the compressed blocks currently held in memory (labels, topics, sizes). `search` runs a **deterministic** case-insensitive keyword search over the stored originals (no embeddings) and returns matching `[bN]` labels with a snippet; use `expand`/`recall` to restore a match. Both return their result directly; `search` is bounded by `compress.searchMaxResults`.
+`inspect` lists the compressed blocks currently held in memory (labels, topics, sizes). `search` runs a **deterministic** case-insensitive keyword search over the stored originals (no embeddings) and returns matching `[bN]` labels with a snippet; use `expand` to restore a match. Both return their result directly; `search` is bounded by `compress.searchMaxResults`.
 
 When the optional [semantic retrieval adapter](#optional-adapters-) is configured, `search` runs embedding-based retrieval first and falls back to the keyword search on any error or when it finds nothing.
 
@@ -305,7 +310,7 @@ Each feature below lists **what** it does, its **config** keys and how it
 - **Config** — none.
 
 ### Compression tools
-- **What** — `compress`/`squash` (fold), `expand`/`recall` (restore), `inspect`/`search`
+- **What** — `compress`/`squash` (fold), `expand` (restore), `inspect`/`search`
   (browse/retrieve). See [Compression Tools](#compression-tools).
 - **Config** — `compress.{protectedTurns,reversible,maxBlocksPerSquash,searchMaxResults}`.
 - **Interactions** — applied in the transform before trimming.
@@ -415,7 +420,7 @@ Precedence, low to high: **defaults → global file → plugin options → proje
     // Model-driven compression tools
     "compress": {
         "protectedTurns": 3,        // Trailing user turns excluded from deterministic selection
-        "reversible": false,        // Keep originals in memory for expand/recall
+        "reversible": false,        // Keep originals in memory for expand
         "maxBlocksPerSquash": 8,    // Max blocks merged by a single squash
         "searchMaxResults": 5       // Max hits returned by the `search` tool
     },
@@ -611,7 +616,7 @@ test/
   glob.test.ts      — Glob matcher tests
   compress.test.ts  — Compress/squash tests
   blocks.test.ts    — Block id and span selection tests
-  expand.test.ts    — Reversible expand/recall tests
+  expand.test.ts    — Reversible expand tests
   eviction.test.ts  — Graduated eviction tests
   todo-preserver.test.ts — Todo preserver and task-state tests
   preemption.test.ts — Trigger, gates and preemptive tests
@@ -642,8 +647,8 @@ Compatible with [`oh-my-opencode-slim`](https://github.com/alvinunreal/oh-my-ope
 
 - `experimental.session.compacting` — omo-slim only marks the session (it does not touch `output.prompt`/`output.context`), so this plugin's prompt handling is unaffected.
 - `experimental.chat.messages.transform` — omo-slim rewrites user text and image parts; this plugin trims/dedups/purges tool parts and applies compressions. Load omo-slim **before** this plugin so its in-place rewrites run before this plugin's structural compression.
-- `config` — omo-slim manages agents, MCPs and commands; this plugin only ensures permissions for its own tools (`compress`, `squash`, `expand`, `recall`, `inspect`, `search`) and leaves a global permission string untouched.
-- No shared tool names (omo-slim: `task*`, `waitForUser`, `acpRun`, `webfetch`, `ast_grep_*`, `marketplace_*`; this plugin: `compress`, `squash`, `expand`, `recall`, `inspect`, `search`).
+- `config` — omo-slim manages agents, MCPs and commands; this plugin only ensures permissions for its own tools (`compress`, `squash`, `expand`, `inspect`, `search`) and leaves a global permission string untouched.
+- No shared tool names (omo-slim: `task*`, `waitForUser`, `acpRun`, `webfetch`, `ast_grep_*`, `marketplace_*`; this plugin: `compress`, `squash`, `expand`, `inspect`, `search`).
 - omo-slim does not use `experimental.compaction.autocontinue` and does not mutate `permission`.
 
 Recommended `plugin` order in `opencode.json`:

@@ -15,7 +15,7 @@
  * - Hook error isolation
  * - Opt-in preemptive compaction near the context limit
  * - Opt-in post-compaction degradation diagnostic
- * - Model-driven compress/squash/expand/recall tools
+ * - Model-driven compress/squash/expand tools
  * - Global + project + plugin-option config
  *
  * Usage:
@@ -48,7 +48,6 @@ import {
 	buildCompressToolDef,
 	buildSquashToolDef,
 	buildExpandToolDef,
-	buildRecallToolDef,
 	buildInspectToolDef,
 	buildSearchToolDef,
 } from "./opencode/tools.js";
@@ -83,7 +82,6 @@ const PLUGIN_TOOL_NAMES = [
 	"compress",
 	"squash",
 	"expand",
-	"recall",
 	"inspect",
 	"search",
 ] as const;
@@ -397,17 +395,18 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 				logger.info("squash queued", { sessionID, from: a.from, to: a.to });
 			}
 
-			if ((tool === "expand" || tool === "recall") && typeof a.block === "string") {
+			if (tool === "expand" && typeof a.block === "string") {
+				const mode = a.mode === "once" ? "once" : "sticky";
 				expandStore.queue(sessionID, {
 					block: a.block,
-					mode: tool === "expand" ? "sticky" : "once",
+					mode,
 					callID: input.callID,
 					timestamp: Date.now(),
 				});
 				logger.info("expand queued", {
 					sessionID,
 					block: a.block,
-					mode: tool,
+					mode,
 				});
 			}
 
@@ -713,7 +712,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			compress: buildCompressToolDef(),
 			squash: buildSquashToolDef(),
 			expand: buildExpandToolDef(),
-			recall: buildRecallToolDef(),
 			inspect: buildInspectToolDef(expansions),
 			search: buildSearchToolDef(
 				expansions,

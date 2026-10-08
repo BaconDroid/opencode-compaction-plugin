@@ -1,7 +1,8 @@
 /**
  * Reversible compression: an in-memory sidecar of the original messages that a
- * `<compressed-block>` replaced, plus the `expand`/`recall` tools to restore
- * them. This is the minimal internal version — no index, no vectors, no disk.
+ * `<compressed-block>` replaced, plus the `expand` tool (sticky or one-shot) to
+ * restore them. This is the minimal internal version — no index, no vectors, no
+ * disk.
  */
 
 import {
@@ -229,8 +230,8 @@ export function applyExpansions(
 	if (requests.length === 0) return { expanded: 0, unmatched: [] };
 
 	const blocks = orderCompressBlocks(parseCompressBlocks(messages));
-	// Dedupe by target index: two requests for the same block (e.g. expand +
-	// recall, or a repeated expand) must restore it once, not twice.
+	// Dedupe by target index: two requests for the same block (e.g. a sticky
+	// plus a one-shot expand) must restore it once, not twice.
 	const planned = new Map<number, unknown[]>();
 	const unmatched: string[] = [];
 

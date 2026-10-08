@@ -9,7 +9,6 @@ import {
 } from "../src/core/expand.ts";
 import {
 	buildExpandToolDef,
-	buildRecallToolDef,
 	buildInspectToolDef,
 	buildSearchToolDef,
 } from "../src/opencode/tools.ts";
@@ -114,7 +113,7 @@ describe("ExpandStore", () => {
 		expect(second[0].block).toBe("b0");
 	});
 
-	it("keeps a sticky expand when a one-shot recall follows", () => {
+	it("keeps a sticky expand when a one-shot expand follows", () => {
 		const store = new ExpandStore();
 		store.queue("s", { block: "b0", mode: "sticky", timestamp: 1 });
 		store.queue("s", { block: "b0", mode: "once", timestamp: 2 });
@@ -247,14 +246,19 @@ describe("inspection & deterministic search", () => {
 	});
 });
 
-describe("expand/recall/inspect/search tool definitions", () => {
-	it("expose a block argument and execute", async () => {
+describe("expand/inspect/search tool definitions", () => {
+	it("exposes block + mode arguments and executes in either mode", async () => {
 		const expand = buildExpandToolDef();
 		expect(expand.args).toHaveProperty("block");
+		expect(expand.args).toHaveProperty("mode");
 		expect(await expand.execute({ block: "b0" }, {} as any)).toContain("b0");
-		const recall = buildRecallToolDef();
-		expect(recall.args).toHaveProperty("block");
-		expect(await recall.execute({ block: "b1" }, {} as any)).toContain("b1");
+		expect(await expand.execute({ block: "b0" }, {} as any)).toContain(
+			"sticky",
+		);
+		const once = buildExpandToolDef("once");
+		expect(
+			await once.execute({ block: "b1", mode: "once" }, {} as any),
+		).toContain("once");
 	});
 
 	it("expose inspect/search backed by the sidecar", async () => {

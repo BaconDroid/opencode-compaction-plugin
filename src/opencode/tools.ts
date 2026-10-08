@@ -108,43 +108,28 @@ adjacent; ambiguous requests are refused.`,
 }
 
 /**
- * Build the `expand` tool: restore a compressed block from the sidecar and keep
- * it expanded on subsequent transforms (sticky).
+ * Build the `expand` tool: restore a compressed block from the sidecar. The
+ * `mode` argument selects a sticky expansion (kept on later transforms) or a
+ * one-shot restore (the block re-compresses afterwards).
  */
-export function buildExpandToolDef() {
+export function buildExpandToolDef(mode: "sticky" | "once" = "sticky") {
 	return tool({
 		description: `Expand a compressed block, restoring its original messages.
 
-Reference the block by its [bN] label (or durable id). The expansion is sticky:
-the block stays expanded on later turns.`,
+Reference the block by its [bN] label (or durable id). Set \`mode\` to "sticky"
+(default) to keep the block expanded on later turns, or "once" to restore it for
+the next transform only (the block re-compresses afterwards).`,
 		args: {
 			block: tool.schema
 				.string()
 				.describe("Block label (e.g. 'b0') or durable id to expand"),
+			mode: tool.schema
+				.enum(["sticky", "once"])
+				.optional()
+				.describe(`Expansion mode (default: ${mode})`),
 		},
 		async execute(args) {
-			return `Expansion queued for block ${args.block}. It will be applied on the next message transform.`;
-		},
-	});
-}
-
-/**
- * Build the `recall` tool: restore a compressed block for a single transform
- * (one-shot).
- */
-export function buildRecallToolDef() {
-	return tool({
-		description: `Recall a compressed block's original messages for the next turn only.
-
-Reference the block by its [bN] label (or durable id). Unlike expand, the
-expansion is one-shot and the block re-compresses afterwards.`,
-		args: {
-			block: tool.schema
-				.string()
-				.describe("Block label (e.g. 'b0') or durable id to recall"),
-		},
-		async execute(args) {
-			return `Recall queued for block ${args.block}. It will be applied on the next message transform.`;
+			return `Expansion queued for block ${args.block} (${args.mode ?? mode}). It will be applied on the next message transform.`;
 		},
 	});
 }
@@ -157,7 +142,7 @@ export function buildInspectToolDef(sidecar: ExpansionSidecar) {
 	return tool({
 		description: `List the compressed blocks currently held in memory.
 
-Use this to see which [bN] blocks exist and can be recalled or expanded.`,
+Use this to see which [bN] blocks exist and can be expanded.`,
 		args: {},
 		async execute(_args, context) {
 			return renderInspector(sidecar, context?.sessionID);
@@ -180,7 +165,7 @@ export function buildSearchToolDef(
 
 By default this is a deterministic case-insensitive keyword search. When a
 semantic adapter is configured, embedding-based retrieval runs first. Returns
-matching [bN] labels and a snippet; use expand or recall to restore a match.`,
+matching [bN] labels and a snippet; use expand to restore a match.`,
 		args: {
 			query: tool.schema.string().describe("Keyword to search for"),
 		},
