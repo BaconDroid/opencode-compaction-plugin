@@ -186,12 +186,9 @@ matching [bN] labels and a snippet; use expand or recall to restore a match.`,
 			if (semantic) {
 				try {
 					const hits = await semantic.index.search(args.query, maxResults);
-					if (hits.length > 0) {
-						return renderHits(
-							semanticHits(sidecar, hits),
-							args.query,
-							"semantic",
-						);
+					const enriched = semanticHits(sidecar, hits);
+					if (enriched.length > 0) {
+						return renderHits(enriched, args.query, "semantic");
 					}
 				} catch (error) {
 					semantic.logger.info(

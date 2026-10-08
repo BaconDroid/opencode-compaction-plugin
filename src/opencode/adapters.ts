@@ -16,7 +16,7 @@
 import { spawn } from "node:child_process";
 import type { Embedder, Judge, Scorer } from "../core/adapters.js";
 import type {
-	AdapterProvider,
+	AdapterTransportConfig,
 	EmbeddingsAdapterConfig,
 	JudgeAdapterConfig,
 	ScorerAdapterConfig,
@@ -30,16 +30,6 @@ export interface AdapterResolutionDeps {
 	/** Injectable fetch for tests (defaults to the platform fetch). */
 	fetcher?: typeof fetch;
 }
-
-/** The subset of fields shared by every adapter config block. */
-type TransportConfig = {
-	enabled?: boolean;
-	provider?: AdapterProvider;
-	url?: string;
-	command?: string;
-	model?: string;
-	timeoutMs?: number;
-};
 
 type ResolvedTransport =
 	| {
@@ -371,7 +361,7 @@ function parseCommandText(stdout: string): string {
 
 /** Resolve a shared transport from an adapter config, or `undefined`. */
 function resolveTransport(
-	cfg: TransportConfig | undefined,
+	cfg: AdapterTransportConfig | undefined,
 	deps: AdapterResolutionDeps,
 	kind: string,
 ): ResolvedTransport | undefined {
@@ -390,12 +380,6 @@ function resolveTransport(
 			deps.fetcher ??
 			((input: string | URL | Request, init?: RequestInit) =>
 				globalThis.fetch(input, init));
-		if (typeof fetcher !== "function") {
-			deps.logger.info(
-				`adapters.${kind}: no fetch available; adapter disabled`,
-			);
-			return undefined;
-		}
 		return {
 			provider: "http",
 			url: cfg.url,

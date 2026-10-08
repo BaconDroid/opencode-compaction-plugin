@@ -123,11 +123,11 @@ export interface PreemptiveCompactionConfig {
 export type AdapterProvider = "http" | "command" | "mcp";
 
 /**
- * Optional semantic embedding/retrieval adapter (E2/E3/E4). Opt-in: the feature
- * is disabled unless this block is present. Providers talk to an existing
- * endpoint/command; no SDK or model is bundled.
+ * Fields shared by every optional adapter. Opt-in: an adapter is disabled
+ * unless its block is present. Providers talk to an existing endpoint/command;
+ * no SDK or model is bundled.
  */
-export interface EmbeddingsAdapterConfig {
+export interface AdapterTransportConfig {
 	/** Enable the adapter (default: true when the block is present) */
 	enabled?: boolean;
 	/** Transport: `http` (default), `command`, or `mcp` (not yet supported) */
@@ -140,46 +140,27 @@ export interface EmbeddingsAdapterConfig {
 	model?: string;
 	/** Request timeout in ms (default: 10000) */
 	timeoutMs?: number;
+}
+
+/**
+ * Optional semantic embedding/retrieval adapter (E2/E3/E4).
+ */
+export interface EmbeddingsAdapterConfig extends AdapterTransportConfig {
 	/** Minimum cosine score for a semantic hit (default: 0) */
 	minScore?: number;
 }
 
 /**
- * Optional model-judge adapter (E1/E5/E6). Opt-in: disabled unless present.
- * The judge answers a prompt; callers build the prompt and read the verdict.
+ * Optional model-judge adapter (E1/E5/E6). The judge answers a prompt; callers
+ * build the prompt and read the verdict.
  */
-export interface JudgeAdapterConfig {
-	/** Enable the adapter (default: true when the block is present) */
-	enabled?: boolean;
-	/** Transport: `http` (default), `command`, or `mcp` (not yet supported) */
-	provider?: AdapterProvider;
-	/** Endpoint URL (required for provider "http") */
-	url?: string;
-	/** Shell command (required for provider "command"); see README for the contract */
-	command?: string;
-	/** Optional model/identifier forwarded to the provider */
-	model?: string;
-	/** Request timeout in ms (default: 10000) */
-	timeoutMs?: number;
-}
+export interface JudgeAdapterConfig extends AdapterTransportConfig {}
 
 /**
- * Optional residual/perplexity scorer adapter (E5/E9). Opt-in: disabled unless
- * present. Refines the eviction budget estimate; absent → heuristic.
+ * Optional residual/perplexity scorer adapter (E5/E9). Refines the eviction
+ * budget estimate; absent → heuristic.
  */
-export interface ScorerAdapterConfig {
-	/** Enable the adapter (default: true when the block is present) */
-	enabled?: boolean;
-	/** Transport: `http` (default), `command`, or `mcp` (not yet supported) */
-	provider?: AdapterProvider;
-	/** Endpoint URL (required for provider "http") */
-	url?: string;
-	/** Shell command (required for provider "command"); see README for the contract */
-	command?: string;
-	/** Optional model/identifier forwarded to the provider */
-	model?: string;
-	/** Request timeout in ms (default: 10000) */
-	timeoutMs?: number;
+export interface ScorerAdapterConfig extends AdapterTransportConfig {
 	/** Maximum distinct texts scored per transform (default: 200) */
 	maxSamples?: number;
 }

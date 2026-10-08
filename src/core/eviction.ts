@@ -50,12 +50,25 @@ const EPISODE_MARKER = "[evicted episode]";
 const REASONING_MARKER = "[evicted reasoning]";
 const INTERMEDIATE_MARKER = "[evicted intermediate]";
 
-/** Rough token estimate (4 chars ≈ 1 token) over text, outputs and inputs. */
-export function estimateTokens(messages: BlockMessage[]): number {
+/**
+ * Rough token estimate (4 chars ≈ 1 token) over text, outputs and inputs.
+ *
+ * `resolveText` optionally overrides the estimate for a given text (e.g. a
+ * scorer adapter, E5); unresolved texts keep the chars ÷ 4 heuristic.
+ */
+export function estimateTokens(
+	messages: BlockMessage[],
+	resolveText?: (text: string) => number | undefined,
+): number {
 	let chars = 0;
+	let tokens = 0;
 	for (const message of messages) {
 		for (const part of message.parts ?? []) {
-			if (typeof part.text === "string") chars += part.text.length;
+			if (typeof part.text === "string") {
+				const scored = resolveText?.(part.text);
+				if (scored !== undefined) tokens += scored;
+				else chars += part.text.length;
+			}
 			const state = (part as { state?: { output?: unknown; input?: unknown } })
 				.state;
 			if (state && typeof state.output === "string") {
@@ -69,7 +82,7 @@ export function estimateTokens(messages: BlockMessage[]): number {
 			}
 		}
 	}
-	return Math.ceil(chars / 4);
+	return Math.ceil(chars / 4) + tokens;
 }
 
 function evictReasoning(message: BlockMessage, result: EvictionResult): void {

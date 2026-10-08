@@ -71,8 +71,7 @@ export function cosineSimilarity(a: number[], b: number[]): number {
  * search are picked up without rebuilding the index.
  */
 export class EmbeddingVectorIndex implements VectorIndex {
-	private vectors = new Map<string, number[]>();
-	private cachedText = new Map<string, string>();
+	private cache = new Map<string, { text: string; vector: number[] }>();
 
 	constructor(
 		private readonly embedder: Embedder,
@@ -89,7 +88,7 @@ export class EmbeddingVectorIndex implements VectorIndex {
 		if (items.length === 0) return [];
 
 		const missing = items.filter(
-			(item) => this.cachedText.get(item.id) !== item.text,
+			(item) => this.cache.get(item.id)?.text !== item.text,
 		);
 		if (missing.length > 0) {
 			const vectors = await this.embedder.embed(missing.map((i) => i.text));
@@ -99,8 +98,7 @@ export class EmbeddingVectorIndex implements VectorIndex {
 				);
 			}
 			missing.forEach((item, index) => {
-				this.vectors.set(item.id, vectors[index]);
-				this.cachedText.set(item.id, item.text);
+				this.cache.set(item.id, { text: item.text, vector: vectors[index] });
 			});
 		}
 
@@ -111,9 +109,9 @@ export class EmbeddingVectorIndex implements VectorIndex {
 
 		const scored: VectorHit[] = [];
 		for (const item of items) {
-			const vector = this.vectors.get(item.id);
-			if (!vector) continue;
-			const score = cosineSimilarity(queryVector, vector);
+			const cached = this.cache.get(item.id);
+			if (!cached) continue;
+			const score = cosineSimilarity(queryVector, cached.vector);
 			if (Number.isFinite(score) && score >= this.minScore) {
 				scored.push({ id: item.id, score });
 			}
@@ -124,7 +122,6 @@ export class EmbeddingVectorIndex implements VectorIndex {
 
 	/** Drop the embedding cache (the next search re-embeds the corpus). */
 	clear(): void {
-		this.vectors.clear();
-		this.cachedText.clear();
+		this.cache.clear();
 	}
 }
