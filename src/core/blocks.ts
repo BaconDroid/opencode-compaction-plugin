@@ -22,8 +22,6 @@ export interface DeterministicSpan {
 }
 
 export interface SelectSpanOptions {
-	/** Ids already known to be compressed blocks. */
-	existingBlockIds?: Set<string>;
 	/** Number of trailing user turns that must never be compressed. */
 	protectedTurns?: number;
 }
@@ -31,7 +29,7 @@ export interface SelectSpanOptions {
 const COMPRESSED_BLOCK_TAG = "<compressed-block";
 
 const COMPRESSED_BLOCK_RE =
-	/<compressed-block\b([^>]*)>([\s\S]*?)<\/compressed-block>/;
+	/<compressed-block\b([^>]*)>([\s\S]*?)<\/compressed-block>/g;
 
 export interface CompressBlock {
 	/** Index of the message carrying the block. */
@@ -55,19 +53,22 @@ export function parseCompressBlocks(messages: BlockMessage[]): CompressBlock[] {
 	for (let i = 0; i < messages.length; i++) {
 		for (const part of messages[i].parts ?? []) {
 			if (part?.type !== "text" || typeof part.text !== "string") continue;
-			const match = COMPRESSED_BLOCK_RE.exec(part.text);
-			if (!match) continue;
-			const attrs = match[1] ?? "";
-			// Strip a leading `[bN]` label so re-rendering stays stable.
-			const summary = (match[2] ?? "")
-				.replace(/^\s*\[b\d+\]\s*/, "")
-				.trim();
-			blocks.push({
-				index: i,
-				id: readAttr(attrs, "id") ?? blockId(messages[i]),
-				topic: readAttr(attrs, "topic"),
-				summary,
-			});
+			// A single text part may carry more than one block; scan them all.
+			COMPRESSED_BLOCK_RE.lastIndex = 0;
+			let match: RegExpExecArray | null;
+			while ((match = COMPRESSED_BLOCK_RE.exec(part.text)) !== null) {
+				const attrs = match[1] ?? "";
+				// Strip a leading `[bN]` label so re-rendering stays stable.
+				const summary = (match[2] ?? "")
+					.replace(/^\s*\[b\d+\]\s*/, "")
+					.trim();
+				blocks.push({
+					index: i,
+					id: readAttr(attrs, "id") ?? blockId(messages[i]),
+					topic: readAttr(attrs, "topic"),
+					summary,
+				});
+			}
 		}
 	}
 	return blocks;
@@ -149,24 +150,17 @@ export function selectDeterministicSpan(
 	opts: SelectSpanOptions = {},
 ): DeterministicSpan | undefined {
 	const protectedTurns = opts.protectedTurns ?? 3;
-	const existingBlockIds = opts.existingBlockIds;
 
 	let newestBlockIndex = -1;
 	for (let i = 0; i < messages.length; i++) {
-		const message = messages[i];
-		const isBlock =
-			isCompressedBlockMessage(message) ||
-			existingBlockIds?.has(blockId(message)) === true;
-		if (isBlock) newestBlockIndex = i;
+		if (isCompressedBlockMessage(messages[i])) newestBlockIndex = i;
 	}
 
 	const tailStart = protectedTailStart(messages, protectedTurns);
 
 	const eligible: number[] = [];
 	for (let i = newestBlockIndex + 1; i < messages.length && i < tailStart; i++) {
-		const message = messages[i];
-		if (isCompressedBlockMessage(message)) continue;
-		if (existingBlockIds?.has(blockId(message))) continue;
+		if (isCompressedBlockMessage(messages[i])) continue;
 		eligible.push(i);
 	}
 

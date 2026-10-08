@@ -163,7 +163,9 @@ export function applyExpansions(
 	if (requests.length === 0) return { expanded: 0, unmatched: [] };
 
 	const blocks = orderCompressBlocks(parseCompressBlocks(messages));
-	const planned: { index: number; original: unknown[] }[] = [];
+	// Dedupe by target index: two requests for the same block (e.g. expand +
+	// recall, or a repeated expand) must restore it once, not twice.
+	const planned = new Map<number, unknown[]>();
 	const unmatched: string[] = [];
 
 	for (const req of requests) {
@@ -179,12 +181,11 @@ export function applyExpansions(
 			unmatched.push(req.block);
 			continue;
 		}
-		planned.push({ index: block.index, original: record.original });
+		if (!planned.has(block.index)) planned.set(block.index, record.original);
 	}
 
-	planned.sort((a, b) => b.index - a.index);
 	let expanded = 0;
-	for (const { index, original } of planned) {
+	for (const [index, original] of [...planned].sort((a, b) => b[0] - a[0])) {
 		if (index < 0 || index >= messages.length) continue;
 		messages.splice(index, 1, ...(original as BlockMessage[]));
 		expanded++;

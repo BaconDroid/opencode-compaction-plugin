@@ -98,6 +98,32 @@ describe("applyExpansions()", () => {
 		expect(result.expanded).toBe(0);
 		expect(result.unmatched).toEqual(["b9"]);
 	});
+
+	it("restores a block once when requested twice", () => {
+		const sidecar = new ExpansionSidecar();
+		sidecar.save("s", "id-1", [
+			textMsg("user", "one"),
+			textMsg("assistant", "two"),
+		]);
+		const messages = [
+			blockMsg("id-1", "b0", "[b0]\n\nsummary"),
+			textMsg("user", "keep"),
+		];
+		const result = applyExpansions(
+			messages as any,
+			[
+				{ block: "b0", mode: "sticky", timestamp: 1 },
+				{ block: "b0", mode: "once", timestamp: 2 },
+			],
+			sidecar,
+		);
+		expect(result.expanded).toBe(1);
+		expect(messages.map((m) => (m.parts[0] as any).text)).toEqual([
+			"one",
+			"two",
+			"keep",
+		]);
+	});
 });
 
 describe("inspection & deterministic search", () => {
