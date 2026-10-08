@@ -2,11 +2,13 @@
  * Files-touched collector for opencode-live-compaction.
  *
  * Tracks which files were read, written, edited, or deleted during a session
- * by listening to tool execution events. Produces a manifest block that
- * can be injected into the compaction prompt.
+ * from the structured tool calls (`read`, `write`, `edit`, `delete`, …).
+ * Shell commands are intentionally not parsed — the heuristics were fragile —
+ * so files touched only through `bash` are not listed. Produces a manifest
+ * block that can be injected into the compaction prompt.
  */
 
-export type FileOperation = "R" | "W" | "E" | "M" | "D";
+export type FileOperation = "R" | "W" | "E" | "D";
 
 export interface FileEntry {
 	path: string;
@@ -17,7 +19,6 @@ const OP_LABELS: Record<FileOperation, string> = {
 	R: "read",
 	W: "write",
 	E: "edit",
-	M: "move",
 	D: "delete",
 };
 
@@ -63,14 +64,6 @@ export class FilesTouchedTracker {
 			case "multiedit": {
 				const path = extractPath(args, ["filePath", "path", "file"]);
 				if (path) this.record(path, "E");
-				break;
-			}
-			case "bash":
-			case "shell": {
-				const cmd = typeof args.command === "string" ? args.command : "";
-				for (const { path, op } of commandOperations(cmd)) {
-					this.record(path, op);
-				}
 				break;
 			}
 			case "delete":
@@ -133,56 +126,4 @@ function extractPath(
 		if (typeof val === "string" && val.trim()) return val.trim();
 	}
 	return undefined;
-}
-
-/**
- * Best-effort extraction of file paths and their operation from a shell command
- * (`cat`/`git` → read, `touch`/`cp`/`mkdir` → write, `vim` → edit, `mv` → move,
- * `rm` → delete).
- */
-function commandOperations(
-	cmd: string,
-): Array<{ path: string; op: FileOperation }> {
-	const results: Array<{ path: string; op: FileOperation }> = [];
-	const add = (candidate: string | undefined, op: FileOperation): void => {
-		if (candidate && !candidate.startsWith("-") && looksLikePath(candidate)) {
-			results.push({ path: candidate, op });
-		}
-	};
-
-	// `\b` anchors the verb (e.g. `copycat` is not read as `cat`); the leading
-	// `(?:-\S+\s+)*` skips option flags (`rm -rf x`, `cp -r a b`).
-	const opts = "(?:-\\S+\\s+)*";
-	const single: Array<[RegExp, FileOperation]> = [
-		[new RegExp(`\\b(?:cat|head|tail|less|more)\\s+${opts}["']?([^\\s"']+)["']?`, "g"), "R"],
-		[new RegExp(`\\b(?:touch|mkdir|chmod|chown)\\s+${opts}["']?([^\\s"']+)["']?`, "g"), "W"],
-		[new RegExp(`\\b(?:rm)\\s+${opts}["']?([^\\s"']+)["']?`, "g"), "D"],
-		[new RegExp(`\\b(?:vim|nano|code|edit)\\s+${opts}["']?([^\\s"']+)["']?`, "g"), "E"],
-		[new RegExp(`\\b(?:git)\\s+(?:add|checkout|restore|diff)\\s+${opts}["']?([^\\s"']+)["']?`, "g"), "R"],
-		[/\b(?:grep|rg|find|ag)\s+.*["']?([^\s"']+\.\w+)["']?/g, "R"],
-	];
-	for (const [pattern, op] of single) {
-		let match: RegExpExecArray | null;
-		while ((match = pattern.exec(cmd)) !== null) add(match[1], op);
-	}
-
-	// `cp`/`mv` take a source and a destination.
-	const pairs: Array<[RegExp, FileOperation]> = [
-		[new RegExp(`\\b(?:cp)\\s+${opts}["']?([^\\s"']+)["']?\\s+["']?([^\\s"']+)["']?`, "g"), "W"],
-		[new RegExp(`\\b(?:mv)\\s+${opts}["']?([^\\s"']+)["']?\\s+["']?([^\\s"']+)["']?`, "g"), "M"],
-	];
-	for (const [pattern, op] of pairs) {
-		let match: RegExpExecArray | null;
-		while ((match = pattern.exec(cmd)) !== null) {
-			add(match[1], op);
-			add(match[2], op);
-		}
-	}
-
-	return results;
-}
-
-function looksLikePath(s: string): boolean {
-	// Has a slash, starts with ./ or ../, or has a file extension
-	return s.includes("/") || s.startsWith(".") || /\.\w{1,10}$/.test(s);
 }

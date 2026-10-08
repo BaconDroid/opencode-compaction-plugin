@@ -14,7 +14,7 @@ OpenCode's built-in compaction produces a 7-section summary. This plugin replace
 | **User intent** | Captured as "Goal" | **Chronological intent trail** with direction changes |
 | **Dead ends** | Not tracked | **Dedicated section** for failed approaches |
 | **Task continuity** | Not captured | **Exact moment** where work stopped |
-| **Files touched** | "Relevant Files" section | **Operation-badge manifest** (`R`=read, `E`=edit, `W`=write, `M`=move, `D`=delete) |
+| **Files touched** | "Relevant Files" section | **Operation-badge manifest** (`R`=read, `E`=edit, `W`=write, `D`=delete) from structured file tools |
 | **Prompt** | Hardcoded | Replaced via plugin hook (customizable) |
 | **Tool output size** | Unmanaged | **Configurable per-tool trim limits** |
 | **Duplicate tool calls** | Kept as-is | **Deduplicated** (keeps only latest) |
@@ -240,9 +240,11 @@ Each feature below lists **what** it does, its **config** keys and how it
 - **Config** — none (replace mode).
 
 ### Files-touched manifest
-- **What** — records read/write/edit/move/delete and emits an operation-badge
-  manifest (`R`/`W`/`E`/`M`/`D`).
+- **What** — records read/write/edit/delete from structured file tools and emits
+  an operation-badge manifest (`R`/`W`/`E`/`D`).
 - **Config** — none.
+- **Interactions** — shell commands (`bash`) are not parsed; files touched only
+  through a shell are not listed (the extraction heuristics were fragile).
 
 ### Tool-output trimming
 - **What** — truncates long tool outputs to per-tool limits, keeping the tail.

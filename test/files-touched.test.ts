@@ -49,45 +49,10 @@ describe("FilesTouchedTracker", () => {
 		}
 	});
 
-	it("extracts paths from bash and git commands", () => {
+	it("ignores shell commands (no fragile shell parsing)", () => {
 		const tracker = new FilesTouchedTracker();
 		tracker.processToolCall("bash", { command: "cat src/config.json" });
-		tracker.processToolCall("bash", { command: "git add src/staged.ts" });
-		const manifest = tracker.renderManifest();
-		expect(manifest).toContain("src/config.json");
-		expect(manifest).toContain("src/staged.ts");
-	});
-
-	it("maps shell verbs to operations", () => {
-		const tracker = new FilesTouchedTracker();
-		tracker.processToolCall("bash", { command: "rm src/old.ts" });
-		tracker.processToolCall("bash", { command: "mv src/a.ts src/b.ts" });
-		tracker.processToolCall("bash", { command: "cp src/a.ts src/copy.ts" });
-		const manifest = tracker.renderManifest();
-		expect(manifest).toContain("- `src/old.ts` `D`");
-		expect(manifest).toContain("- `src/a.ts` `M` `W`");
-		expect(manifest).toContain("- `src/b.ts` `M`");
-		expect(manifest).toContain("- `src/copy.ts` `W`");
-	});
-
-	it("handles option flags before paths", () => {
-		const tracker = new FilesTouchedTracker();
-		tracker.processToolCall("bash", { command: "rm -rf src/old.ts" });
-		tracker.processToolCall("bash", { command: "cp -r src/a.ts src/b.ts" });
-		tracker.processToolCall("bash", { command: "mv -f src/c.ts src/d.ts" });
-		const manifest = tracker.renderManifest();
-		expect(manifest).toContain("- `src/old.ts` `D`");
-		expect(manifest).toContain("- `src/a.ts` `W`");
-		expect(manifest).toContain("- `src/b.ts` `W`");
-		expect(manifest).toContain("- `src/c.ts` `M`");
-		expect(manifest).toContain("- `src/d.ts` `M`");
-	});
-
-	it("does not treat command substrings as commands", () => {
-		const tracker = new FilesTouchedTracker();
-		tracker.processToolCall("bash", {
-			command: "copycat secret.txt && confirm deploy.txt",
-		});
+		tracker.processToolCall("shell", { command: "rm -rf src/old.ts" });
 		expect(tracker.size).toBe(0);
 	});
 
