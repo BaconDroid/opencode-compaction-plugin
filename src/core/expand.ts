@@ -173,9 +173,16 @@ export class ExpansionSidecar {
 export class ExpandStore extends KeyedQueue<ExpandRequest> {
 	/** Keep at most one request per block to bound the queue. */
 	override queue(sessionID: string, item: ExpandRequest): void {
-		const existing = this.take(sessionID).filter(
-			(req) => req.block !== item.block,
-		);
+		const existing = this.take(sessionID);
+		const index = existing.findIndex((req) => req.block === item.block);
+		if (index !== -1) {
+			// A one-shot must not cancel a sticky retention for the same block.
+			if (existing[index].mode === "sticky" && item.mode === "once") {
+				this.retain(sessionID, existing);
+				return;
+			}
+			existing.splice(index, 1);
+		}
 		existing.push(item);
 		this.retain(sessionID, existing);
 	}

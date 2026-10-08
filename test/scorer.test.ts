@@ -69,6 +69,34 @@ describe("buildScorerEstimator()", () => {
 		expect(DEFAULT_SCORER_MAX_SAMPLES).toBe(200);
 	});
 
+	it("keeps a cached current text when trimming the cache", async () => {
+		const scorer: Scorer = {
+			async score(text) {
+				return text.length;
+			},
+		};
+		// Fill the cache to its bound (1000), then re-score an old text together
+		// with a new one: trimming must not evict the cached current text.
+		const fill = Array.from({ length: 1000 }, (_, i) => `t${i}`);
+		await buildScorerEstimator(
+			scorer,
+			fill.map((t) => textMsg("assistant", t)) as any,
+			1005,
+		);
+		const estimate = await buildScorerEstimator(
+			scorer,
+			[textMsg("assistant", "t0"), textMsg("assistant", "t1000")] as any,
+			1005,
+		);
+		// t0 = 2 (cached), t1000 = 5; with the bug t0 falls back to ceil(2/4)=1.
+		expect(
+			estimate([
+				textMsg("assistant", "t0"),
+				textMsg("assistant", "t1000"),
+			] as any),
+		).toBe(7);
+	});
+
 	it("caches scores across transforms for the same scorer", async () => {
 		let calls = 0;
 		const scorer: Scorer = {
