@@ -44,7 +44,11 @@ export interface CompressConfig {
 export interface EvictionSettings {
 	/** Enable graduated LLM-free eviction (default: true) */
 	enabled?: boolean;
-	/** Token budget; eviction runs only above it (default: 200000) */
+	/**
+	 * Token budget; eviction runs only above it (default: 200000). When
+	 * preemptive compaction is enabled with `contextLimit` and this is unset,
+	 * the budget is derived from the limit instead.
+	 */
 	thresholdTokens?: number;
 	/** Levels to apply, in order (default: reasoning, bulk_output, intermediate, episode) */
 	levels?: EvictionLevel[];
@@ -260,6 +264,11 @@ function nonNegative(value: unknown, fallback: number): number {
 		: fallback;
 }
 
+/** A real boolean, else the default. Non-booleans are rejected. */
+function booleanOr(value: unknown, fallback: boolean): boolean {
+	return typeof value === "boolean" ? value : fallback;
+}
+
 /**
  * Defensively normalize values that JSON config could set to destructive or
  * nonsensical values (the loader casts `JSON.parse` output without validation).
@@ -269,6 +278,7 @@ function normalizeConfig(cfg: ResolvedConfig): ResolvedConfig {
 	// the default section instead, matching the previous tolerant behavior.
 	for (const key of [
 		"dedup",
+		"compress",
 		"eviction",
 		"purgeErrors",
 		"preemptiveCompaction",
@@ -279,6 +289,64 @@ function normalizeConfig(cfg: ResolvedConfig): ResolvedConfig {
 				DEFAULT_CONFIG[key],
 			);
 		}
+	}
+
+	// Booleans: a non-boolean JSON value is rejected in favour of the default.
+	cfg.enabled = booleanOr(cfg.enabled, DEFAULT_CONFIG.enabled);
+	cfg.debug = booleanOr(cfg.debug, DEFAULT_CONFIG.debug);
+	cfg.dedup.enabled = booleanOr(cfg.dedup.enabled, DEFAULT_CONFIG.dedup.enabled);
+	cfg.purgeErrors.enabled = booleanOr(
+		cfg.purgeErrors.enabled,
+		DEFAULT_CONFIG.purgeErrors.enabled,
+	);
+	cfg.purgeErrors.wholeAttempt = booleanOr(
+		cfg.purgeErrors.wholeAttempt,
+		DEFAULT_CONFIG.purgeErrors.wholeAttempt,
+	);
+	cfg.purgeErrors.cascade = booleanOr(
+		cfg.purgeErrors.cascade,
+		DEFAULT_CONFIG.purgeErrors.cascade,
+	);
+	cfg.compress.reversible = booleanOr(
+		cfg.compress.reversible,
+		DEFAULT_CONFIG.compress.reversible,
+	);
+	cfg.eviction.enabled = booleanOr(
+		cfg.eviction.enabled,
+		DEFAULT_CONFIG.eviction.enabled,
+	);
+	cfg.eviction.protectPrologue = booleanOr(
+		cfg.eviction.protectPrologue,
+		DEFAULT_CONFIG.eviction.protectPrologue,
+	);
+	cfg.preemptiveCompaction.enabled = booleanOr(
+		cfg.preemptiveCompaction.enabled,
+		DEFAULT_CONFIG.preemptiveCompaction.enabled,
+	);
+	cfg.preemptiveCompaction.countCacheTokens = booleanOr(
+		cfg.preemptiveCompaction.countCacheTokens,
+		DEFAULT_CONFIG.preemptiveCompaction.countCacheTokens,
+	);
+	cfg.degradationMonitor.enabled = booleanOr(
+		cfg.degradationMonitor.enabled,
+		DEFAULT_CONFIG.degradationMonitor.enabled,
+	);
+
+	// Integers / enumeration.
+	cfg.compress.protectedTurns = Math.floor(
+		nonNegative(
+			cfg.compress.protectedTurns,
+			DEFAULT_CONFIG.compress.protectedTurns,
+		),
+	);
+	cfg.compress.searchMaxResults = Math.floor(
+		nonNegative(
+			cfg.compress.searchMaxResults,
+			DEFAULT_CONFIG.compress.searchMaxResults,
+		),
+	);
+	if (cfg.promptMode !== "replace" && cfg.promptMode !== "augment") {
+		cfg.promptMode = DEFAULT_CONFIG.promptMode;
 	}
 
 	cfg.dedup.protectedTools = Array.isArray(cfg.dedup.protectedTools)
@@ -349,6 +417,14 @@ function normalizeConfig(cfg: ResolvedConfig): ResolvedConfig {
 			) {
 				delete adapter.minScore;
 			}
+			// A non-boolean `enabled` is dropped so the documented default (on
+			// when the block is present) applies.
+			if (
+				adapter.enabled !== undefined &&
+				typeof adapter.enabled !== "boolean"
+			) {
+				delete adapter.enabled;
+			}
 		}
 	}
 
@@ -359,13 +435,38 @@ function normalizeConfig(cfg: ResolvedConfig): ResolvedConfig {
  * Merge user config over defaults. Deep-merges nested objects. The defaults are
  * cloned so a caller cannot mutate the shared `DEFAULT_CONFIG` through the
  * result, and the merged result is normalized defensively.
+ *
+ * When preemptive compaction is enabled with an explicit `contextLimit` and the
+ * user did not pin `eviction.thresholdTokens`, the eviction budget is derived
+ * from that limit (`min(contextLimit × threshold, absoluteTokenThreshold)`), so
+ * eviction triggers as early as the preemption would. Without a configured
+ * `contextLimit` the provider-resolved limit is not available synchronously, so
+ * the fixed default is kept.
  */
 export function mergeConfig(user: LiveCompactionConfig): ResolvedConfig {
-	const merged = deepMerge(
-		structuredClone(DEFAULT_CONFIG) as LiveCompactionConfig,
-		user,
-	) as ResolvedConfig;
-	return normalizeConfig(merged);
+	const merged = normalizeConfig(
+		deepMerge(
+			structuredClone(DEFAULT_CONFIG) as LiveCompactionConfig,
+			user,
+		) as ResolvedConfig,
+	);
+
+	const pre = merged.preemptiveCompaction;
+	if (
+		pre.enabled === true &&
+		typeof pre.contextLimit === "number" &&
+		pre.contextLimit > 0 &&
+		user.eviction?.thresholdTokens === undefined
+	) {
+		let linked = Math.floor(pre.contextLimit * pre.threshold);
+		const absolute = pre.absoluteTokenThreshold;
+		if (typeof absolute === "number" && absolute > 0) {
+			linked = Math.min(linked, absolute);
+		}
+		merged.eviction.thresholdTokens = linked;
+	}
+
+	return merged;
 }
 
 /** The fully-resolved configuration (defaults merged with user config). */

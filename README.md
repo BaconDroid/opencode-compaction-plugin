@@ -221,7 +221,10 @@ Each feature below lists **what** it does, its **config** keys and how it
 - **What** — LLM-free eviction (`reasoning → bulk output → intermediate → episode`)
   once the estimated budget is exceeded.
 - **Config** — `eviction.{enabled,thresholdTokens,levels,protectPrologue}`.
-- **Interactions** — runs last; never evicts user turns or the prologue.
+- **Interactions** — runs last; never evicts user turns or the prologue. With
+  preemptive compaction enabled and a `contextLimit` set, an unset
+  `thresholdTokens` is derived from the limit
+  (`min(contextLimit × threshold, absoluteTokenThreshold)`).
 
 ### Preemptive compaction
 - **What** — calls `session.summarize` before the context is full.
@@ -333,7 +336,10 @@ Precedence, low to high: **defaults → global file → plugin options → proje
     // Graduated, LLM-free eviction
     "eviction": {
         "enabled": true,
-        "thresholdTokens": 200000,  // Eviction runs only above this estimated budget
+        // Runs only above this estimated budget. If preemptiveCompaction is
+        // enabled with a contextLimit and this is unset, it is derived from the
+        // limit: min(contextLimit × threshold, absoluteTokenThreshold).
+        "thresholdTokens": 200000,
         "levels": ["reasoning", "bulk_output", "intermediate", "episode"],
         "protectPrologue": true     // Never evict the first message
     },

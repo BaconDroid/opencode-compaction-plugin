@@ -113,14 +113,91 @@ describe("mergeConfig()", () => {
 	it("tolerates malformed non-object sections", () => {
 		const cfg = mergeConfig({
 			dedup: null,
+			compress: false,
 			eviction: false,
 			preemptiveCompaction: 0,
 			degradationMonitor: "x",
 		} as any);
 		expect(cfg.dedup.enabled).toBe(true);
+		expect(cfg.compress.protectedTurns).toBe(3);
 		expect(cfg.eviction.levels).toHaveLength(4);
 		expect(cfg.preemptiveCompaction.threshold).toBe(0.8);
 		expect(cfg.degradationMonitor.threshold).toBe(4);
+	});
+
+	it("rejects non-boolean and non-numeric strategy values", () => {
+		const cfg = mergeConfig({
+			enabled: "yes",
+			debug: 1,
+			promptMode: "weird",
+			dedup: { enabled: "nope" },
+			purgeErrors: { cascade: "true", wholeAttempt: 0, turns: 3.9 },
+			compress: { reversible: "no", protectedTurns: -2, searchMaxResults: 3.7 },
+			eviction: { enabled: "y", protectPrologue: null },
+			preemptiveCompaction: { enabled: "yes", countCacheTokens: 0 },
+			degradationMonitor: { enabled: "on" },
+		} as any);
+		expect(cfg.enabled).toBe(true);
+		expect(cfg.debug).toBe(false);
+		expect(cfg.promptMode).toBe("replace");
+		expect(cfg.dedup.enabled).toBe(true);
+		expect(cfg.purgeErrors.cascade).toBe(true);
+		expect(cfg.purgeErrors.wholeAttempt).toBe(true);
+		expect(cfg.purgeErrors.turns).toBe(3);
+		expect(cfg.compress.reversible).toBe(false);
+		expect(cfg.compress.protectedTurns).toBe(3);
+		expect(cfg.compress.searchMaxResults).toBe(3);
+		expect(cfg.eviction.enabled).toBe(true);
+		expect(cfg.eviction.protectPrologue).toBe(true);
+		expect(cfg.preemptiveCompaction.enabled).toBe(false);
+		expect(cfg.preemptiveCompaction.countCacheTokens).toBe(true);
+		expect(cfg.degradationMonitor.enabled).toBe(false);
+	});
+
+	it("drops a non-boolean adapter enabled flag", () => {
+		const cfg = mergeConfig({
+			adapters: { embeddings: { provider: "http", url: "u", enabled: "yes" } },
+		} as any);
+		expect(cfg.adapters?.embeddings?.enabled).toBeUndefined();
+	});
+
+	it("links eviction.thresholdTokens to contextLimit when preemption is on", () => {
+		const cfg = mergeConfig({
+			preemptiveCompaction: { enabled: true, contextLimit: 100000, threshold: 0.5 },
+		});
+		expect(cfg.eviction.thresholdTokens).toBe(50000);
+	});
+
+	it("caps the linked threshold at absoluteTokenThreshold", () => {
+		const cfg = mergeConfig({
+			preemptiveCompaction: {
+				enabled: true,
+				contextLimit: 100000,
+				threshold: 0.5,
+				absoluteTokenThreshold: 30000,
+			},
+		});
+		expect(cfg.eviction.thresholdTokens).toBe(30000);
+	});
+
+	it("keeps an explicit eviction.thresholdTokens", () => {
+		const cfg = mergeConfig({
+			eviction: { thresholdTokens: 12345 },
+			preemptiveCompaction: { enabled: true, contextLimit: 100000, threshold: 0.5 },
+		});
+		expect(cfg.eviction.thresholdTokens).toBe(12345);
+	});
+
+	it("does not link without a contextLimit or when preemption is off", () => {
+		expect(
+			mergeConfig({ preemptiveCompaction: { enabled: true, threshold: 0.5 } })
+				.eviction.thresholdTokens,
+		).toBe(200000);
+		expect(
+			mergeConfig({
+				preemptiveCompaction: { enabled: false, contextLimit: 100000, threshold: 0.5 },
+			}).eviction.thresholdTokens,
+		).toBe(200000);
 	});
 
 	it("preserves an explicit empty eviction.levels", () => {
