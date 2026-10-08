@@ -114,6 +114,17 @@ describe("ExpandStore", () => {
 		expect(second[0].block).toBe("b0");
 	});
 
+	it("keeps a sticky expand when a one-shot recall follows", () => {
+		const store = new ExpandStore();
+		store.queue("s", { block: "b0", mode: "sticky", timestamp: 1 });
+		store.queue("s", { block: "b0", mode: "once", timestamp: 2 });
+		const drained = store.drain("s");
+		expect(drained).toHaveLength(1);
+		expect(drained[0].mode).toBe("sticky");
+		// Still retained for the next transform.
+		expect(store.drain("s")).toHaveLength(1);
+	});
+
 	it("dedupes by block and prunes unmatched sticky requests", () => {
 		const store = new ExpandStore();
 		store.queue("s", { block: "b0", mode: "sticky", timestamp: 1 });

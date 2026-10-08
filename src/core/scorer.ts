@@ -99,19 +99,23 @@ export async function buildScorerEstimator(
 				cache!.set(text, value);
 			}
 		});
-		// Bound the cache, dropping the oldest inserted texts.
-		while (cache.size > MAX_SCORE_CACHE) {
-			const oldest = cache.keys().next().value;
-			if (oldest === undefined) break;
-			cache.delete(oldest);
-		}
 	}
 
+	// Build `scores` before trimming: trimming first could evict a text that is
+	// in the current set, silently dropping it to the heuristic.
 	const scores = new Map<string, number>();
 	for (const text of texts) {
 		const value = cache.get(text);
 		if (value !== undefined) scores.set(text, value);
 	}
+
+	// Bound the cache, dropping the oldest inserted texts.
+	while (cache.size > MAX_SCORE_CACHE) {
+		const oldest = cache.keys().next().value;
+		if (oldest === undefined) break;
+		cache.delete(oldest);
+	}
+
 	if (scores.size === 0) return estimateTokens;
 
 	return (msgs) => estimateTokens(msgs, (text) => scores.get(text));
