@@ -92,6 +92,26 @@ describe("mergeConfig()", () => {
 		});
 	});
 
+	it("leaves adapters off by default and preserves configured blocks", () => {
+		expect(mergeConfig({}).adapters).toBeUndefined();
+		const cfg = mergeConfig({
+			adapters: {
+				embeddings: { provider: "http", url: "http://e", minScore: 0.3 },
+				judge: { provider: "command", command: "judge-cmd" },
+				scorer: { provider: "http", url: "http://s", maxSamples: 10 },
+			},
+		});
+		expect(cfg.adapters?.embeddings).toMatchObject({
+			url: "http://e",
+			minScore: 0.3,
+		});
+		expect(cfg.adapters?.judge?.command).toBe("judge-cmd");
+		expect(cfg.adapters?.scorer).toMatchObject({
+			url: "http://s",
+			maxSamples: 10,
+		});
+	});
+
 	it("overrides compress, eviction, preemptive and degradation settings", () => {
 		const cfg = mergeConfig({
 			compress: { protectedTurns: 5, reversible: false, maxBlocksPerSquash: 2 },
@@ -206,6 +226,16 @@ describe("loadConfig()", () => {
 		expect(cfg.enabled).toBe(true);
 		expect(errors).toHaveLength(1);
 		expect(errors[0]).toContain("failed to parse");
+	});
+
+	it("loads adapter blocks from a project file", () => {
+		writeFileSync(
+			join(TMP_DIR, ".opencode", "live-compaction.json"),
+			JSON.stringify({
+				adapters: { embeddings: { provider: "http", url: "http://x" } },
+			}),
+		);
+		expect(loadConfig(TMP_DIR).adapters?.embeddings?.url).toBe("http://x");
 	});
 
 	it("applies precedence: defaults < global < plugin options < project", () => {
