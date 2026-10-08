@@ -131,7 +131,7 @@ describe("EmbeddingVectorIndex", () => {
 		await expect(index.search("q", 5)).rejects.toThrow("vectors for");
 	});
 
-	it("skips empty-text items and drops non-positive scores", async () => {
+	it("skips empty-text corpus items", async () => {
 		// A provider-like embedder that rejects empty input.
 		const embedder: Embedder = {
 			async embed(texts) {

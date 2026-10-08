@@ -32,11 +32,12 @@ export function buildIntegrityPrompt(
 export function parseVerdict(answer: string): boolean | undefined {
 	const text = answer.trim().toLowerCase();
 	if (!text) return undefined;
-	const yes = /\byes\b/.test(text);
-	const no = /\bno\b/.test(text);
-	// A hedging answer that mentions both is not a usable verdict.
-	if (yes === no) return undefined;
-	return yes;
+	// A bare two-word hedge is not a usable verdict; otherwise the first
+	// yes/no wins (so "yes, there is no issue" still reads as yes).
+	if (/^(?:yes\s+and\s+no|no\s+and\s+yes)$/.test(text)) return undefined;
+	if (/\byes\b/.test(text)) return true;
+	if (/\bno\b/.test(text)) return false;
+	return undefined;
 }
 
 /**
