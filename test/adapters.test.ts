@@ -301,6 +301,41 @@ describe("search tool with a semantic index", () => {
 	});
 });
 
+describe("search tool rerank gating", () => {
+	function setup() {
+		const sidecar = new ExpansionSidecar();
+		sidecar.save("s", "id-1", [textMsg("user", "hello world")], { label: "b0" });
+		let called = 0;
+		const { logger } = recordingLogger();
+		const search = buildSearchToolDef(sidecar, 5, {
+			index: {
+				async search() {
+					called++;
+					return [{ id: "id-1", score: 1 }];
+				},
+			},
+			logger,
+			mode: "rerank",
+		});
+		return { search, calls: () => called };
+	}
+
+	it("uses keyword results without calling the model when the keyword matches", async () => {
+		const { search, calls } = setup();
+		const result = await search.execute({ query: "hello" }, {} as any);
+		expect(result).toContain("[b0]");
+		expect(result).not.toContain("(semantic)");
+		expect(calls()).toBe(0);
+	});
+
+	it("falls back to the model when the keyword finds nothing", async () => {
+		const { search, calls } = setup();
+		const result = await search.execute({ query: "absent" }, {} as any);
+		expect(calls()).toBe(1);
+		expect(result).toContain("(semantic)");
+	});
+});
+
 describe("parseEmbeddings()", () => {
 	it("accepts bare arrays, {embeddings} and OpenAI {data}", () => {
 		expect(parseEmbeddings([[1, 2]], 1)).toEqual([[1, 2]]);
@@ -567,17 +602,24 @@ describe("parseTokenEstimates() / parseRankedIds()", () => {
 });
 
 describe("resolveScorer() / resolveReranker() with the opencode provider", () => {
-	const echoCounts = async (prompt: string): Promise<string> => {
-		const texts = JSON.parse(prompt.slice(prompt.lastIndexOf("[")));
-		return JSON.stringify(texts.map(() => 10));
-	};
-
-	it("builds a batched model scorer from an injected runner", async () => {
+	it("warms the model scorer cache in the background (non-blocking)", async () => {
+		let calls = 0;
+		const modelRunner = async (prompt: string): Promise<string> => {
+			calls++;
+			const texts = JSON.parse(prompt.slice(prompt.lastIndexOf("[")));
+			return JSON.stringify(texts.map(() => 10));
+		};
 		const scorer = resolveScorer(
 			{ provider: "opencode" },
-			{ logger: recordingLogger().logger, modelRunner: echoCounts },
+			{ logger: recordingLogger().logger, modelRunner },
 		);
 		expect(scorer).toBeDefined();
+		// The first call returns nothing yet (heuristic) and schedules a fill.
+		const first = await scorer!.scoreMany!(["a", "b"]);
+		expect(first.every((value) => Number.isNaN(value))).toBe(true);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(calls).toBe(1);
+		// The warmed cache is used on the next call.
 		expect(await scorer!.scoreMany!(["a", "b"])).toEqual([10, 10]);
 		expect(await scorer!.score("a")).toBe(10);
 	});

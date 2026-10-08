@@ -7,6 +7,10 @@ import {
 	buildScorerEstimator,
 } from "../src/core/scorer.ts";
 import { applyEviction, estimateTokens } from "../src/core/eviction.ts";
+import { applyTransform } from "../src/core/transform.ts";
+import { mergeConfig } from "../src/config/config.ts";
+import { CompressionStore } from "../src/core/compress.ts";
+import { ExpansionSidecar, ExpandStore } from "../src/core/expand.ts";
 import { parseScore, resolveScorer } from "../src/opencode/adapters.ts";
 import { LiveCompactionPlugin } from "../src/index.ts";
 import { makeTmpSetup, recordingLogger } from "./helpers.ts";
@@ -280,6 +284,62 @@ describe("resolveScorer()", () => {
 		);
 		expect(await scorer!.score("hello")).toBe(12);
 		expect(seenBody).toContain('"text":"hello"');
+	});
+});
+
+describe("scorer budget gate (transform)", () => {
+	const config = mergeConfig({
+		dedup: { enabled: false },
+		purgeErrors: { enabled: false },
+		eviction: {
+			enabled: true,
+			thresholdTokens: 1000,
+			levels: ["reasoning"],
+			protectPrologue: false,
+		},
+	});
+	const makeDeps = () => ({
+		config,
+		logger: recordingLogger().logger,
+		compressions: new CompressionStore(),
+		expansions: new ExpansionSidecar(),
+		expandStore: new ExpandStore(),
+	});
+
+	it("skips the scorer when the context is far below the budget", async () => {
+		let calls = 0;
+		const scorer: Scorer = {
+			async score() {
+				calls++;
+				return 999;
+			},
+		};
+		const messages = [
+			{
+				info: { role: "assistant" },
+				parts: [{ type: "reasoning", text: "x".repeat(40) }],
+			},
+		];
+		await applyTransform(messages as any, { ...makeDeps(), scorer });
+		expect(calls).toBe(0);
+	});
+
+	it("consults the scorer near the budget", async () => {
+		let calls = 0;
+		const scorer: Scorer = {
+			async score() {
+				calls++;
+				return 999;
+			},
+		};
+		const messages = [
+			{
+				info: { role: "assistant" },
+				parts: [{ type: "reasoning", text: "x".repeat(4000) }],
+			},
+		];
+		await applyTransform(messages as any, { ...makeDeps(), scorer });
+		expect(calls).toBeGreaterThan(0);
 	});
 });
 

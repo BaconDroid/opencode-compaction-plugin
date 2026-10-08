@@ -18,6 +18,11 @@ import type { Logger } from "../types.js";
 export interface SemanticSearchDeps {
 	index: VectorIndex;
 	logger: Logger;
+	/**
+	 * "semantic" (default) tries the index first; "rerank" tries the deterministic
+	 * keyword search first and only spends a model call when it finds nothing.
+	 */
+	mode?: "semantic" | "rerank";
 }
 
 /**
@@ -142,6 +147,15 @@ matching [bN] labels and a snippet; use expand to restore a match.`,
 		},
 		async execute(args, context) {
 			const sessionID = context?.sessionID;
+			// Rerank gating: an exact-term match is already relevant and free, so
+			// only ask the (model-backed) index when the keyword search finds
+			// nothing.
+			if (semantic?.mode === "rerank") {
+				const keywordHits = sidecar.search(args.query, maxResults, sessionID);
+				if (keywordHits.length > 0) {
+					return renderHits(keywordHits, args.query, "keyword");
+				}
+			}
 			if (semantic) {
 				try {
 					const hits = await semantic.index.search(

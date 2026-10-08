@@ -342,23 +342,56 @@ export function parseTokenEstimates(raw: string, expected: number): number[] {
 	});
 }
 
+/** Bound on the model scorer's text→estimate cache (insertion-order eviction). */
+const MODEL_SCORE_CACHE_MAX = 1000;
+
 /**
- * A `Scorer` backed by the opencode model runner. It batches all texts into a
- * single call (one round-trip per transform) and asks for token estimates.
+ * A `Scorer` backed by the opencode model runner. It never blocks the transform:
+ * `scoreMany` returns the estimates already cached and warms the rest in the
+ * background (one call at a time), so a slow or broken model only delays scores
+ * to a later transform. Fail-open: errors leave texts unscored (heuristic).
  */
 function buildModelScorer(runner: ModelRunner, cfg: ScorerAdapterConfig): Scorer {
 	const model = cfg.model ?? DEFAULT_ADAPTER_MODEL;
 	const timeoutMs = cfg.timeoutMs ?? DEFAULT_MODEL_TIMEOUT_MS;
+	const cache = new Map<string, number>();
+	let inFlight = false;
+
+	const fill = async (texts: string[]): Promise<void> => {
+		inFlight = true;
+		try {
+			const prompt = [
+				"Estimate the number of LLM tokens (contiguous BPE tokens) each text below would consume.",
+				`Return ONLY a JSON array of ${texts.length} integers, one per text, in the same order.`,
+				JSON.stringify(texts),
+			].join("\n\n");
+			const raw = await runner(prompt, { system: SCORER_SYSTEM, model, timeoutMs });
+			const values = parseTokenEstimates(raw, texts.length);
+			texts.forEach((text, index) => {
+				const value = values[index];
+				if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+					cache.set(text, value);
+				}
+			});
+			while (cache.size > MODEL_SCORE_CACHE_MAX) {
+				const oldest = cache.keys().next().value;
+				if (oldest === undefined) break;
+				cache.delete(oldest);
+			}
+		} catch {
+			// fail-open: leave uncached so a later transform retries
+		} finally {
+			inFlight = false;
+		}
+	};
 
 	const scoreMany = async (texts: string[]): Promise<number[]> => {
 		if (texts.length === 0) return [];
-		const prompt = [
-			"Estimate the number of LLM tokens (contiguous BPE tokens) each text below would consume.",
-			`Return ONLY a JSON array of ${texts.length} integers, one per text, in the same order.`,
-			JSON.stringify(texts),
-		].join("\n\n");
-		const raw = await runner(prompt, { system: SCORER_SYSTEM, model, timeoutMs });
-		return parseTokenEstimates(raw, texts.length);
+		const missing = texts.filter((text) => !cache.has(text));
+		if (missing.length > 0 && !inFlight) {
+			void fill(missing).catch(() => {});
+		}
+		return texts.map((text) => cache.get(text) ?? Number.NaN);
 	};
 
 	return {

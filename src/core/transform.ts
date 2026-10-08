@@ -10,9 +10,13 @@ import {
 	applyDedup,
 	applyPurgeErrors,
 } from "./strategies.js";
-import { applyEviction } from "./eviction.js";
+import { applyEviction, estimateTokens } from "./eviction.js";
 import { applyPendingRequests, type RequestDeps } from "./requests.js";
-import { buildScorerEstimator, type ScorerEstimator } from "./scorer.js";
+import {
+	buildScorerEstimator,
+	SCORER_BUDGET_GATE,
+	type ScorerEstimator,
+} from "./scorer.js";
 import type { Scorer } from "./adapters.js";
 import type { Message } from "../types.js";
 
@@ -62,10 +66,16 @@ export async function applyTransform(
 
 	// Runs last: content-addressed, never evicts user turns or the prologue.
 	if (config.eviction?.enabled) {
-		// Optional scorer adapter (E5): calibrate the budget estimate. Any error
-		// falls back to the heuristic `estimateTokens` (fail-open).
+		const thresholdTokens = config.eviction.thresholdTokens ?? 200000;
+		// Optional scorer adapter (E5): calibrate the budget estimate. Only
+		// consult it near the budget — far below it eviction will not run, so a
+		// model-backed scorer would be a wasted round-trip. Any error falls back
+		// to the heuristic `estimateTokens` (fail-open).
 		let scorerEstimator: ScorerEstimator | undefined;
-		if (deps.scorer) {
+		if (
+			deps.scorer &&
+			estimateTokens(messages) >= thresholdTokens * SCORER_BUDGET_GATE
+		) {
 			try {
 				scorerEstimator = await buildScorerEstimator(
 					deps.scorer,
@@ -80,7 +90,7 @@ export async function applyTransform(
 		}
 		const { removed, evictedIds } = applyEviction(messages, {
 			enabled: true,
-			thresholdTokens: config.eviction.thresholdTokens ?? 200000,
+			thresholdTokens,
 			levels: config.eviction.levels,
 			protectPrologue: config.eviction.protectPrologue ?? true,
 			resolveText: scorerEstimator?.resolveText,

@@ -256,19 +256,25 @@ Each feature below lists **what** it does, its **config** keys and how it
   ranks the blocks (no embedding endpoint needed).
 - **Config** — `adapters.embeddings.*` or `adapters.rerank.*` (opt-in; off when
   absent). `embeddings` takes precedence when both are set.
-- **Interactions** — semantic hits are tried first; any error (timeout, bad
-  response) or an empty result falls back to the deterministic keyword search.
-  Never changes the transform/compaction path.
+- **Interactions** — `embeddings` tries semantic retrieval first; `rerank` tries
+  the deterministic keyword search first and only spends a model call when the
+  keyword finds nothing (an exact-term match is already relevant and free). Any
+  error (timeout, bad response) or an empty result falls back to the keyword
+  search. Never changes the transform/compaction path.
 
 ### Residual/perplexity scoring (optional adapter)
 - **What** — eviction normally budgets with the heuristic `estimateTokens`
   (chars ÷ 4). When `adapters.scorer` is configured, each distinct text part is
   scored once and its residual estimate replaces the heuristic for that text.
   The `opencode` provider reuses a model already configured in OpenCode (no
-  endpoint or credentials handled by the plugin).
+  endpoint or credentials handled by the plugin) and is **non-blocking**: it
+  returns the estimates already cached and warms the rest in the background, so
+  a slow model only delays scores to a later transform.
 - **Config** — `adapters.scorer.*` (opt-in; off when absent).
-- **Interactions** — only affects the eviction budget estimate; tool outputs and
-  unscored texts keep the heuristic; any scorer error falls back to it.
+- **Interactions** — only affects the eviction budget estimate, and is skipped
+  entirely when the heuristic estimate is below 50% of `eviction.thresholdTokens`
+  (eviction would not run there). Tool outputs and unscored texts keep the
+  heuristic; any scorer error falls back to it.
 
 ## Strategy order & interactions
 
@@ -422,8 +428,11 @@ sandboxed session, so OpenCode keeps handling provider auth and no key or
 endpoint is set here. `model` defaults to the free `opencode/big-pickle`; set it
 to `"host"` to reuse the model OpenCode is already using. Supported for `scorer`
 and `rerank` only — `embeddings` still needs a real embedding endpoint (use
-`rerank` for model-based retrieval). A model call is never nested: while one
-adapter call is in flight, another falls back to its deterministic behaviour.
+`rerank` for model-based retrieval). Calls are gated so the model is only used
+when it helps: the scorer runs only near the eviction budget and warms its cache
+in the background; the reranker runs only when keyword search finds nothing. A
+model call is never nested: while one adapter call is in flight, another falls
+back to its deterministic behaviour.
 
 **Provider `http`** — for `embeddings`, POSTs an OpenAI-style request
 (`{ "model"?, "input": ["text", …] }`) and accepts the response as a bare
@@ -469,7 +478,7 @@ bun run test:coverage
 # (OpenCode loads .ts files directly via Bun)
 ```
 
-Current coverage: **95.9% functions, 99.6% lines** (283 tests).
+Current coverage: **95.8% functions, 99.5% lines** (287 tests).
 
 ## File Structure
 

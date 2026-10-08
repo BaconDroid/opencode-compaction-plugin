@@ -17,6 +17,12 @@ import type { Scorer } from "./adapters.js";
 export const DEFAULT_SCORER_MAX_SAMPLES = 200;
 /** Maximum in-flight scorer requests, to avoid hammering the endpoint. */
 export const SCORER_CONCURRENCY = 8;
+/**
+ * Fraction of the eviction budget below which the scorer is skipped. Far below
+ * the budget eviction will not run, so scoring would be wasted work (and, for a
+ * model-backed scorer, a wasted round-trip).
+ */
+export const SCORER_BUDGET_GATE = 0.5;
 
 /**
  * Score every text, in input order. A scorer that exposes `scoreMany` is used

@@ -198,6 +198,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 	const rerankCfg = config.adapters?.rerank;
 	const embedder = resolveEmbedder(embeddingCfg, adapterDeps);
 	let semanticIndex: VectorIndex | undefined;
+	let semanticMode: "semantic" | "rerank" = "semantic";
 	if (embedder) {
 		semanticIndex = new EmbeddingVectorIndex(
 			embedder,
@@ -215,6 +216,7 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 				corpus,
 				rerankCfg?.maxCandidates,
 			);
+			semanticMode = "rerank";
 			logger.info("rerank search adapter enabled", {
 				model: rerankCfg?.model ?? "opencode/big-pickle",
 			});
@@ -585,7 +587,9 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			search: buildSearchToolDef(
 				expansions,
 				config.compress?.searchMaxResults ?? 5,
-				semanticIndex ? { index: semanticIndex, logger } : undefined,
+				semanticIndex
+					? { index: semanticIndex, logger, mode: semanticMode }
+					: undefined,
 			),
 		},
 	};
