@@ -132,6 +132,14 @@ describe("LiveCompactionPlugin", () => {
 				await compact(hooks, sessionID, output);
 				expect(output.prompt, tool).toContain(filePath);
 			}
+
+			// Several files in one session are all listed.
+			await afterTool(hooks, "read", "sess-multi", "c1", { filePath: "a.ts" });
+			await afterTool(hooks, "write", "sess-multi", "c2", { filePath: "b.ts" });
+			const multi = { context: [], prompt: undefined };
+			await compact(hooks, "sess-multi", multi);
+			expect(multi.prompt).toContain("a.ts");
+			expect(multi.prompt).toContain("b.ts");
 		});
 
 		it("ignores calls without sessionID or args", async () => {
@@ -142,17 +150,6 @@ describe("LiveCompactionPlugin", () => {
 			const output = { context: [], prompt: undefined };
 			await compact(hooks, "sess-5", output);
 			expect(output.prompt).not.toContain("## Files Touched Manifest");
-		});
-
-		it("tracks multiple files in same session", async () => {
-			const hooks = await getHooks();
-			await afterTool(hooks, "read", "sess-multi", "c1", { filePath: "a.ts" });
-			await afterTool(hooks, "write", "sess-multi", "c2", { filePath: "b.ts" });
-
-			const output = { context: [], prompt: undefined };
-			await compact(hooks, "sess-multi", output);
-			expect(output.prompt).toContain("a.ts");
-			expect(output.prompt).toContain("b.ts");
 		});
 	});
 
