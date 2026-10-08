@@ -34,14 +34,23 @@ function userMsg(text: string) {
 }
 
 describe("estimateTokens()", () => {
-	it("estimates from text and tool output", () => {
-		const messages = [assistantWithText("x".repeat(400))] as any;
-		expect(estimateTokens(messages)).toBe(100);
-	});
-
-	it("includes tool outputs and inputs", () => {
-		const messages = [assistantWithTool("y".repeat(400))] as any;
-		expect(estimateTokens(messages)).toBe(100);
+	it("estimates text, tool outputs and tool inputs", () => {
+		expect(
+			estimateTokens([assistantWithText("x".repeat(400))] as any),
+		).toBe(100);
+		const withIO = [
+			{
+				info: { role: "assistant" },
+				parts: [
+					{
+						type: "tool",
+						tool: "bash",
+						state: { output: "y".repeat(200), input: "z".repeat(200) },
+					},
+				],
+			},
+		] as any;
+		expect(estimateTokens(withIO)).toBe(100);
 	});
 });
 

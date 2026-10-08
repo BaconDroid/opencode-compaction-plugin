@@ -13,9 +13,7 @@ import {
 	type Scale,
 } from "./blocks.js";
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 export interface CompressRequest {
 	/** Topic label for the compression (3-5 words) */
@@ -34,9 +32,7 @@ export interface CompressRequest {
 	callID?: string;
 }
 
-// ---------------------------------------------------------------------------
 // Pending compressions storage (per instance, per session)
-// ---------------------------------------------------------------------------
 
 /**
  * Per-plugin-instance store of pending compression requests. Kept as a class so
@@ -44,7 +40,7 @@ export interface CompressRequest {
  */
 export class CompressionStore extends KeyedQueue<CompressRequest> {
 	/** Get and clear pending compressions for a session (newest range first). */
-	override drain(sessionID: string): CompressRequest[] {
+	drain(sessionID: string): CompressRequest[] {
 		// Explicit-index requests are processed from end to start; auto-selected
 		// requests (no index) go last since they recompute their span.
 		return this.take(sessionID).sort(
@@ -53,9 +49,7 @@ export class CompressionStore extends KeyedQueue<CompressRequest> {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Compression application
-// ---------------------------------------------------------------------------
 
 /** All tool callIDs present in the messages. */
 export function presentCallIds(messages: Message[]): Set<string> {

@@ -34,10 +34,6 @@ export class KeyedQueue<T> {
 		else this.queues.delete(sessionID);
 	}
 
-	drain(sessionID: string): T[] {
-		return this.take(sessionID);
-	}
-
 	clear(sessionID: string): void {
 		this.queues.delete(sessionID);
 	}

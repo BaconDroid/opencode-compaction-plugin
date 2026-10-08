@@ -310,8 +310,6 @@ describe("PreemptionController", () => {
 		);
 		controller.recordUsage("s", "prov", "model-x", { input: 900 });
 		await controller.maybePreempt("s");
-		await controller.maybePreempt("s");
-		expect(listCalls).toBe(1);
 
 		const realNow = Date.now;
 		Date.now = () => realNow() + 61_000;

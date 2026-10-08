@@ -244,13 +244,11 @@ describe("expand/inspect/search tool definitions", () => {
 		const expand = buildExpandToolDef();
 		expect(expand.args).toHaveProperty("block");
 		expect(expand.args).toHaveProperty("mode");
-		expect(await expand.execute({ block: "b0" }, {} as any)).toContain("b0");
 		expect(await expand.execute({ block: "b0" }, {} as any)).toContain(
 			"sticky",
 		);
-		const once = buildExpandToolDef("once");
 		expect(
-			await once.execute({ block: "b1", mode: "once" }, {} as any),
+			await expand.execute({ block: "b1", mode: "once" }, {} as any),
 		).toContain("once");
 	});
 

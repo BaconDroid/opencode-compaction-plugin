@@ -51,17 +51,21 @@ describe("applyDedup()", () => {
 		expect(msgs[0].parts[0].state.output).toBe("content1");
 	});
 
-	it("keeps only the last of identical calls", () => {
+	it("keeps only the last of identical calls, key-sorted", () => {
 		const cfg = mergeConfig({});
 		const msgs = [
 			msg("bash", { command: "ls" }, "v1"),
 			msg("bash", { command: "ls" }, "v2"),
 			msg("bash", { command: "ls" }, "v3"),
+			msg("bash", { command: "ls", cwd: "/tmp" }, "w1"),
+			msg("bash", { cwd: "/tmp", command: "ls" }, "w2"),
 		];
-		expect(applyDedup(msgs as never, cfg)).toBe(2);
+		expect(applyDedup(msgs as never, cfg)).toBe(3);
 		expect(msgs[0].parts[0].state.output).toContain("deduped");
 		expect(msgs[1].parts[0].state.output).toContain("deduped");
 		expect(msgs[2].parts[0].state.output).toBe("v3");
+		expect(msgs[3].parts[0].state.output).toContain("deduped");
+		expect(msgs[4].parts[0].state.output).toBe("w2");
 	});
 
 	it("does not dedup different tools/args or protected tools", () => {
@@ -91,16 +95,6 @@ describe("applyDedup()", () => {
 		];
 		expect(applyDedup(msgs as never, cfg)).toBe(0);
 		expect((msgs[2].parts[0].state as { error?: string }).error).toBe("boom");
-	});
-
-	it("deduplicates nested and swapped-key args", () => {
-		const cfg = mergeConfig({});
-		const msgs = [
-			msg("bash", { command: "ls", cwd: "/tmp" }, "v1"),
-			msg("bash", { cwd: "/tmp", command: "ls" }, "v2"),
-		];
-		expect(applyDedup(msgs as never, cfg)).toBe(1);
-		expect(msgs[0].parts[0].state.output).toContain("deduped");
 	});
 
 	it("is idempotent across transform passes", () => {

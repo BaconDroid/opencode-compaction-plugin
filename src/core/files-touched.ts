@@ -109,7 +109,6 @@ export class FilesTouchedTracker {
 	}
 }
 
-// --- Helpers ---
 
 function extractPath(
 	args: Record<string, unknown>,

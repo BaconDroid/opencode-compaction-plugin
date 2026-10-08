@@ -65,7 +65,7 @@ describe("extractPreviousSummary()", () => {
 		expect(state.lastSummaryText).toBe("first");
 	});
 
-	it("does not re-emit the summary already carried forward", () => {
+	it("falls back to the carried text when the summary is not re-emitted", () => {
 		const state: SlidingState = {
 			lastSummaryMessageId: "s1",
 			lastSummaryText: "carried",
@@ -79,6 +79,13 @@ describe("extractPreviousSummary()", () => {
 		// The matching message is skipped, so it falls back to the carried text
 		// (a re-emit would return "first" and fail).
 		expect(extractPreviousSummary(messages, state)).toBe("carried");
+		// No summary message at all: same fallback.
+		expect(
+			extractPreviousSummary(
+				[{ info: { role: "user" }, parts: [{ type: "text", text: "hi" }] }],
+				{ lastSummaryText: "carried" },
+			),
+		).toBe("carried");
 	});
 
 	it("prefers a newer summary over the carried one", () => {
@@ -100,13 +107,4 @@ describe("extractPreviousSummary()", () => {
 		expect(state.lastSummaryMessageId).toBe("s2");
 	});
 
-	it("returns the carried text when no summary message remains", () => {
-		const state: SlidingState = { lastSummaryText: "carried" };
-		expect(
-			extractPreviousSummary(
-				[{ info: { role: "user" }, parts: [{ type: "text", text: "hi" }] }],
-				state,
-			),
-		).toBe("carried");
-	});
 });

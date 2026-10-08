@@ -119,8 +119,8 @@ export async function buildScorerEstimator(
 		});
 	}
 
-	// Build `scores` before trimming: trimming first could evict a text that is
-	// in the current set, silently dropping it to the heuristic.
+	// Snapshot the scored texts once, so the resolver stays consistent for the
+	// whole transform even as the cache is bounded below.
 	const scores = new Map<string, number>();
 	for (const text of texts) {
 		const value = cache.get(text);

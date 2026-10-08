@@ -12,18 +12,27 @@ import { DEDUPED_PREFIX } from "./markers.js";
 import { partInput, setPartInput } from "./messages.js";
 import type { Message, MessagePart } from "../types.js";
 
-// ---------------------------------------------------------------------------
 // Deduplication
-// ---------------------------------------------------------------------------
+
+// A tool part's args object is stable across transforms (a purge replaces it,
+// it is never mutated in place), so its serialization is cached per identity.
+const argsKeyCache = new WeakMap<object, string>();
+
+function serializedArgs(args: unknown): string {
+	if (typeof args !== "object" || args === null) return JSON.stringify(args);
+	const cached = argsKeyCache.get(args);
+	if (cached !== undefined) return cached;
+	const value = JSON.stringify(sortKeys(args));
+	argsKeyCache.set(args, value);
+	return value;
+}
 
 /**
  * Build a stable hash key for a tool call (tool name + serialized args).
  * Uses JSON.stringify with sorted keys for determinism.
  */
 export function toolCallKey(tool: string, args: unknown): string {
-	const sorted =
-		typeof args === "object" && args !== null ? sortKeys(args) : args;
-	return `${tool}::${JSON.stringify(sorted)}`;
+	return `${tool}::${serializedArgs(args)}`;
 }
 
 /** Recursively sort object keys (including inside arrays) for a stable hash. */
@@ -94,9 +103,7 @@ export function applyDedup(
 	return deduped;
 }
 
-// ---------------------------------------------------------------------------
 // Error Purge
-// ---------------------------------------------------------------------------
 
 /**
  * Find tool parts that returned errors and whose input should be purged.

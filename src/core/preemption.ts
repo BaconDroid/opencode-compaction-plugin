@@ -12,9 +12,7 @@ import type { PluginInput } from "../types.js";
 /** How long a negative context-limit lookup is trusted before re-checking. */
 const NEGATIVE_CONTEXT_LIMIT_TTL_MS = 60_000;
 
-// ---------------------------------------------------------------------------
 // Pure trigger logic (testable without a client)
-// ---------------------------------------------------------------------------
 
 export interface TokenInfo {
 	input?: number;
@@ -110,9 +108,7 @@ export function shouldTriggerPreemptiveCompaction(input: {
 	return input.totalInputTokens / input.contextLimit >= input.threshold;
 }
 
-// ---------------------------------------------------------------------------
 // Controller
-// ---------------------------------------------------------------------------
 
 export class PreemptionController {
 	private usage = new Map<string, CachedUsage>();

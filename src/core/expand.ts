@@ -186,7 +186,7 @@ export class ExpandStore extends KeyedQueue<ExpandRequest> {
 	 * Return the active requests for a session. Sticky requests are retained for
 	 * the next transform; one-shot requests are returned only once.
 	 */
-	override drain(sessionID: string): ExpandRequest[] {
+	drain(sessionID: string): ExpandRequest[] {
 		const queue = this.take(sessionID);
 		this.retain(
 			sessionID,

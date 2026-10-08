@@ -83,7 +83,7 @@ Message indices are 0-based. Use the message order visible in the conversation.`
  * `mode` argument selects a sticky expansion (kept on later transforms) or a
  * one-shot restore (the block re-compresses afterwards).
  */
-export function buildExpandToolDef(mode: "sticky" | "once" = "sticky") {
+export function buildExpandToolDef() {
 	return tool({
 		description: `Expand a compressed block, restoring its original messages.
 
@@ -97,10 +97,10 @@ the next transform only (the block re-compresses afterwards).`,
 			mode: tool.schema
 				.enum(["sticky", "once"])
 				.optional()
-				.describe(`Expansion mode (default: ${mode})`),
+				.describe("Expansion mode (default: sticky)"),
 		},
 		async execute(args) {
-			return `Expansion queued for block ${args.block} (${args.mode ?? mode}). It will be applied on the next message transform.`;
+			return `Expansion queued for block ${args.block} (${args.mode ?? "sticky"}). It will be applied on the next message transform.`;
 		},
 	});
 }

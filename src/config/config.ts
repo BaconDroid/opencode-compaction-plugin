@@ -5,9 +5,7 @@
 
 import type { EvictionLevel } from "../core/eviction.js";
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 export interface DedupConfig {
 	/** Enable deduplication of repeated tool calls (default: true) */
@@ -153,9 +151,7 @@ export interface LiveCompactionConfig {
 	debug?: boolean;
 }
 
-// ---------------------------------------------------------------------------
 // Defaults
-// ---------------------------------------------------------------------------
 
 export const DEFAULT_CONFIG: Required<
 	Omit<
@@ -221,9 +217,7 @@ export const DEFAULT_CONFIG: Required<
 	},
 };
 
-// ---------------------------------------------------------------------------
 // Merge over defaults
-// ---------------------------------------------------------------------------
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);

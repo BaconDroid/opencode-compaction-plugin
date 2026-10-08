@@ -6,14 +6,10 @@ import {
 } from "../src/core/todo-preserver.ts";
 
 describe("extractTodos()", () => {
-	it("extracts from { data: [...] }", () => {
-		expect(
-			extractTodos({ data: [{ content: "a", status: "pending" }] }),
-		).toHaveLength(1);
-	});
-
-	it("extracts from an array", () => {
-		expect(extractTodos([{ content: "a", status: "pending" }])).toHaveLength(1);
+	it("extracts from { data: [...] } or a bare array", () => {
+		const todo = { content: "a", status: "pending" };
+		expect(extractTodos({ data: [todo] })).toHaveLength(1);
+		expect(extractTodos([todo])).toHaveLength(1);
 	});
 
 	it("returns an empty array for unknown shapes", () => {
