@@ -59,9 +59,9 @@ export function applyDedup(
 
 	for (let mi = 0; mi < messages.length; mi++) {
 		if (protectedIndices?.has(mi)) continue;
-		const msg = messages[mi];
-		for (let pi = 0; pi < msg.parts.length; pi++) {
-			const part = msg.parts[pi];
+		const parts = messages[mi]?.parts ?? [];
+		for (let pi = 0; pi < parts.length; pi++) {
+			const part = parts[pi];
 			if (part.type !== "tool" || !part.tool) continue;
 			if (protectedTools.has(part.tool)) continue;
 			// Only completed tool parts have an output to dedup; error states
@@ -112,9 +112,9 @@ export function findErroredParts(
 	const errored: { msgIdx: number; partIdx: number }[] = [];
 
 	for (let mi = 0; mi < messages.length; mi++) {
-		const msg = messages[mi];
-		for (let pi = 0; pi < msg.parts.length; pi++) {
-			const part = msg.parts[pi];
+		const parts = messages[mi]?.parts ?? [];
+		for (let pi = 0; pi < parts.length; pi++) {
+			const part = parts[pi];
 			if (part.type !== "tool" || !part.state) continue;
 
 			const status = part.state.status;
@@ -251,8 +251,9 @@ export function applyCascadePurge(
 	// Index tool parts by callID.
 	const partsByCall = new Map<string, { msgIdx: number; partIdx: number }>();
 	for (let mi = 0; mi < messages.length; mi++) {
-		for (let pi = 0; pi < messages[mi].parts.length; pi++) {
-			const part = messages[mi].parts[pi];
+		const parts = messages[mi]?.parts ?? [];
+		for (let pi = 0; pi < parts.length; pi++) {
+			const part = parts[pi];
 			if (part.type === "tool" && typeof part.callID === "string") {
 				partsByCall.set(part.callID, { msgIdx: mi, partIdx: pi });
 			}

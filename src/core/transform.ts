@@ -58,7 +58,7 @@ export async function applyTransform(
 	// 2. Trim tool outputs with protection checks.
 	for (let mi = 0; mi < messages.length; mi++) {
 		if (recentIndices.has(mi) || pinnedIndices.has(mi)) continue;
-		for (const part of messages[mi].parts) {
+		for (const part of messages[mi].parts ?? []) {
 			if (
 				part.type !== "tool" ||
 				!part.state ||
