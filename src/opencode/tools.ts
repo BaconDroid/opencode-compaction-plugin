@@ -55,12 +55,14 @@ Message indices are 0-based. Use the message order visible in the conversation.`
 				),
 			start: tool.schema
 				.number()
+				.int()
 				.optional()
 				.describe(
 					"Legacy start message index (inclusive, 0-based). Omit to auto-select the range.",
 				),
 			end: tool.schema
 				.number()
+				.int()
 				.optional()
 				.describe(
 					"Legacy end message index (inclusive, 0-based). Omit to auto-select the range.",

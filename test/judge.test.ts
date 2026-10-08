@@ -126,6 +126,19 @@ describe("judge command provider", () => {
 		);
 		expect(await judge!.ask("prompt")).toBe("YES");
 	});
+
+	it("sends the prompt as a messages payload", async () => {
+		const echoScript = join(dir, "echo.mjs");
+		writeFileSync(
+			echoScript,
+			`let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{const {messages}=JSON.parse(d);process.stdout.write(messages[0].content)});`,
+		);
+		const judge = resolveJudge(
+			{ provider: "command", command: `"${process.execPath}" "${echoScript}"` },
+			{ logger: recordingLogger().logger },
+		);
+		expect(await judge!.ask("hello judge")).toBe("hello judge");
+	});
 });
 
 describe("E6 integration: semantic constraint validation", () => {

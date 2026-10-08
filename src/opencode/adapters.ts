@@ -224,6 +224,9 @@ function runCommand(
 		child.stdout?.on("data", (chunk) => {
 			stdout += String(chunk);
 		});
+		// Drain stderr: an unconsumed pipe buffer would block the child (and
+		// trip the timeout) even when stdout is valid.
+		child.stderr?.resume();
 		child.on("error", (error) => finish(() => reject(error)));
 		child.on("close", (code) => {
 			if (code !== 0) {
