@@ -68,6 +68,25 @@ export class CompressionStore extends KeyedQueue<CompressRequest> {
 // Compression application
 // ---------------------------------------------------------------------------
 
+/** All tool callIDs present in the messages. */
+export function presentCallIds(messages: Message[]): Set<string> {
+	const present = new Set<string>();
+	for (const msg of messages) {
+		for (const part of msg.parts ?? []) {
+			if (typeof part.callID === "string") present.add(part.callID);
+		}
+	}
+	return present;
+}
+
+/** Whether a request carrying `callID` belongs to the current message batch. */
+export function belongsToBatch(
+	callID: string | undefined,
+	present: Set<string>,
+): boolean {
+	return !callID || present.has(callID);
+}
+
 /**
  * Split compression requests into those that belong to the given message array
  * and those that must be deferred.
@@ -82,12 +101,7 @@ export function selectCompressions(
 	messages: Message[],
 	requests: CompressRequest[],
 ): { applicable: CompressRequest[]; deferred: CompressRequest[] } {
-	const present = new Set<string>();
-	for (const msg of messages) {
-		for (const part of msg.parts ?? []) {
-			if (typeof part.callID === "string") present.add(part.callID);
-		}
-	}
+	const present = presentCallIds(messages);
 
 	const applicable: CompressRequest[] = [];
 	const deferred: CompressRequest[] = [];

@@ -984,10 +984,16 @@ describe("LiveCompactionPlugin", () => {
 					},
 				],
 			});
-			const messages = [
-				block("a", "b0", "[b0]\n\nfirst"),
-				block("b", "b1", "[b1]\n\nsecond"),
-			];
+			// The squash tool call must be part of the conversation for the
+			// request to be scoped to it.
+			const first = block("a", "b0", "[b0]\n\nfirst");
+			first.parts.push({
+				type: "tool",
+				tool: "squash",
+				callID: "c-sq",
+				state: { output: "ok" },
+			} as never);
+			const messages = [first, block("b", "b1", "[b1]\n\nsecond")];
 			await transform(hooks, messages);
 			expect(messages).toHaveLength(1);
 			expect(messages[0].parts[0].text).toContain("combined");
@@ -1026,6 +1032,103 @@ describe("LiveCompactionPlugin", () => {
 			await transform(hooks, own);
 			expect(own).toHaveLength(2); // 3 - 2 + 1 = 2
 			expect((own[0].parts[0] as any).text).toContain("sumA");
+		});
+
+		it("does not apply a squash to a different session's messages", async () => {
+			const hooks = await getHooks();
+			await afterTool(hooks, "squash", "sess-S", "c-S", {
+				from: "b0",
+				to: "b1",
+				topic: "M",
+				summary: "sumS",
+			});
+			const block = (id: string, label: string, body: string) => ({
+				info: { role: "assistant" },
+				parts: [
+					{
+						type: "text",
+						text: `<compressed-block id="${id}" label="${label}">${body}</compressed-block>`,
+					},
+				],
+			});
+
+			// Other conversation (no c-S): untouched.
+			const other = [
+				block("a", "b0", "[b0]\n\nfirst"),
+				block("b", "b1", "[b1]\n\nsecond"),
+			];
+			await transform(hooks, other);
+			expect(other).toHaveLength(2);
+
+			// Owning conversation (contains c-S): merged.
+			const own = [
+				block("a", "b0", "[b0]\n\nfirst"),
+				block("b", "b1", "[b1]\n\nsecond"),
+			];
+			own[0].parts.push({
+				type: "tool",
+				tool: "squash",
+				callID: "c-S",
+				state: { output: "ok" },
+			} as never);
+			await transform(hooks, own);
+			expect(own).toHaveLength(1);
+			expect(own[0].parts[0].text).toContain("sumS");
+		});
+
+		it("does not apply an expand to a different session's messages", async () => {
+			const hooks = await LiveCompactionPlugin(mockCtx as any, {
+				compress: { reversible: true },
+			} as any);
+			// Empty callID keeps the compression applicable (backward compat).
+			await afterTool(hooks, "compress", "sess-E", "", {
+				topic: "T",
+				start: 0,
+				end: 1,
+				summary: "S",
+			});
+			const own = [
+				{
+					info: { role: "user", timestamp: 1 },
+					parts: [{ type: "text", text: "orig1" }],
+				},
+				{ info: { role: "assistant" }, parts: [{ type: "text", text: "orig2" }] },
+				{
+					info: { role: "user" },
+					parts: [
+						{ type: "text", text: "keep" },
+						{
+							type: "tool",
+							tool: "expand",
+							callID: "c-exp",
+							state: { output: "ok" },
+						},
+					],
+				},
+			];
+			await transform(hooks, own); // sidecar records id "u:1"
+			expect(own).toHaveLength(2);
+
+			await afterTool(hooks, "expand", "sess-E", "c-exp", { block: "b0" });
+
+			// Other conversation with a colliding block id but no c-exp.
+			const other = [
+				{
+					info: { role: "assistant" },
+					parts: [
+						{
+							type: "text",
+							text: '<compressed-block id="u:1" label="b0">[b0]\n\nother</compressed-block>',
+						},
+					],
+				},
+			];
+			await transform(hooks, other);
+			expect(other).toHaveLength(1);
+
+			// Owning conversation: expanded.
+			await transform(hooks, own);
+			expect(own).toHaveLength(3);
 		});
 
 		it("defers a compression requested far below the compaction threshold", async () => {
@@ -1129,7 +1232,18 @@ describe("LiveCompactionPlugin", () => {
 					parts: [{ type: "text", text: "orig1" }],
 				},
 				{ info: { role: "assistant" }, parts: [{ type: "text", text: "orig2" }] },
-				{ info: { role: "user" }, parts: [{ type: "text", text: "keep" }] },
+				{
+					info: { role: "user" },
+					parts: [
+						{ type: "text", text: "keep" },
+						{
+							type: "tool",
+							tool: "expand",
+							callID: "c-expand",
+							state: { output: "ok" },
+						},
+					],
+				},
 			];
 			await transform(hooks, messages);
 			expect(messages).toHaveLength(2);
