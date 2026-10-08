@@ -113,6 +113,16 @@ describe("ExpandStore", () => {
 		expect(second).toHaveLength(1);
 		expect(second[0].block).toBe("b0");
 	});
+
+	it("dedupes by block and prunes unmatched sticky requests", () => {
+		const store = new ExpandStore();
+		store.queue("s", { block: "b0", mode: "sticky", timestamp: 1 });
+		store.queue("s", { block: "b0", mode: "sticky", timestamp: 2 });
+		expect(store.drain("s")).toHaveLength(1); // one per block
+		// The block no longer resolves: the retained sticky request is dropped.
+		store.prune("s", ["b0"]);
+		expect(store.drain("s")).toHaveLength(0);
+	});
 });
 
 describe("applyExpansions()", () => {

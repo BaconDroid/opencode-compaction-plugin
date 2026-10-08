@@ -85,10 +85,13 @@ export async function applyTransform(
 
 	// 4. Purge errored tool inputs (older than purgeErrors.turns).
 	if (config.purgeErrors?.enabled) {
-		const purgeProtected = getRecentTurnIndices(
-			messages,
-			config.purgeErrors.turns ?? 4,
-		);
+		const purgeTurns = config.purgeErrors.turns ?? 4;
+		// Reuse the recent-turn set when the windows coincide (default: both 4);
+		// trim/dedup do not change the message count, so it is still valid.
+		const purgeProtected =
+			deps.turnProtectionEnabled && purgeTurns === deps.protectedTurns
+				? new Set(recentIndices)
+				: getRecentTurnIndices(messages, purgeTurns);
 		for (const index of pinnedIndices) purgeProtected.add(index);
 		const purgedCallIds = new Set<string>();
 		const purged = applyPurgeErrors(

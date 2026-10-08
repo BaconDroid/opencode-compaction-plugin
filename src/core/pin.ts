@@ -9,11 +9,19 @@
 import { partsText } from "./messages.js";
 import type { Message } from "../types.js";
 
+// Memoized by pattern-array identity: the config array is stable, so the
+// needle list is computed once instead of per message.
+const needlesCache = new WeakMap<string[], string[]>();
+
 function needlesFor(patterns: string[]): string[] {
-	return patterns
+	const cached = needlesCache.get(patterns);
+	if (cached) return cached;
+	const needles = patterns
 		.filter((pattern): pattern is string => typeof pattern === "string")
 		.map((pattern) => pattern.trim().toLowerCase())
 		.filter(Boolean);
+	needlesCache.set(patterns, needles);
+	return needles;
 }
 
 /** True when a message's text matches any pinning pattern. */

@@ -515,7 +515,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			await applyTransform(output.messages, {
 				config,
 				logger,
-				sessionIDs: sessionTrackers.keys(),
 				compressions,
 				squashes,
 				expansions,

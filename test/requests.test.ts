@@ -69,7 +69,6 @@ describe("applyPendingRequests() request scoping", () => {
 		applyPendingRequests(messages as never, {
 			config: mergeConfig({}),
 			logger: recordingLogger().logger,
-			sessionIDs: ["s"],
 			compressions,
 			squashes,
 			expansions,

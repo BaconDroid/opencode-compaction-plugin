@@ -16,6 +16,11 @@ export class KeyedQueue<T> {
 		queue.push(item);
 	}
 
+	/** Session ids with a non-empty queue. */
+	sessions(): Iterable<string> {
+		return this.queues.keys();
+	}
+
 	/** Remove and return the queue for a session. */
 	protected take(sessionID: string): T[] {
 		const queue = this.queues.get(sessionID) ?? [];

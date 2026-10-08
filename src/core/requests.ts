@@ -44,8 +44,6 @@ function requeueDeferred<T extends { timestamp: number }>(
 export interface RequestDeps {
 	config: ResolvedConfig;
 	logger: Logger;
-	/** Sessions with activity (used to route per-session requests). */
-	sessionIDs: Iterable<string>;
 	compressions: CompressionStore;
 	squashes: SquashStore;
 	expansions: ExpansionSidecar;
@@ -60,12 +58,18 @@ export function applyPendingRequests(
 		deps;
 
 	// Requests are scoped to their originating conversation by callID. The set
-	// of callIDs must be recomputed per stage because earlier stages
-	// (compressions) mutate `messages`.
+	// of callIDs must be recomputed after compressions, which mutate `messages`.
 	const reversible = config.compress?.reversible ?? false;
 
-	for (const sid of deps.sessionIDs) {
-		// Compressions.
+	// Only sessions with a queued request need processing (not every tracked
+	// session), keeping the per-transform cost proportional to pending work.
+	const sessions = new Set<string>();
+	for (const store of [compressions, squashes, expandStore]) {
+		for (const sid of store.sessions()) sessions.add(sid);
+	}
+
+	for (const sid of sessions) {
+		// Compressions (selectCompressions recomputes the present set itself).
 		const requests = compressions.drain(sid);
 		if (requests.length > 0) {
 			const { applicable, deferred } = selectCompressions(messages, requests);
@@ -92,10 +96,14 @@ export function applyPendingRequests(
 			requeueDeferred(compressions, sid, deferred, logger, "compress");
 		}
 
-		// Squash contiguous blocks.
+		// Squash and expand run after compressions; neither changes tool
+		// callIDs, so one present-set scan serves both.
 		const squashRequests = squashes.drain(sid);
+		const expandRequests = expandStore.drain(sid);
+		if (squashRequests.length === 0 && expandRequests.length === 0) continue;
+		const present = presentCallIds(messages);
+
 		if (squashRequests.length > 0) {
-			const present = presentCallIds(messages);
 			const applicable = squashRequests.filter((req) =>
 				belongsToBatch(req.callID, present),
 			);
@@ -133,9 +141,7 @@ export function applyPendingRequests(
 
 		// Expand compressed blocks back to their originals. `drain` retains
 		// sticky requests; deferred one-shot requests are requeued here.
-		const expandRequests = expandStore.drain(sid);
 		if (expandRequests.length > 0) {
-			const present = presentCallIds(messages);
 			const applicable = expandRequests.filter((req) =>
 				belongsToBatch(req.callID, present),
 			);
@@ -151,6 +157,9 @@ export function applyPendingRequests(
 			if (unmatched.length > 0) {
 				logger.info("expand unmatched", { sessionID: sid, blocks: unmatched });
 			}
+			// Drop retained sticky requests for blocks that no longer exist, so
+			// they do not accumulate/re-log every transform.
+			expandStore.prune(sid, unmatched);
 			requeueDeferred(
 				expandStore,
 				sid,

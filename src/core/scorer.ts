@@ -66,11 +66,15 @@ function collectTexts(messages: BlockMessage[], maxSamples: number): string[] {
 	return texts;
 }
 
+/** Cross-transform score cache, one per scorer instance (bounded). */
+const scoreCache = new WeakMap<Scorer, Map<string, number>>();
+const MAX_SCORE_CACHE = 1000;
+
 /**
  * Build a synchronous token estimator calibrated by the scorer. Each distinct
- * text is scored once; unresolved texts and tool outputs keep the heuristic.
- * Falls back to `estimateTokens` when there is nothing to score or every score
- * is unusable.
+ * text is scored once and the result is cached across transforms; unresolved
+ * texts and tool outputs keep the heuristic. Falls back to `estimateTokens`
+ * when there is nothing to score or every score is unusable.
  */
 export async function buildScorerEstimator(
 	scorer: Scorer,
@@ -80,14 +84,34 @@ export async function buildScorerEstimator(
 	const texts = collectTexts(messages, maxSamples);
 	if (texts.length === 0) return estimateTokens;
 
-	const values = await scoreAll(scorer, texts, SCORER_CONCURRENCY);
-	const scores = new Map<string, number>();
-	texts.forEach((text, index) => {
-		const value = values[index];
-		if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
-			scores.set(text, value);
+	let cache = scoreCache.get(scorer);
+	if (!cache) {
+		cache = new Map();
+		scoreCache.set(scorer, cache);
+	}
+
+	const missing = texts.filter((text) => !cache.has(text));
+	if (missing.length > 0) {
+		const values = await scoreAll(scorer, missing, SCORER_CONCURRENCY);
+		missing.forEach((text, index) => {
+			const value = values[index];
+			if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+				cache!.set(text, value);
+			}
+		});
+		// Bound the cache, dropping the oldest inserted texts.
+		while (cache.size > MAX_SCORE_CACHE) {
+			const oldest = cache.keys().next().value;
+			if (oldest === undefined) break;
+			cache.delete(oldest);
 		}
-	});
+	}
+
+	const scores = new Map<string, number>();
+	for (const text of texts) {
+		const value = cache.get(text);
+		if (value !== undefined) scores.set(text, value);
+	}
 	if (scores.size === 0) return estimateTokens;
 
 	return (msgs) => estimateTokens(msgs, (text) => scores.get(text));
