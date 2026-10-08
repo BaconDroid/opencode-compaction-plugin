@@ -46,6 +46,7 @@ const DEFAULT_LEVELS: EvictionLevel[] = [
 ];
 
 const BULK_OUTPUT_LIMIT = 200;
+const BULK_OUTPUT_MARKER = "\n... [evicted bulk output]";
 const EPISODE_MARKER = "[evicted episode]";
 const REASONING_MARKER = "[evicted reasoning]";
 const INTERMEDIATE_MARKER = "[evicted intermediate]";
@@ -85,38 +86,45 @@ export function estimateTokens(
 	return Math.ceil(chars / 4) + tokens;
 }
 
-function evictReasoning(message: BlockMessage, result: EvictionResult): void {
+/** Returns true when something was evicted (so the budget can be re-checked). */
+function evictReasoning(message: BlockMessage, result: EvictionResult): boolean {
+	let changed = false;
 	for (const part of message.parts ?? []) {
 		if (
 			(part.type === "reasoning" || part.type === "thinking") &&
 			typeof part.text === "string" &&
-			part.text.length > 0
+			part.text.length > 0 &&
+			part.text !== REASONING_MARKER
 		) {
 			part.text = REASONING_MARKER;
 			result.removed++;
 			result.evictedIds.push(blockId(message));
+			changed = true;
 		}
 	}
+	return changed;
 }
 
-function evictBulkOutput(message: BlockMessage, result: EvictionResult): void {
+function evictBulkOutput(message: BlockMessage, result: EvictionResult): boolean {
+	let changed = false;
 	for (const part of message.parts ?? []) {
 		const state = (part as { state?: { output?: unknown } }).state;
 		if (
 			part.type === "tool" &&
 			state &&
 			typeof state.output === "string" &&
-			state.output.length > BULK_OUTPUT_LIMIT
+			state.output.length > BULK_OUTPUT_LIMIT &&
+			!state.output.endsWith(BULK_OUTPUT_MARKER)
 		) {
-			state.output =
-				state.output.slice(-BULK_OUTPUT_LIMIT) +
-				"\n... [evicted bulk output]";
+			state.output = state.output.slice(-BULK_OUTPUT_LIMIT) + BULK_OUTPUT_MARKER;
 			result.removed++;
 			result.evictedIds.push(
 				typeof part.callID === "string" ? `r:${part.callID}` : blockId(message),
 			);
+			changed = true;
 		}
 	}
+	return changed;
 }
 
 function evictIntermediate(
@@ -124,20 +132,24 @@ function evictIntermediate(
 	result: EvictionResult,
 	lastAssistantIndex: number,
 	index: number,
-): void {
+): boolean {
 	// Keep the most recent assistant message intact.
-	if (index >= lastAssistantIndex) return;
+	if (index >= lastAssistantIndex) return false;
+	let changed = false;
 	for (const part of message.parts ?? []) {
 		if (
 			part.type === "text" &&
 			typeof part.text === "string" &&
-			part.text.length > 0
+			part.text.length > 0 &&
+			part.text !== INTERMEDIATE_MARKER
 		) {
 			part.text = INTERMEDIATE_MARKER;
 			result.removed++;
 			result.evictedIds.push(blockId(message));
+			changed = true;
 		}
 	}
+	return changed;
 }
 
 function evictEpisode(message: BlockMessage, result: EvictionResult): boolean {
@@ -186,23 +198,24 @@ export function applyEviction(
 		if (level === "episode") {
 			// Oldest assistant tool episodes first.
 			for (let i = 0; i < messages.length; i++) {
-				if (budgetReached()) break;
 				if (isProtected(i)) continue;
-				evictEpisode(messages[i], result);
+				// Only re-estimate the budget after an actual eviction.
+				if (evictEpisode(messages[i], result) && budgetReached()) break;
 			}
 			continue;
 		}
 
 		for (let i = 0; i < messages.length; i++) {
-			if (budgetReached()) break;
 			if (isProtected(i)) continue;
+			let changed = false;
 			if (level === "reasoning") {
-				evictReasoning(messages[i], result);
+				changed = evictReasoning(messages[i], result);
 			} else if (level === "bulk_output") {
-				evictBulkOutput(messages[i], result);
+				changed = evictBulkOutput(messages[i], result);
 			} else if (level === "intermediate") {
-				evictIntermediate(messages[i], result, lastAssistantIndex, i);
+				changed = evictIntermediate(messages[i], result, lastAssistantIndex, i);
 			}
+			if (changed && budgetReached()) break;
 		}
 	}
 
