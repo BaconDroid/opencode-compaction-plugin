@@ -74,9 +74,6 @@ export interface PluginInput {
 				query?: { directory?: string };
 			}) => Promise<unknown>;
 		};
-		provider?: {
-			list?: (input?: Record<string, unknown>) => Promise<unknown>;
-		};
 	};
 	project: { id: string; name: string };
 	directory: string;

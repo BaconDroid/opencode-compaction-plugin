@@ -1,7 +1,7 @@
 /**
  * The `experimental.chat.messages.transform` pipeline: applies the queued
- * compress/expand requests, then dedup, error purge and (opt-in) graduated
- * eviction — before OpenCode's own truncation.
+ * compress requests, then dedup, error purge and graduated eviction — before
+ * OpenCode's own truncation.
  */
 
 import { getRecentTurnIndices } from "./messages.js";

@@ -52,7 +52,7 @@ export class CompressionStore extends KeyedQueue<CompressRequest> {
 // Compression application
 
 /** All tool callIDs present in the messages. */
-export function presentCallIds(messages: Message[]): Set<string> {
+function presentCallIds(messages: Message[]): Set<string> {
 	const present = new Set<string>();
 	for (const msg of messages) {
 		for (const part of msg.parts ?? []) {
