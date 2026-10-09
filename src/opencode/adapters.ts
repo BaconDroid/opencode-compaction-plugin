@@ -268,7 +268,7 @@ function parseJsonArray(raw: string, label: string): unknown[] {
  * mis-sized array throws; a non-numeric entry yields `NaN` so the estimator
  * keeps the heuristic for that text.
  */
-export function parseTokenEstimates(raw: string, expected: number): number[] {
+function parseTokenEstimates(raw: string, expected: number): number[] {
 	const parsed = parseJsonArray(raw, "scorer");
 	if (parsed.length !== expected) {
 		throw new Error(

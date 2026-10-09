@@ -9,7 +9,7 @@
  * - Error purge (whole-attempt + cascade)
  * - Auto-continue control (skips the compaction agent and duplicates)
  * - Hook error isolation
- * - Model-driven compress/expand/inspect tools
+ * - Model-driven compress tool
  * - Global + project + plugin-option config
  *
  * Usage:
@@ -17,8 +17,8 @@
  *   2. npm: add "opencode-compaction-plugin" to `plugin` array in opencode.json
  *
  * This file is the wiring only; the logic lives in focused modules:
- *   transform.ts · prompt.ts · compress.ts · expand.ts · strategies.ts ·
- *   eviction.ts · config.ts · …
+ *   transform.ts · prompt.ts · compress.ts · strategies.ts · eviction.ts ·
+ *   config.ts · …
  */
 
 import {

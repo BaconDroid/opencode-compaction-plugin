@@ -20,17 +20,6 @@ export function partsText(parts: unknown): string {
 		.trim();
 }
 
-/** Whether a message has any non-empty text part. */
-export function hasText(parts: unknown): boolean {
-	if (!Array.isArray(parts)) return false;
-	return parts.some(
-		(part) =>
-			part?.type === "text" &&
-			typeof part.text === "string" &&
-			part.text.trim().length > 0,
-	);
-}
-
 /** A tool part's input: `args`, else `state.input` (may be a JSON string). */
 export function partInput(part: MessagePart): unknown {
 	return (part as Record<string, unknown>).args ?? part.state?.input;

@@ -28,12 +28,6 @@ export class KeyedQueue<T> {
 		return queue;
 	}
 
-	/** Store the remaining items for a session (deleting when empty). */
-	protected retain(sessionID: string, items: T[]): void {
-		if (items.length > 0) this.queues.set(sessionID, items);
-		else this.queues.delete(sessionID);
-	}
-
 	clear(sessionID: string): void {
 		this.queues.delete(sessionID);
 	}
