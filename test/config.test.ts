@@ -23,7 +23,6 @@ describe("mergeConfig()", () => {
 		});
 		expect(cfg.compress).toEqual({
 			protectedTurns: 3,
-			reversible: false,
 		});
 		expect(cfg.eviction).toMatchObject({
 			enabled: true,
@@ -97,7 +96,7 @@ describe("mergeConfig()", () => {
 			promptMode: "weird",
 			dedup: { enabled: "nope" },
 			purgeErrors: { cascade: "true", wholeAttempt: 0, turns: 3.9 },
-			compress: { reversible: "no", protectedTurns: -2 },
+			compress: { protectedTurns: -2 },
 			eviction: { enabled: "y", protectPrologue: null },
 		} as any);
 		expect(cfg.enabled).toBe(true);
@@ -107,7 +106,6 @@ describe("mergeConfig()", () => {
 		expect(cfg.purgeErrors.cascade).toBe(true);
 		expect(cfg.purgeErrors.wholeAttempt).toBe(true);
 		expect(cfg.purgeErrors.turns).toBe(3);
-		expect(cfg.compress.reversible).toBe(false);
 		expect(cfg.compress.protectedTurns).toBe(3);
 		expect(cfg.eviction.enabled).toBe(true);
 		expect(cfg.eviction.protectPrologue).toBe(true);
@@ -189,12 +187,11 @@ describe("mergeConfig()", () => {
 
 	it("overrides compress and eviction settings", () => {
 		const cfg = mergeConfig({
-			compress: { protectedTurns: 5, reversible: false },
+			compress: { protectedTurns: 5 },
 			eviction: { enabled: true, thresholdTokens: 1000, levels: ["episode"] },
 		});
 		expect(cfg.compress).toEqual({
 			protectedTurns: 5,
-			reversible: false,
 		});
 		expect(cfg.eviction).toMatchObject({
 			enabled: true,

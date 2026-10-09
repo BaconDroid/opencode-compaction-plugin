@@ -1,6 +1,6 @@
 # opencode-live-compaction
 
-Enhanced context compaction plugin for [OpenCode](https://opencode.ai) — structured summaries with files-touched manifests, deterministic triggering, multi-scale folding, reversible compression, deduplication, error purging, and graduated eviction.
+Enhanced context compaction plugin for [OpenCode](https://opencode.ai) — structured summaries with files-touched manifests, deterministic triggering, model-driven folding, deduplication, error purging, and graduated eviction.
 
 ## What it does
 
@@ -23,7 +23,6 @@ OpenCode's built-in compaction produces a 7-section summary. This plugin replace
 | **Prompt application** | Replaces the default | Configurable: `replace` (default) or `augment` (keep the default prompt) |
 | **Compress tool** | None | Model-driven **compress** tool (deterministic span selection — no indices needed) |
 | **Block folding** | None | Stable `[bN]` block labels for compressed ranges |
-| **Reversible compression** | None | **expand** (sticky or one-shot) restores the original messages from an in-memory sidecar |
 | **Graduated eviction** | None | LLM-free `reasoning → bulk output → intermediate → episode`, oldest first (never evicts `user` turns) |
 | **Focus** | None | `<latest-user-ask>` block anchored to the current user request |
 
@@ -88,10 +87,9 @@ Records every file operation (read, write, edit, delete) during the session. Pro
 Runs on every message batch sent to the LLM. Applies the following strategies in order:
 
 1. **Pending compressions** — Applies queued `compress` calls (deterministic span selection) as `<compressed-block>` messages with stable `[bN]` labels.
-2. **Expand** — Restores a block's original messages from the in-memory sidecar (`mode: "sticky"` keeps it expanded, `mode: "once"` restores it for one transform).
-3. **Deduplication** — When the same tool is called with the same args multiple times, only the latest output is kept. Earlier duplicates are replaced with a short marker.
-4. **Error purge** — Purges the whole failed attempt (input + output, with a compact error extract) from errored tool calls older than N turns; `cascade` (on by default) extends the purge to calls that depend on a purged call.
-5. **Graduated eviction** — LLM-free eviction (`reasoning → bulk output → intermediate → episode`) once the estimated budget is exceeded; user turns are never evicted.
+2. **Deduplication** — When the same tool is called with the same args multiple times, only the latest output is kept. Earlier duplicates are replaced with a short marker.
+3. **Error purge** — Purges the whole failed attempt (input + output, with a compact error extract) from errored tool calls older than N turns; `cascade` (on by default) extends the purge to calls that depend on a purged call.
+4. **Graduated eviction** — LLM-free eviction (`reasoning → bulk output → intermediate → episode`) once the estimated budget is exceeded; user turns are never evicted.
 
 ### 3. `experimental.session.compacting` — Enhanced prompt
 
@@ -115,7 +113,7 @@ Enables the synthetic "continue" turn after compaction, except for the compactio
 
 ## Compression Tools
 
-The plugin exposes three model-driven tools for proactive context management: `compress` (fold), `expand` (restore, sticky or one-shot) and `inspect` (browse). The model decides when to compress and writes the summaries itself (it has full context).
+The plugin exposes one model-driven tool for proactive context management: `compress` (fold). The model decides when to compress and writes the summary itself (it has full context).
 
 ### `compress`
 
@@ -127,20 +125,7 @@ The plugin exposes three model-driven tools for proactive context management: `c
 | `start` | number *(optional, legacy)* | Explicit start message index (inclusive, 0-based) |
 | `end` | number *(optional, legacy)* | Explicit end message index (inclusive, 0-based) |
 
-When `start`/`end` are omitted, the plugin selects the range **deterministically**: everything after the newest existing compressed block, excluding the last `compress.protectedTurns` user turns. The range is replaced with a `<compressed-block>` carrying a durable `id` and a stable `[bN]` label. The originals are kept in memory when `compress.reversible` is enabled (off by default).
-
-### `expand`
-
-Restores a compressed block's original messages from the in-memory sidecar, referenced by `[bN]` label or durable id. The optional `mode` selects **sticky** (default — stays expanded on later turns) or **one-shot** (restored for one transform, then re-compressed). Applied on the next message transform cycle.
-
-| Parameter | Type | Description |
-|---|---|---|
-| `block` | string | Block `[bN]` label or durable id to expand |
-| `mode` | `"sticky"` \| `"once"` *(optional)* | Expansion mode (default: `sticky`) |
-
-### `inspect`
-
-`inspect` lists the compressed blocks currently held in memory (labels, topics, sizes). It returns its result directly; use `expand` to restore a block.
+When `start`/`end` are omitted, the plugin selects the range **deterministically**: everything after the newest existing compressed block, excluding the last `compress.protectedTurns` user turns. The range is replaced with a `<compressed-block>` carrying a durable `id` and a stable `[bN]` label.
 
 ## Feature reference
 
@@ -159,7 +144,7 @@ Each feature below lists **what** it does, its **config** keys and how it
 | Error purge | `purgeErrors.{enabled,turns,wholeAttempt,cascade}` | `true`, `4`, `true`, `true` |
 | Graduated eviction | `eviction.{enabled,thresholdTokens,levels,protectPrologue}` | `true`, `200000`, reasoning/bulk_output/intermediate/episode, `true` |
 | Auto-continue | — | — |
-| Compression tools | `compress.{protectedTurns,reversible}` | `3`, `false` |
+| Compression tool | `compress.protectedTurns` | `3` |
 | Residual/perplexity scoring (optional) | `adapters.scorer.*` | disabled |
 
 ### Structured compaction prompt
@@ -211,10 +196,9 @@ Each feature below lists **what** it does, its **config** keys and how it
   compaction agent and duplicate triggers (short per-session guard).
 - **Config** — none.
 
-### Compression tools
-- **What** — `compress` (fold), `expand` (restore), `inspect` (browse). See
-  [Compression Tools](#compression-tools).
-- **Config** — `compress.{protectedTurns,reversible}`.
+### Compression tool
+- **What** — `compress` (fold). See [Compression Tools](#compression-tools).
+- **Config** — `compress.protectedTurns`.
 - **Interactions** — applied in the transform before dedup/purge/eviction.
 
 ### Residual/perplexity scoring (optional adapter)
@@ -238,7 +222,7 @@ The `messages.transform` pipeline runs in a fixed order (see
 [How it works](#2-experimentalchatmessagestransform--context-optimization)):
 
 ```
-compress → expand → dedup → purge (+cascade) → eviction
+compress → dedup → purge (+cascade) → eviction
 ```
 
 Override rules:
@@ -294,10 +278,9 @@ Precedence, low to high: **defaults → global file → plugin options → proje
         "cascade": true         // Cascade the purge to calls depending on a purged call
     },
 
-    // Model-driven compression tools
+    // Model-driven compression tool
     "compress": {
-        "protectedTurns": 3,        // Trailing user turns excluded from deterministic selection
-        "reversible": false         // Keep originals in memory for expand
+        "protectedTurns": 3         // Trailing user turns excluded from deterministic selection
     },
 
     // Graduated, LLM-free eviction
@@ -389,7 +372,7 @@ bun run test:coverage
 # (OpenCode loads .ts files directly via Bun)
 ```
 
-Current coverage: **95.4% functions, 98.6% lines** (209 tests).
+Current coverage: **95.1% functions, 98.2% lines** (190 tests).
 
 ## File Structure
 
@@ -402,10 +385,9 @@ src/
   types.ts              — Shared types (messages, hooks, logger)
   core/                 — Domain logic (no OpenCode SDK)
     transform.ts        — messages.transform pipeline
-    requests.ts         — queued compress/expand application
+    requests.ts         — queued compression application
     compress.ts         — compress domain + block rendering
     blocks.ts           — durable block ids + deterministic span selection
-    expand.ts           — reversible sidecar + inspection
     adapters.ts         — optional adapter contract (scorer)
     scorer.ts           — optional scorer-calibrated token estimator
     strategies.ts       — dedup, error purge, cascade purge
@@ -414,7 +396,7 @@ src/
     prompt.ts           — compaction prompt template (11 sections)
     previous-summary.ts — previous summary extraction + sliding state
     files-touched.ts    — file operation tracker + manifest
-    store.ts            — per-session keyed queue shared by the compression stores
+    store.ts            — per-session keyed queue shared by the compression store
   config/
     config.ts           — config types, defaults and merge
     config-loader.ts    — JSON/JSONC file loading
@@ -431,13 +413,11 @@ test/
   strategies.test.ts — Strategy unit tests
   compress.test.ts  — Compress tests
   blocks.test.ts    — Block id and span selection tests
-  expand.test.ts    — Reversible expand tests
   eviction.test.ts  — Graduated eviction tests
   previous-summary.test.ts — Previous summary and sliding-state tests
   scorer.test.ts    — Optional scorer adapter, estimator and eviction integration
   model.test.ts     — Optional opencode-model runner (host/default model, fail-open)
   messages.test.ts  — Message helper tests
-  requests.test.ts  — Queued request scoping tests
   helpers.ts        — Shared test setup + recording logger
 ```
 
@@ -452,8 +432,8 @@ Compatible with [`oh-my-opencode-slim`](https://github.com/alvinunreal/oh-my-ope
 
 - `experimental.session.compacting` — omo-slim only marks the session (it does not touch `output.prompt`/`output.context`), so this plugin's prompt handling is unaffected.
 - `experimental.chat.messages.transform` — omo-slim rewrites user text and image parts; this plugin dedups/purges tool parts and applies compressions. Load omo-slim **before** this plugin so its in-place rewrites run before this plugin's structural compression.
-- `config` — omo-slim manages agents, MCPs and commands; this plugin only ensures permissions for its own tools (`compress`, `expand`, `inspect`) and leaves a global permission string untouched.
-- No shared tool names (omo-slim: `task*`, `waitForUser`, `acpRun`, `webfetch`, `ast_grep_*`, `marketplace_*`; this plugin: `compress`, `expand`, `inspect`).
+- `config` — omo-slim manages agents, MCPs and commands; this plugin only ensures permissions for its own tool (`compress`) and leaves a global permission string untouched.
+- No shared tool names (omo-slim: `task*`, `waitForUser`, `acpRun`, `webfetch`, `ast_grep_*`, `marketplace_*`; this plugin: `compress`).
 - omo-slim does not use `experimental.compaction.autocontinue` and does not mutate `permission`.
 
 Recommended `plugin` order in `opencode.json`:

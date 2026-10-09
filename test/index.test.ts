@@ -560,8 +560,6 @@ describe("LiveCompactionPlugin", () => {
 			expect(opencodeConfig.permission).toEqual({
 				bash: "ask",
 				compress: "allow",
-				expand: "allow",
-				inspect: "allow",
 			});
 		});
 
@@ -573,8 +571,6 @@ describe("LiveCompactionPlugin", () => {
 			await (hooks as any).config(opencodeConfig);
 			expect(opencodeConfig.permission).toEqual({
 				compress: "deny",
-				expand: "allow",
-				inspect: "allow",
 			});
 		});
 
@@ -595,7 +591,6 @@ describe("LiveCompactionPlugin", () => {
 			};
 			await (hooks as any).config(opencodeConfig);
 			expect((opencodeConfig.permission as any).compress).toBe("ask");
-			expect((opencodeConfig.permission as any).expand).toBe("allow");
 		});
 	});
 
@@ -685,61 +680,6 @@ describe("LiveCompactionPlugin", () => {
 			expect((own[0].parts[0] as any).text).toContain("sumA");
 		});
 
-		it("does not apply an expand to a different session's messages", async () => {
-			const hooks = await LiveCompactionPlugin(mockCtx as any, {
-				compress: { reversible: true },
-			} as any);
-			// Empty callID keeps the compression applicable (backward compat).
-			await afterTool(hooks, "compress", "sess-E", "", {
-				topic: "T",
-				start: 0,
-				end: 1,
-				summary: "S",
-			});
-			const own = [
-				{
-					info: { role: "user", timestamp: 1 },
-					parts: [{ type: "text", text: "orig1" }],
-				},
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "orig2" }] },
-				{
-					info: { role: "user" },
-					parts: [
-						{ type: "text", text: "keep" },
-						{
-							type: "tool",
-							tool: "expand",
-							callID: "c-exp",
-							state: { output: "ok" },
-						},
-					],
-				},
-			];
-			await transform(hooks, own); // sidecar records id "u:1"
-			expect(own).toHaveLength(2);
-
-			await afterTool(hooks, "expand", "sess-E", "c-exp", { block: "b0" });
-
-			// Other conversation with a colliding block id but no c-exp.
-			const other = [
-				{
-					info: { role: "assistant" },
-					parts: [
-						{
-							type: "text",
-							text: '<compressed-block id="u:1" label="b0">[b0]\n\nother</compressed-block>',
-						},
-					],
-				},
-			];
-			await transform(hooks, other);
-			expect(other).toHaveLength(1);
-
-			// Owning conversation: expanded.
-			await transform(hooks, own);
-			expect(own).toHaveLength(3);
-		});
-
 		it("applies a queued compression", async () => {
 			const hooks = await LiveCompactionPlugin(mockCtx as any, {});
 
@@ -763,98 +703,6 @@ describe("LiveCompactionPlugin", () => {
 			await transform(hooks, msgs);
 			expect(msgs).toHaveLength(2);
 			expect((msgs[0].parts[0] as any).text).toContain("S");
-		});
-
-		it("restores original messages via expand", async () => {
-			const hooks = await LiveCompactionPlugin(mockCtx as any, {
-				compress: { reversible: true },
-			} as any);
-
-			await afterTool(hooks, "compress", "sess-expand", "", { topic: "T", start: 0, end: 1, summary: "S" });
-
-			const messages = [
-				{
-					info: { role: "user", timestamp: 1 },
-					parts: [{ type: "text", text: "orig1" }],
-				},
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "orig2" }] },
-				{
-					info: { role: "user" },
-					parts: [
-						{ type: "text", text: "keep" },
-						{
-							type: "tool",
-							tool: "expand",
-							callID: "c-expand",
-							state: { output: "ok" },
-						},
-					],
-				},
-			];
-			await transform(hooks, messages);
-			expect(messages).toHaveLength(2);
-			expect(messages[0].parts[0].text).toContain("[b0]");
-
-			await afterTool(hooks, "expand", "sess-expand", "c-expand", { block: "b0" });
-			await transform(hooks, messages);
-			expect(messages).toHaveLength(3);
-			expect(messages[0].parts[0].text).toBe("orig1");
-			expect(messages[1].parts[0].text).toBe("orig2");
-		});
-
-		it("applies a one-shot expand (mode: 'once') only once", async () => {
-			const hooks = await LiveCompactionPlugin(mockCtx as any, {
-				compress: { reversible: true },
-			} as any);
-
-			await afterTool(hooks, "compress", "sess-once", "", {
-				topic: "T",
-				start: 0,
-				end: 1,
-				summary: "S",
-			});
-			const seeded = [
-				{ info: { role: "user", timestamp: 1 }, parts: [{ type: "text", text: "orig1" }] },
-				{ info: { role: "assistant" }, parts: [{ type: "text", text: "orig2" }] },
-			];
-			await transform(hooks, seeded);
-			expect(seeded).toHaveLength(1);
-			const blockText = seeded[0].parts[0].text as string;
-
-			// Rebuild the compressed conversation the way the host would each turn,
-			// carrying the expand tool call that scopes the request to this batch.
-			const rebuild = () => [
-				{
-					info: { role: "assistant" },
-					parts: [
-						{ type: "text", text: blockText },
-						{
-							type: "tool",
-							tool: "expand",
-							callID: "c-once",
-							state: { output: "ok" },
-						},
-					],
-				},
-				{ info: { role: "user" }, parts: [{ type: "text", text: "keep" }] },
-			];
-
-			await afterTool(hooks, "expand", "sess-once", "c-once", {
-				block: "b0",
-				mode: "once",
-			});
-			const first = rebuild();
-			await transform(hooks, first);
-			expect(first.map((m) => (m.parts[0] as any).text)).toEqual([
-				"orig1",
-				"orig2",
-				"keep",
-			]);
-
-			// The one-shot was consumed: the block is left compressed next turn.
-			const second = rebuild();
-			await transform(hooks, second);
-			expect((second[0].parts[0] as any).text).toContain("[b0]");
 		});
 
 		it("drops stale deferred compressions", async () => {

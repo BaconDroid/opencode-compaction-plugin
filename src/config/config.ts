@@ -33,8 +33,6 @@ export interface PurgeErrorsConfig {
 export interface CompressConfig {
 	/** Trailing user turns protected from deterministic span selection (default: 3) */
 	protectedTurns?: number;
-	/** Keep compressed originals in memory for expand (default: false) */
-	reversible?: boolean;
 }
 
 export interface EvictionSettings {
@@ -135,7 +133,6 @@ export const DEFAULT_CONFIG: Required<
 	},
 	compress: {
 		protectedTurns: 3,
-		reversible: false,
 	},
 	eviction: {
 		enabled: true,
@@ -226,10 +223,6 @@ function normalizeConfig(cfg: ResolvedConfig): ResolvedConfig {
 	cfg.purgeErrors.cascade = booleanOr(
 		cfg.purgeErrors.cascade,
 		DEFAULT_CONFIG.purgeErrors.cascade,
-	);
-	cfg.compress.reversible = booleanOr(
-		cfg.compress.reversible,
-		DEFAULT_CONFIG.compress.reversible,
 	);
 	cfg.eviction.enabled = booleanOr(
 		cfg.eviction.enabled,

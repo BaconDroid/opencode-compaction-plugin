@@ -26,17 +26,9 @@ import { FilesTouchedTracker } from "./core/files-touched.js";
 import { loadConfig } from "./config/config-loader.js";
 import type { LiveCompactionConfig } from "./config/config.js";
 import { CompressionStore } from "./core/compress.js";
-import {
-	ExpansionSidecar,
-	ExpandStore,
-} from "./core/expand.js";
 import { resolveScorer } from "./opencode/adapters.js";
 import { createModelRunner } from "./opencode/model.js";
-import {
-	buildCompressToolDef,
-	buildExpandToolDef,
-	buildInspectToolDef,
-} from "./opencode/tools.js";
+import { buildCompressToolDef } from "./opencode/tools.js";
 import {
 	extractPreviousSummary,
 	type SlidingState,
@@ -47,8 +39,6 @@ import type { Hooks, Logger, Plugin, PluginInput } from "./types.js";
 /** Model-driven tools registered by this plugin (used for permission wiring). */
 const PLUGIN_TOOL_NAMES = [
 	"compress",
-	"expand",
-	"inspect",
 ] as const;
 
 /**
@@ -153,8 +143,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 	// Per-instance state.
 	const sessionTrackers = new Map<string, FilesTouchedTracker>();
 	const compressions = new CompressionStore();
-	const expansions = new ExpansionSidecar();
-	const expandStore = new ExpandStore();
 	const slidingState = new Map<string, SlidingState>();
 	const autocontinue = new AutocontinueGuard();
 
@@ -222,21 +210,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 							: "auto",
 				});
 			}
-
-			if (tool === "expand" && typeof a.block === "string") {
-				const mode = a.mode === "once" ? "once" : "sticky";
-				expandStore.queue(sessionID, {
-					block: a.block,
-					mode,
-					callID: input.callID,
-					timestamp: Date.now(),
-				});
-				logger.info("expand queued", {
-					sessionID,
-					block: a.block,
-					mode,
-				});
-			}
 		},
 
 		"experimental.session.compacting": async (input, output) => {
@@ -295,8 +268,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 				config,
 				logger,
 				compressions,
-				expansions,
-				expandStore,
 				scorer,
 				scorerMaxSamples: config.adapters?.scorer?.maxSamples,
 			});
@@ -340,8 +311,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 			if (event.type === "session.deleted" && sessionID) {
 				sessionTrackers.delete(sessionID);
 				compressions.clear(sessionID);
-				expansions.clear(sessionID);
-				expandStore.clear(sessionID);
 				slidingState.delete(sessionID);
 				autocontinue.clear(sessionID);
 			}
@@ -350,8 +319,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		dispose: async () => {
 			sessionTrackers.clear();
 			compressions.clearAll();
-			expansions.clearAll();
-			expandStore.clearAll();
 			slidingState.clear();
 			autocontinue.clearAll();
 		},
@@ -379,8 +346,6 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 		// The `tool` hook maps a tool name to its definition.
 		tool: {
 			compress: buildCompressToolDef(),
-			expand: buildExpandToolDef(),
-			inspect: buildInspectToolDef(expansions),
 		},
 	};
 

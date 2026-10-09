@@ -62,14 +62,6 @@ export function presentCallIds(messages: Message[]): Set<string> {
 	return present;
 }
 
-/** Whether a request carrying `callID` belongs to the current message batch. */
-export function belongsToBatch(
-	callID: string | undefined,
-	present: Set<string>,
-): boolean {
-	return !callID || present.has(callID);
-}
-
 /**
  * Split compression requests into those that belong to the given message array
  * and those that must be deferred.
@@ -103,13 +95,6 @@ export function selectCompressions(
 export interface ApplyCompressionOptions {
 	/** Trailing user turns protected from deterministic span selection. */
 	protectedTurns?: number;
-	/** Called before a range is replaced, with the original messages. */
-	record?: (info: {
-		id: string;
-		label: string;
-		topic: string;
-		original: Message[];
-	}) => void;
 }
 
 /**
@@ -169,16 +154,6 @@ export function applyCompressions(
 
 		const id = blockId(messages[start]);
 		const label = `b${blockCount}`;
-
-		// Capture the originals before they are replaced (for expand).
-		if (opts.record) {
-			opts.record({
-				id,
-				label,
-				topic: req.topic,
-				original: messages.slice(start, end + 1),
-			});
-		}
 
 		const scaleAttr = req.scale ? ` scale="${escapeAttr(req.scale)}"` : "";
 		const summaryMessage: Message = {

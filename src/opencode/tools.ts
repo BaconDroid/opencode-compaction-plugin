@@ -1,10 +1,9 @@
 /**
  * Model-driven tool definitions (the OpenCode SDK boundary). The domain logic
- * they feed lives in `../core/compress.ts` and `../core/expand.ts`.
+ * lives in `../core/compress.ts`.
  */
 
 import { tool } from "@opencode-ai/plugin";
-import { renderInspector, type ExpansionSidecar } from "../core/expand.js";
 
 /**
  * Build the `compress` tool definition: replace a range of messages with a
@@ -60,49 +59,6 @@ Message indices are 0-based. Use the message order visible in the conversation.`
 					? `messages ${args.start}-${args.end}`
 					: "an auto-selected range";
 			return `Compression queued for ${range} (${args.topic}). It will be applied on the next message transform.`;
-		},
-	});
-}
-
-/**
- * Build the `expand` tool: restore a compressed block from the sidecar. The
- * `mode` argument selects a sticky expansion (kept on later transforms) or a
- * one-shot restore (the block re-compresses afterwards).
- */
-export function buildExpandToolDef() {
-	return tool({
-		description: `Expand a compressed block, restoring its original messages.
-
-Reference the block by its [bN] label (or durable id). Set \`mode\` to "sticky"
-(default) to keep the block expanded on later turns, or "once" to restore it for
-the next transform only (the block re-compresses afterwards).`,
-		args: {
-			block: tool.schema
-				.string()
-				.describe("Block label (e.g. 'b0') or durable id to expand"),
-			mode: tool.schema
-				.enum(["sticky", "once"])
-				.optional()
-				.describe("Expansion mode (default: sticky)"),
-		},
-		async execute(args) {
-			return `Expansion queued for block ${args.block} (${args.mode ?? "sticky"}). It will be applied on the next message transform.`;
-		},
-	});
-}
-
-/**
- * Build the `inspect` tool: list the compressed blocks currently held in the
- * in-memory sidecar.
- */
-export function buildInspectToolDef(sidecar: ExpansionSidecar) {
-	return tool({
-		description: `List the compressed blocks currently held in memory.
-
-Use this to see which [bN] blocks exist and can be expanded.`,
-		args: {},
-		async execute(_args, context) {
-			return renderInspector(sidecar, context?.sessionID);
 		},
 	});
 }

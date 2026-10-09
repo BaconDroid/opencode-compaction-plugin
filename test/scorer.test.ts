@@ -10,7 +10,6 @@ import { applyEviction, estimateTokens } from "../src/core/eviction.ts";
 import { applyTransform } from "../src/core/transform.ts";
 import { mergeConfig } from "../src/config/config.ts";
 import { CompressionStore } from "../src/core/compress.ts";
-import { ExpansionSidecar, ExpandStore } from "../src/core/expand.ts";
 import { parseScore, resolveScorer } from "../src/opencode/adapters.ts";
 import { LiveCompactionPlugin } from "../src/index.ts";
 import { makeTmpSetup, recordingLogger } from "./helpers.ts";
@@ -302,8 +301,6 @@ describe("scorer budget gate (transform)", () => {
 		config,
 		logger: recordingLogger().logger,
 		compressions: new CompressionStore(),
-		expansions: new ExpansionSidecar(),
-		expandStore: new ExpandStore(),
 	});
 
 	it("skips the scorer when the context is far below the budget", async () => {
