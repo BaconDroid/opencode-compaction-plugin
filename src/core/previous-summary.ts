@@ -2,9 +2,9 @@
  * Extract the previous compaction summary from a session's messages.
  *
  * OpenCode marks a compaction result as an assistant message with
- * `info.summary === true`. When the plugin replaces the default compaction
- * prompt, it must carry that summary forward itself to keep continuity across
- * repeated compactions.
+ * `info.summary === true`. In `replace` prompt mode the plugin discards the
+ * default compaction prompt, so it must carry that summary forward itself to
+ * keep continuity across repeated compactions.
  *
  * A small sliding state avoids re-emitting the same summary and provides a
  * fallback when the newest messages no longer contain the summary (for example

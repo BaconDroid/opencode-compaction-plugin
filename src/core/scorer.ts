@@ -123,14 +123,15 @@ export async function buildScorerEstimator(
 		cache = new Map();
 		scoreCache.set(scorer, cache);
 	}
+	const store = cache;
 
-	const missing = texts.filter((text) => !cache.has(text));
+	const missing = texts.filter((text) => !store.has(text));
 	if (missing.length > 0) {
 		const values = await scoreAll(scorer, missing, SCORER_CONCURRENCY);
 		missing.forEach((text, index) => {
 			const value = values[index];
 			if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
-				cache!.set(text, value);
+				store.set(text, value);
 			}
 		});
 	}
@@ -139,15 +140,15 @@ export async function buildScorerEstimator(
 	// whole transform even as the cache is bounded below.
 	const scores = new Map<string, number>();
 	for (const text of texts) {
-		const value = cache.get(text);
+		const value = store.get(text);
 		if (value !== undefined) scores.set(text, value);
 	}
 
 	// Bound the cache, dropping the oldest inserted texts.
-	while (cache.size > MAX_SCORE_CACHE) {
-		const oldest = cache.keys().next().value;
+	while (store.size > MAX_SCORE_CACHE) {
+		const oldest = store.keys().next().value;
 		if (oldest === undefined) break;
-		cache.delete(oldest);
+		store.delete(oldest);
 	}
 
 	if (scores.size === 0) return heuristicEstimator();

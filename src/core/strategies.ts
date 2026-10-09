@@ -79,8 +79,12 @@ export function applyDedup(
 
 			const key = toolCallKey(part.tool, partInput(part));
 
-			if (!seen.has(key)) seen.set(key, []);
-			seen.get(key)!.push({ msgIdx: mi, partIdx: pi });
+			let positions = seen.get(key);
+			if (!positions) {
+				positions = [];
+				seen.set(key, positions);
+			}
+			positions.push({ msgIdx: mi, partIdx: pi });
 		}
 	}
 
