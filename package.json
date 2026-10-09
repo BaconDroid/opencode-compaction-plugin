@@ -25,6 +25,13 @@
     "type": "git",
     "url": "git+https://github.com/BaconDroid/opencode-compaction-plugin.git"
   },
+  "homepage": "https://github.com/BaconDroid/opencode-compaction-plugin#readme",
+  "bugs": {
+    "url": "https://github.com/BaconDroid/opencode-compaction-plugin/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "@opencode-ai/plugin": "^1.18.0"
   },
