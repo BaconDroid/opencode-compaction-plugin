@@ -372,7 +372,7 @@ bun run test:coverage
 # (OpenCode loads .ts files directly via Bun)
 ```
 
-Current coverage: **95.1% functions, 98.2% lines** (193 tests).
+Current coverage: **96.2% functions, 99.3% lines** (192 tests).
 
 ## File Structure
 
