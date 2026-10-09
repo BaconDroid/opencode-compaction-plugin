@@ -21,12 +21,16 @@ import type { Scorer } from "./adapters.js";
 import type { Message } from "../types.js";
 
 export interface TransformDeps extends RequestDeps {
-	/** Optional residual/perplexity scorer (E5); absent → heuristic estimate. */
+	/** Optional residual/perplexity scorer; absent → heuristic estimate. */
 	scorer?: Scorer;
 	/** Max distinct texts scored per transform when `scorer` is set. */
 	scorerMaxSamples?: number;
 }
 
+/**
+ * Run the transform pipeline in place: compress, then dedup, error purge and
+ * graduated eviction.
+ */
 export async function applyTransform(
 	messages: Message[],
 	deps: TransformDeps,
@@ -67,7 +71,7 @@ export async function applyTransform(
 	// Runs last: content-addressed, never evicts user turns or the prologue.
 	if (config.eviction?.enabled) {
 		const thresholdTokens = config.eviction.thresholdTokens ?? 200000;
-		// Optional scorer adapter (E5): calibrate the budget estimate. Only
+		// Optional scorer adapter: calibrate the budget estimate. Only
 		// consult it near the budget — far below it eviction will not run, so a
 		// model-backed scorer would be a wasted round-trip. Any error falls back
 		// to the heuristic `estimateTokens` (fail-open).

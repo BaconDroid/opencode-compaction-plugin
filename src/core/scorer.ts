@@ -1,5 +1,5 @@
 /**
- * Optional residual/perplexity scorer orchestration (E5/E9).
+ * Optional residual/perplexity scorer orchestration.
  *
  * The eviction budget is normally estimated by the heuristic `estimateTokens`
  * (chars ÷ 4). When a `Scorer` is configured, each distinct text part is scored

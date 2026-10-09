@@ -181,4 +181,3 @@ function escapeAttr(s: string): string {
 		.replace(/</g, "&lt;")
 		.replace(/>/g, "&gt;");
 }
-

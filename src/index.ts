@@ -150,7 +150,7 @@ export const CompactionPlugin: Plugin = async (ctx, options) => {
 	const slidingState = new Map<string, SlidingState>();
 	const autocontinue = new AutocontinueGuard();
 
-	// Optional scorer adapter (opt-in) for the eviction budget (E5). The model
+	// Optional scorer adapter (opt-in) for the eviction budget. The model
 	// runner backs its opencode provider.
 	const adapterDeps = {
 		logger,

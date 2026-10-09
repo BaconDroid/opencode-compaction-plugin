@@ -44,6 +44,7 @@ function readConfigDir(
 	return undefined;
 }
 
+/** Load and merge config: defaults < global file < plugin options < project file. */
 export function loadConfig(
 	projectDir: string,
 	onError?: (message: string, error?: unknown) => void,
