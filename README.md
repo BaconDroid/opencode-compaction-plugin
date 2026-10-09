@@ -4,7 +4,7 @@ Enhanced context compaction plugin for [OpenCode](https://opencode.ai) — struc
 
 ## What it does
 
-OpenCode's built-in compaction produces a 7-section summary. This plugin replaces it with an **11-section structured summary** and adds proactive context optimization strategies that reduce token usage *before* compaction triggers.
+OpenCode's built-in compaction produces a 7-section summary. By default this plugin **augments** it with the sections it lacks (`promptMode: "augment"`), or **replaces** it with a full **11-section template** (`"replace"`). It also adds proactive context optimization strategies that reduce token usage *before* compaction triggers.
 
 ### Built-in vs opencode-compaction-plugin
 
@@ -15,12 +15,12 @@ OpenCode's built-in compaction produces a 7-section summary. This plugin replace
 | **Dead ends** | Not tracked | **Dedicated section** for failed approaches |
 | **Task continuity** | Not captured | **Exact moment** where work stopped |
 | **Files touched** | "Relevant Files" section | **Operation-badge manifest** (`R`=read, `E`=edit, `W`=write, `D`=delete) from structured file tools |
-| **Prompt** | Hardcoded | Replaced via plugin hook (customizable) |
+| **Prompt** | Hardcoded | Extended or replaced via plugin hook (customizable) |
 | **Duplicate tool calls** | Kept as-is | **Deduplicated** (keeps only latest) |
 | **Errored tool calls** | Kept forever | Whole failed attempt purged after N turns (input + output, compact error extract); cascades to dependent calls |
 | **Manual compaction** | `/compact` (built-in) | left to OpenCode (the plugin does not override it) |
 | **Auto-continue** | Always on | Skipped for the compaction agent and duplicate triggers |
-| **Prompt application** | Replaces the default | Configurable: `replace` (default) or `augment` (keep the default prompt) |
+| **Prompt application** | Extended by default | Configurable: `augment` (default — appends the sections the default summary lacks) or `replace` (full 11-section template) |
 | **Compress tool** | None | Model-driven **compress** tool (deterministic span selection — no indices needed) |
 | **Block folding** | None | Stable `[bN]` block labels for compressed ranges |
 | **Graduated eviction** | None | LLM-free `reasoning → bulk output → intermediate → episode`, oldest first (never evicts `user` turns) |
@@ -93,7 +93,7 @@ Runs on every message batch sent to the LLM. Applies the following strategies in
 
 ### 3. `experimental.session.compacting` — Enhanced prompt
 
-When compaction triggers (automatic or manual `/compact`), applies the enhanced 11-section template. By default (`promptMode: "replace"`) it replaces the default prompt; with `"augment"` it keeps OpenCode's default prompt and appends the template. In replace mode the previous compaction summary is fetched and re-injected as `<previous-summary>` so continuity is preserved across repeated compactions (a sliding state avoids re-emitting the same summary). The prompt also carries `<latest-user-ask>` (the current user request) and status markers (`[DONE]`, `[IN PROGRESS]`, `[TODO]`, `[BLOCKED]`, `[FAILED]`, `[UNVERIFIED]`).
+When compaction triggers (automatic or manual `/compact`), the default `promptMode: "augment"` keeps OpenCode's default prompt and appends only the **delta** — the sections the default summary lacks (Brief, User Intent Trail, Errors & Dead Ends, Status, Task Continuity, Open Issues & Questions, Mandatory Reading) plus the rules that make them usable. With `"replace"` the plugin substitutes the full **11-section template** instead. Both modes carry `<latest-user-ask>` (the current user request); in `replace` mode the previous compaction summary is fetched and re-injected as `<previous-summary>` (a sliding state avoids re-emitting the same summary). A reference copy of the 11-section template lives in [`prompts/compaction-11-section.md`](prompts/compaction-11-section.md).
 
 1. **Brief** — Executive summary
 2. **User Intent Trail** — Chronological goals with direction changes
@@ -136,7 +136,7 @@ Each feature below lists **what** it does, its **config** keys and how it
 
 | Feature | Config | Default |
 |---|---|---|
-| Structured prompt | `promptMode` | `replace` |
+| Structured prompt | `promptMode` | `augment` |
 | Previous-summary continuity | — | — |
 | Latest user ask | — | — |
 | Files-touched manifest | — | — |
@@ -148,13 +148,13 @@ Each feature below lists **what** it does, its **config** keys and how it
 | Residual/perplexity scoring (optional) | `adapters.scorer.*` | disabled |
 
 ### Structured compaction prompt
-- **What** — replaces (or augments) OpenCode's default prompt with the 11-section
-  template and carries the continuity blocks `<previous-summary>` and
-  `<latest-user-ask>`.
-- **Config** — `promptMode` (`"replace"` default, or `"augment"`).
-- **Interactions** — in `replace` mode the session messages are fetched to populate
-  `<previous-summary>`/`<latest-user-ask>`; `augment` keeps OpenCode's prompt and
-  does not fetch them.
+- **What** — `augment` (default) keeps OpenCode's default prompt and appends only
+  the sections it lacks; `replace` substitutes the full 11-section template. Both
+  carry `<latest-user-ask>`; `replace` also carries `<previous-summary>`.
+- **Config** — `promptMode` (`"augment"` default, or `"replace"`).
+- **Interactions** — both modes fetch the session messages; only `replace`
+  re-injects `<previous-summary>` (the default prompt already carries it in
+  `augment`).
 
 ### Previous-summary continuity
 - **What** — re-injects the last compaction summary as `<previous-summary>`; a
@@ -163,7 +163,7 @@ Each feature below lists **what** it does, its **config** keys and how it
 
 ### Latest user ask
 - **What** — anchors the summary with `<latest-user-ask>` (the current user request).
-- **Config** — none (replace mode).
+- **Config** — none (both modes).
 
 ### Files-touched manifest
 - **What** — records read/write/edit/delete from structured file tools and emits
@@ -291,9 +291,9 @@ Precedence, low to high: **defaults → global file → plugin options → proje
         "protectPrologue": true     // Never evict the first message
     },
 
-    // How the compaction prompt is applied: "replace" (default) or "augment"
-    // ("augment" keeps OpenCode's default prompt and appends these instructions)
-    "promptMode": "replace"
+    // How the compaction prompt is applied: "augment" (default — append the
+    // sections the default summary lacks) or "replace" (full 11-section template)
+    "promptMode": "augment"
 }
 ```
 
@@ -351,7 +351,7 @@ shell — treat it like any other local configuration.
 
 ### Customizing the prompt
 
-To customize the compaction prompt, modify the `buildCompactionPrompt()` function in `src/core/prompt.ts`. The template is a plain string that you can edit to add or remove sections.
+To customize the prompts, edit `buildAugmentPrompt()` (the `augment` delta) or `buildCompactionPrompt()` (the full `replace` template) in `src/core/prompt.ts`. A reference copy of the 11-section template lives in [`prompts/compaction-11-section.md`](prompts/compaction-11-section.md).
 
 ## Development
 
@@ -372,7 +372,7 @@ bun run test:coverage
 # (OpenCode loads .ts files directly via Bun)
 ```
 
-Current coverage: **95.1% functions, 98.2% lines** (190 tests).
+Current coverage: **95.1% functions, 98.2% lines** (193 tests).
 
 ## File Structure
 
@@ -393,7 +393,7 @@ src/
     strategies.ts       — dedup, error purge, cascade purge
     eviction.ts         — graduated, LLM-free eviction
     messages.ts         — message-part helpers
-    prompt.ts           — compaction prompt template (11 sections)
+    prompt.ts           — compaction prompt builders (augment delta + 11-section)
     previous-summary.ts — previous summary extraction + sliding state
     files-touched.ts    — file operation tracker + manifest
     store.ts            — per-session keyed queue shared by the compression store
@@ -404,6 +404,8 @@ src/
     tools.ts            — model-driven tool definitions (SDK boundary)
     model.ts            — opencode-model runner (scorer adapter)
     adapters.ts         — optional adapter provider resolution (http/command/opencode)
+prompts/
+  compaction-11-section.md — reference copy of the replace-mode template
 test/
   index.test.ts     — Plugin integration tests
   compat.test.ts    — omo-slim compatibility contract
