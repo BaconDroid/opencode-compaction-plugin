@@ -216,11 +216,12 @@ function serializeInput(part: MessagePart): string {
 
 const ID_CHAR = /[A-Za-z0-9_-]/;
 
-/**
- * True when `text` references `id` as a whole token, not as a substring of a
+/** Maximal runs of id characters, used to find referenced call ids in O(text). */
+const ID_RUN = /[A-Za-z0-9_-]+/g;
+
+/** True when `text` references `id` as a whole token, not as a substring of a
  * longer id (so purging `abc` does not drag in work that only mentioned
- * `abcdef`).
- */
+ * `abcdef`). */
 function referencesCall(text: string, id: string): boolean {
 	if (!id) return false;
 	let from = 0;
@@ -243,6 +244,10 @@ function referencesCall(text: string, id: string): boolean {
  * A contaminated part is purged only once every part that depends on it has
  * been purged (reverse topological order), so the message graph stays coherent.
  *
+ * Complexity is linear in the number of tool parts: the dependency edges are
+ * built by tokenizing each input once (not by scanning every id), and the
+ * leaves-first purge is a topological peel rather than a fixpoint loop.
+ *
  * Returns the number of parts purged.
  */
 export function applyCascadePurge(
@@ -263,22 +268,43 @@ export function applyCascadePurge(
 		}
 	}
 
-	// reverseDeps: callID -> calls that reference it (its dependents).
-	const reverseDeps = new Map<string, Set<string>>();
+	// dependsOn: call -> calls its input references (call depends on them).
+	// dependents: the reverse edges (call -> calls that reference it).
+	const dependsOn = new Map<string, Set<string>>();
+	const dependents = new Map<string, Set<string>>();
+	const addEdge = (call: string, other: string): void => {
+		let forward = dependsOn.get(call);
+		if (!forward) {
+			forward = new Set();
+			dependsOn.set(call, forward);
+		}
+		forward.add(other);
+		let reverse = dependents.get(other);
+		if (!reverse) {
+			reverse = new Set();
+			dependents.set(other, reverse);
+		}
+		reverse.add(call);
+	};
+
+	// Ids that are not pure id-character runs cannot be found by tokenization;
+	// match those (rare) with the exact substring scan.
+	const irregular: string[] = [];
+	for (const id of partsByCall.keys()) {
+		if (!/^[A-Za-z0-9_-]+$/.test(id)) irregular.push(id);
+	}
+
 	for (const [call, pos] of partsByCall) {
 		const inputText = serializeInput(messages[pos.msgIdx].parts[pos.partIdx]);
 		if (!inputText) continue;
-		for (const other of partsByCall.keys()) {
-			if (other === call) continue;
-			if (referencesCall(inputText, other)) {
-				// `call` depends on `other`: record `call` as a dependent of `other`.
-				let deps = reverseDeps.get(other);
-				if (!deps) {
-					deps = new Set();
-					reverseDeps.set(other, deps);
-				}
-				deps.add(call);
-			}
+		ID_RUN.lastIndex = 0;
+		let match: RegExpExecArray | null;
+		while ((match = ID_RUN.exec(inputText)) !== null) {
+			const token = match[0];
+			if (token !== call && partsByCall.has(token)) addEdge(call, token);
+		}
+		for (const id of irregular) {
+			if (id !== call && referencesCall(inputText, id)) addEdge(call, id);
 		}
 	}
 
@@ -287,7 +313,7 @@ export function applyCascadePurge(
 	const stack = [...purgedCallIds];
 	while (stack.length > 0) {
 		const call = stack.pop() as string;
-		for (const dep of reverseDeps.get(call) ?? []) {
+		for (const dep of dependents.get(call) ?? []) {
 			if (!contaminated.has(dep) && !purgedCallIds.has(dep)) {
 				contaminated.add(dep);
 				stack.push(dep);
@@ -295,36 +321,45 @@ export function applyCascadePurge(
 		}
 	}
 
-	// Purge leaves first: a part is purgeable only when all its dependents are
-	// already purged. Iterate to a fixpoint.
+	// Topological peel: a call is purgeable once all its dependents are purged.
+	// Start from the leaves (no unpurged dependents) and walk the edges back.
+	const pending = new Map<string, number>();
+	const queue: string[] = [];
+	for (const call of contaminated) {
+		let n = 0;
+		for (const dep of dependents.get(call) ?? []) {
+			if (!purgedCallIds.has(dep)) n++;
+		}
+		pending.set(call, n);
+		if (n === 0) queue.push(call);
+	}
+
 	const purgedNow = new Set<string>();
 	let purged = 0;
-	let changed = true;
-	while (changed) {
-		changed = false;
-		for (const call of contaminated) {
-			if (purgedNow.has(call)) continue;
-			let allPurged = true;
-			for (const dep of reverseDeps.get(call) ?? []) {
-				if (!purgedCallIds.has(dep) && !purgedNow.has(dep)) {
-					allPurged = false;
-					break;
-				}
-			}
-			if (!allPurged) continue;
+	while (queue.length > 0) {
+		const call = queue.pop() as string;
+		if (purgedNow.has(call)) continue;
+		const pos = partsByCall.get(call);
+		if (!pos) continue;
+		// A protected call is not purged, so its own dependencies stay blocked.
+		if (protectedIndices?.has(pos.msgIdx)) continue;
 
-			const pos = partsByCall.get(call);
-			if (!pos) continue;
-			if (protectedIndices?.has(pos.msgIdx)) continue;
+		const part = messages[pos.msgIdx].parts[pos.partIdx];
+		setPartInput(part, { purged: "cascade: depends on purged work" });
+		if (part.state) {
+			part.state.output = "[purged cascade: depends on purged work]";
+		}
+		purgedNow.add(call);
+		purged++;
 
-			const part = messages[pos.msgIdx].parts[pos.partIdx];
-			setPartInput(part, { purged: "cascade: depends on purged work" });
-			if (part.state) {
-				part.state.output = "[purged cascade: depends on purged work]";
-			}
-			purgedNow.add(call);
-			purged++;
-			changed = true;
+		// Purging `call` may complete the dependency count of the calls it
+		// depends on, so they can be peeled next.
+		for (const other of dependsOn.get(call) ?? []) {
+			if (purgedCallIds.has(other) || purgedNow.has(other)) continue;
+			const n = pending.get(other);
+			if (n === undefined) continue;
+			pending.set(other, n - 1);
+			if (n - 1 === 0) queue.push(other);
 		}
 	}
 

@@ -274,4 +274,17 @@ describe("applyCascadePurge()", () => {
 			(msgs[1].parts[0].state.input as { purged?: string }).purged,
 		).toBeUndefined();
 	});
+
+	it("does not purge a dependency cycle", () => {
+		const msgs = [
+			call("callA", { command: "use callB and callC" }),
+			call("callB", { command: "use callA" }),
+			call("callC", { command: "run" }),
+		];
+		// callA depends on callC, so callA and the A<->B cycle are contaminated,
+		// but neither cycle member ever has all its dependents purged.
+		expect(applyCascadePurge(msgs as never, new Set(["callC"]))).toBe(0);
+		expect((msgs[0].parts[0].state.input as { purged?: string }).purged).toBeUndefined();
+		expect((msgs[1].parts[0].state.input as { purged?: string }).purged).toBeUndefined();
+	});
 });
