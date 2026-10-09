@@ -3,7 +3,6 @@ import {
 	blockId,
 	isCompressedBlockMessage,
 	parseCompressBlocks,
-	orderCompressBlocks,
 	renderBlockBody,
 	selectDeterministicSpan,
 	type BlockMessage,
@@ -61,7 +60,7 @@ describe("compressed block detection", () => {
 	});
 });
 
-describe("parseCompressBlocks() and orderCompressBlocks()", () => {
+describe("parseCompressBlocks()", () => {
 	it("parses blocks and reads their ids", () => {
 		const blocks = parseCompressBlocks([
 			textMsg(
@@ -81,16 +80,6 @@ describe("parseCompressBlocks() and orderCompressBlocks()", () => {
 			) as BlockMessage,
 		]);
 		expect(blocks.map((b) => b.id)).toEqual(["a", "b"]);
-	});
-
-	it("orders by anchor and renumbers labels", () => {
-		const blocks = parseCompressBlocks([
-			textMsg("user", "u0") as BlockMessage,
-			textMsg("assistant", '<compressed-block id="x">A</compressed-block>') as BlockMessage,
-			textMsg("user", "u1") as BlockMessage,
-			textMsg("assistant", '<compressed-block id="y">B</compressed-block>') as BlockMessage,
-		]);
-		expect(orderCompressBlocks(blocks).map((b) => b.label)).toEqual(["b0", "b1"]);
 	});
 
 	it("renders the block body with the label", () => {
