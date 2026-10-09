@@ -84,4 +84,4 @@ if ($TmpDir -and (Test-Path $TmpDir)) {
 }
 
 Write-Host ""
-Write-Host "[ok]    Done! OpenCode will use enhanced 11-section compaction on next session." -ForegroundColor Green
+Write-Host "[ok]    Done! OpenCode will use the enhanced compaction prompt on next session." -ForegroundColor Green

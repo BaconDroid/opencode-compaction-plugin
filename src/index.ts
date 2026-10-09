@@ -2,7 +2,8 @@
  * opencode-compaction-plugin — Enhanced context compaction plugin for OpenCode.
  *
  * Features:
- * - 11-section structured summary (vs 7 built-in), replace or augment the default
+ * - Structured summary: 11 sections in `replace` mode, or the missing sections
+ *   appended to the default prompt in `augment` (default)
  * - Previous compaction summary carried forward (<previous-summary>)
  * - Files-touched manifest with operation badges
  * - Deduplication of repeated tool calls
