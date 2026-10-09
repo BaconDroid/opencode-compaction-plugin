@@ -1,5 +1,5 @@
 /**
- * Loads opencode-live-compaction config from JSON/JSONC files.
+ * Loads opencode-compaction-plugin config from JSON/JSONC files.
  *
  * Precedence, low to high:
  *   defaults < global config file < plugin options < project-local config file.
@@ -11,11 +11,11 @@ import { homedir } from "node:os";
 import {
 	deepMerge,
 	mergeConfig,
-	type LiveCompactionConfig,
+	type CompactionConfig,
 	type ResolvedConfig,
 } from "./config.js";
 
-const CONFIG_FILE_NAMES = ["live-compaction.json", "live-compaction.jsonc"];
+const CONFIG_FILE_NAMES = ["compaction.json", "compaction.jsonc"];
 
 /**
  * Directory of the global OpenCode config. Uses `XDG_CONFIG_HOME` when set
@@ -30,13 +30,13 @@ function globalConfigDir(): string {
 function readConfigDir(
 	dir: string,
 	onError?: (message: string, error?: unknown) => void,
-): LiveCompactionConfig | undefined {
+): CompactionConfig | undefined {
 	for (const name of CONFIG_FILE_NAMES) {
 		const configPath = join(dir, name);
 		if (!existsSync(configPath)) continue;
 		try {
 			const raw = readFileSync(configPath, "utf-8");
-			return JSON.parse(stripJsonc(raw)) as LiveCompactionConfig;
+			return JSON.parse(stripJsonc(raw)) as CompactionConfig;
 		} catch (error) {
 			onError?.(`failed to parse ${configPath}`, error);
 		}
@@ -47,9 +47,9 @@ function readConfigDir(
 export function loadConfig(
 	projectDir: string,
 	onError?: (message: string, error?: unknown) => void,
-	overrides?: LiveCompactionConfig,
+	overrides?: CompactionConfig,
 ): ResolvedConfig {
-	let user: LiveCompactionConfig = {};
+	let user: CompactionConfig = {};
 
 	const globalConfig = readConfigDir(globalConfigDir(), onError);
 	if (globalConfig) user = deepMerge(user, globalConfig);

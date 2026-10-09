@@ -1,5 +1,5 @@
 /**
- * Graduated, LLM-free eviction for opencode-live-compaction.
+ * Graduated, LLM-free eviction for opencode-compaction-plugin.
  *
  * When the estimated token budget is exceeded, evict content in a deterministic
  * order — reasoning, bulk tool output, intermediate text, then whole episodes —

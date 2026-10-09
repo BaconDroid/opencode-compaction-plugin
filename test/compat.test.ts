@@ -1,5 +1,5 @@
 import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test";
-import { LiveCompactionPlugin } from "../src/index.ts";
+import { CompactionPlugin } from "../src/index.ts";
 import { makeTmpSetup } from "./helpers.ts";
 import { join } from "node:path";
 
@@ -45,7 +45,7 @@ describe("omo-slim compatibility contract", () => {
 	afterEach(cleanupTmp);
 
 	it("exposes exactly the documented model-driven tools, none colliding with omo-slim", async () => {
-		const hooks = await LiveCompactionPlugin(mockCtx as any);
+		const hooks = await CompactionPlugin(mockCtx as any);
 		const names = Object.keys((hooks as any).tool ?? {});
 		expect(names.sort()).toEqual([...PLUGIN_TOOLS].sort());
 		for (const name of names) {
@@ -57,7 +57,7 @@ describe("omo-slim compatibility contract", () => {
 	});
 
 	it("registers only the documented hooks", async () => {
-		const hooks = await LiveCompactionPlugin(mockCtx as any);
+		const hooks = await CompactionPlugin(mockCtx as any);
 		expect(Object.keys(hooks).sort()).toEqual([...EXPECTED_HOOKS].sort());
 	});
 });

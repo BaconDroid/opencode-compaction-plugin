@@ -1,5 +1,5 @@
 /**
- * Context optimization strategies for opencode-live-compaction.
+ * Context optimization strategies for opencode-compaction-plugin.
  *
  * - Deduplication: removes duplicate tool calls (same tool + same args), keeping only the latest.
  * - Error purge: strips input content from errored tool calls after N turns.
@@ -7,7 +7,7 @@
  * Both strategies operate on the messages array in experimental.chat.messages.transform.
  */
 
-import type { LiveCompactionConfig } from "../config/config.js";
+import type { CompactionConfig } from "../config/config.js";
 import { DEDUPED_PREFIX } from "./markers.js";
 import { partInput, setPartInput } from "./messages.js";
 import type { Message, MessagePart } from "../types.js";
@@ -56,7 +56,7 @@ function sortKeys(value: unknown): unknown {
  */
 export function applyDedup(
 	messages: Message[],
-	config: LiveCompactionConfig,
+	config: CompactionConfig,
 ): number {
 	if (!config.dedup?.enabled) return 0;
 
@@ -158,7 +158,7 @@ function errorExtract(part: MessagePart, output: unknown): string {
  */
 export function applyPurgeErrors(
 	messages: Message[],
-	config: LiveCompactionConfig,
+	config: CompactionConfig,
 	protectedIndices?: Set<number>,
 	purgedCallIds?: Set<string>,
 ): number {

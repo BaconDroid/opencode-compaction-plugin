@@ -1,5 +1,5 @@
 /**
- * opencode-live-compaction — Enhanced context compaction plugin for OpenCode.
+ * opencode-compaction-plugin — Enhanced context compaction plugin for OpenCode.
  *
  * Features:
  * - 11-section structured summary (vs 7 built-in), replace or augment the default
@@ -13,8 +13,8 @@
  * - Global + project + plugin-option config
  *
  * Usage:
- *   1. Local: copy to `.opencode/plugins/live-compaction.ts`
- *   2. npm: add "opencode-live-compaction" to `plugin` array in opencode.json
+ *   1. Local: copy to `.opencode/plugins/compaction.ts`
+ *   2. npm: add "opencode-compaction-plugin" to `plugin` array in opencode.json
  *
  * This file is the wiring only; the logic lives in focused modules:
  *   transform.ts · prompt.ts · compress.ts · expand.ts · strategies.ts ·
@@ -24,7 +24,7 @@
 import { buildCompactionPrompt, extractLatestUserAsk } from "./core/prompt.js";
 import { FilesTouchedTracker } from "./core/files-touched.js";
 import { loadConfig } from "./config/config-loader.js";
-import type { LiveCompactionConfig } from "./config/config.js";
+import type { CompactionConfig } from "./config/config.js";
 import { CompressionStore } from "./core/compress.js";
 import { resolveScorer } from "./opencode/adapters.js";
 import { createModelRunner } from "./opencode/model.js";
@@ -59,7 +59,7 @@ function makeLogger(
 		// an unhandled rejection.
 		void client.app.log({
 			body: {
-				service: "live-compaction",
+				service: "compaction",
 				level,
 				message,
 				extra: data as Record<string, unknown> | undefined,
@@ -112,20 +112,20 @@ function unwrapList(response: unknown): unknown[] {
 	return ((response as { data?: unknown })?.data as unknown[] | undefined) ?? [];
 }
 
-export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
+export const CompactionPlugin: Plugin = async (ctx, options) => {
 	// Load config (defaults < global file < plugin options < project file).
 	const configWarnings: string[] = [];
 	const config = loadConfig(
 		ctx.directory,
 		(message) => configWarnings.push(message),
-		options as LiveCompactionConfig | undefined,
+		options as CompactionConfig | undefined,
 	);
 	const logger = makeLogger(ctx.client, config.debug ?? false);
 
 	// Surface config problems regardless of the debug flag.
 	for (const warning of configWarnings) {
 		void ctx.client.app.log({
-			body: { service: "live-compaction", level: "warn", message: warning },
+			body: { service: "compaction", level: "warn", message: warning },
 		}).catch(() => {});
 	}
 
@@ -363,4 +363,4 @@ export const LiveCompactionPlugin: Plugin = async (ctx, options) => {
 	return hooks;
 };
 
-export default LiveCompactionPlugin;
+export default CompactionPlugin;

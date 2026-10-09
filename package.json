@@ -1,5 +1,5 @@
 {
-  "name": "opencode-live-compaction",
+  "name": "opencode-compaction-plugin",
   "version": "0.1.0",
   "description": "Enhanced context compaction for OpenCode — structured summaries with files-touched manifests, task-state continuity, and customizable prompt templates.",
   "type": "module",
@@ -22,7 +22,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/BaconDroid/opencode-live-compaction.git"
+    "url": "git+https://github.com/BaconDroid/opencode-compaction-plugin.git"
   },
   "dependencies": {
     "@opencode-ai/plugin": "^1.18.0"

@@ -1,8 +1,8 @@
 /**
- * Enhanced compaction prompt template for opencode-live-compaction.
+ * Enhanced compaction prompt template for opencode-compaction-plugin.
  *
  * Produces a structured summary with 11 continuity sections, inspired by
- * pi-live-compaction but adapted for OpenCode's plugin hook system.
+ * pi-compaction but adapted for OpenCode's plugin hook system.
  *
  * The prompt is designed to be set as `output.prompt` in the
  * `experimental.session.compacting` hook.

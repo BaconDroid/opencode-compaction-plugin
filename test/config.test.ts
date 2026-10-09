@@ -213,11 +213,11 @@ describe("loadConfig()", () => {
 
 	it("loads json/jsonc, prefers .json and tolerates comments and trailing commas", () => {
 		writeFileSync(
-			join(TMP_DIR, ".opencode", "live-compaction.json"),
+			join(TMP_DIR, ".opencode", "compaction.json"),
 			JSON.stringify({ enabled: false, dedup: { enabled: false } }),
 		);
 		writeFileSync(
-			join(TMP_DIR, ".opencode", "live-compaction.jsonc"),
+			join(TMP_DIR, ".opencode", "compaction.jsonc"),
 			'{ "debug": true }',
 		);
 		let cfg = loadConfig(TMP_DIR);
@@ -225,12 +225,12 @@ describe("loadConfig()", () => {
 		expect(cfg.dedup.enabled).toBe(false);
 		expect(cfg.debug).toBe(false); // .json preferred over .jsonc
 
-		rmSync(join(TMP_DIR, ".opencode", "live-compaction.json"));
+		rmSync(join(TMP_DIR, ".opencode", "compaction.json"));
 		cfg = loadConfig(TMP_DIR);
 		expect(cfg.debug).toBe(true); // falls back to .jsonc
 
 		writeFileSync(
-			join(TMP_DIR, ".opencode", "live-compaction.jsonc"),
+			join(TMP_DIR, ".opencode", "compaction.jsonc"),
 			`{
 				// line comment
 				"enabled": false,
@@ -245,7 +245,7 @@ describe("loadConfig()", () => {
 
 	it("tolerates a comment between a trailing comma and the closing brace", () => {
 		writeFileSync(
-			join(TMP_DIR, ".opencode", "live-compaction.jsonc"),
+			join(TMP_DIR, ".opencode", "compaction.jsonc"),
 			`{
 				"enabled": false,
 				"purgeErrors": { "turns": 10 },
@@ -259,7 +259,7 @@ describe("loadConfig()", () => {
 
 	it("preserves slashes and escapes inside JSONC strings", () => {
 		writeFileSync(
-			join(TMP_DIR, ".opencode", "live-compaction.jsonc"),
+			join(TMP_DIR, ".opencode", "compaction.jsonc"),
 			`{
 				"debug": true,
 				"url": "https://example.com/a//b",
@@ -278,7 +278,7 @@ describe("loadConfig()", () => {
 
 	it("falls back to defaults on invalid JSON and reports the error", () => {
 		writeFileSync(
-			join(TMP_DIR, ".opencode", "live-compaction.json"),
+			join(TMP_DIR, ".opencode", "compaction.json"),
 			"not valid json {{{",
 		);
 		const errors: string[] = [];
@@ -290,7 +290,7 @@ describe("loadConfig()", () => {
 
 	it("loads adapter blocks from a project file", () => {
 		writeFileSync(
-			join(TMP_DIR, ".opencode", "live-compaction.json"),
+			join(TMP_DIR, ".opencode", "compaction.json"),
 			JSON.stringify({
 				adapters: { scorer: { provider: "http", url: "http://x" } },
 			}),
@@ -301,7 +301,7 @@ describe("loadConfig()", () => {
 	it("applies precedence: defaults < global < plugin options < project", () => {
 		mkdirSync(join(TMP_DIR, "xdg", "opencode"), { recursive: true });
 		writeFileSync(
-			join(TMP_DIR, "xdg", "opencode", "live-compaction.json"),
+			join(TMP_DIR, "xdg", "opencode", "compaction.json"),
 			JSON.stringify({ purgeErrors: { turns: 11 } }),
 		);
 		expect(loadConfig(TMP_DIR).purgeErrors.turns).toBe(11);
@@ -310,7 +310,7 @@ describe("loadConfig()", () => {
 				.turns,
 		).toBe(77);
 		writeFileSync(
-			join(TMP_DIR, ".opencode", "live-compaction.json"),
+			join(TMP_DIR, ".opencode", "compaction.json"),
 			JSON.stringify({ purgeErrors: { turns: 99 } }),
 		);
 		const cfg = loadConfig(TMP_DIR, undefined, { purgeErrors: { turns: 77 } });

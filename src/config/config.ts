@@ -1,5 +1,5 @@
 /**
- * Configuration model for opencode-live-compaction: types, defaults and the
+ * Configuration model for opencode-compaction-plugin: types, defaults and the
  * merge over defaults. File loading lives in `config-loader.ts`.
  */
 
@@ -84,7 +84,7 @@ export interface AdaptersConfig {
 	scorer?: ScorerAdapterConfig;
 }
 
-export interface LiveCompactionConfig {
+export interface CompactionConfig {
 	/** Enable/disable the entire plugin (default: true) */
 	enabled?: boolean;
 	/** Deduplication strategy */
@@ -107,7 +107,7 @@ export interface LiveCompactionConfig {
 
 export const DEFAULT_CONFIG: Required<
 	Omit<
-		LiveCompactionConfig,
+		CompactionConfig,
 		"dedup" | "purgeErrors" | "compress" | "eviction" | "adapters"
 	>
 > & {
@@ -149,9 +149,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 export function deepMerge(
-	base: LiveCompactionConfig,
-	override: LiveCompactionConfig,
-): LiveCompactionConfig {
+	base: CompactionConfig,
+	override: CompactionConfig,
+): CompactionConfig {
 	const out: Record<string, unknown> = { ...base };
 	for (const [key, value] of Object.entries(override)) {
 		// `undefined` means "unset": keep the lower layer's value rather than
@@ -161,12 +161,12 @@ export function deepMerge(
 		out[key] =
 			isPlainObject(value) && isPlainObject(current)
 				? deepMerge(
-						current as LiveCompactionConfig,
-						value as LiveCompactionConfig,
+						current as CompactionConfig,
+						value as CompactionConfig,
 					)
 				: value;
 	}
-	return out as LiveCompactionConfig;
+	return out as CompactionConfig;
 }
 
 const EVICTION_LEVELS: EvictionLevel[] = [
@@ -300,10 +300,10 @@ function normalizeConfig(cfg: ResolvedConfig): ResolvedConfig {
  * cloned so a caller cannot mutate the shared `DEFAULT_CONFIG` through the
  * result, and the merged result is normalized defensively.
  */
-export function mergeConfig(user: LiveCompactionConfig): ResolvedConfig {
+export function mergeConfig(user: CompactionConfig): ResolvedConfig {
 	return normalizeConfig(
 		deepMerge(
-			structuredClone(DEFAULT_CONFIG) as LiveCompactionConfig,
+			structuredClone(DEFAULT_CONFIG) as CompactionConfig,
 			user,
 		) as ResolvedConfig,
 	);

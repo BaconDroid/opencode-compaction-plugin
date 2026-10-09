@@ -1,5 +1,5 @@
 /**
- * Files-touched collector for opencode-live-compaction.
+ * Files-touched collector for opencode-compaction-plugin.
  *
  * Tracks which files were read, written, edited, or deleted during a session
  * from the structured tool calls (`read`, `write`, `edit`, `delete`, …).

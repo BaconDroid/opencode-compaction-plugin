@@ -12,7 +12,7 @@ export const DEFAULT_ADAPTER_MODEL = "opencode/big-pickle";
 export const HOST_MODEL = "host";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
-const SANDBOX_TITLE = "live-compaction adapter";
+const SANDBOX_TITLE = "compaction adapter";
 
 /**
  * Split a `provider/model` string into its parts. `"host"` (or an unset value)

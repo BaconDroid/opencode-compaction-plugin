@@ -1,5 +1,5 @@
 import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test";
-import { LiveCompactionPlugin } from "../src/index.ts";
+import { CompactionPlugin } from "../src/index.ts";
 import { makeTmpSetup } from "./helpers.ts";
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -10,7 +10,7 @@ const { setup: setupTmp, cleanup: cleanupTmp } = makeTmpSetup(TMP_DIR);
 // Access the internal session trackers map for testing
 // We test through the public plugin interface only
 
-describe("LiveCompactionPlugin", () => {
+describe("CompactionPlugin", () => {
 	const logMock = () => mock().mockResolvedValue(undefined);
 	const userTurns = (n: number) =>
 		Array.from({ length: n }, (_, i) => [
@@ -27,7 +27,7 @@ describe("LiveCompactionPlugin", () => {
 	};
 
 	async function getHooks() {
-		return await LiveCompactionPlugin(mockCtx as any);
+		return await CompactionPlugin(mockCtx as any);
 	}
 
 	const emit = (hooks: any, type: string, properties: unknown) =>
@@ -81,17 +81,17 @@ describe("LiveCompactionPlugin", () => {
 			const dotDir = join(TMP_DIR, ".opencode");
 			if (!existsSync(dotDir)) mkdirSync(dotDir, { recursive: true });
 			writeFileSync(
-				join(dotDir, "live-compaction.json"),
+				join(dotDir, "compaction.json"),
 				JSON.stringify({ debug: true }),
 			);
 			const logSpy = mock().mockResolvedValue(undefined);
-			await LiveCompactionPlugin({
+			await CompactionPlugin({
 				...mockCtx,
 				client: { app: { log: logSpy } },
 				directory: TMP_DIR,
 			} as any);
 			expect(logSpy).toHaveBeenCalled();
-			expect(logSpy.mock.calls[0][0].body.service).toBe("live-compaction");
+			expect(logSpy.mock.calls[0][0].body.service).toBe("compaction");
 			expect(logSpy.mock.calls[0][0].body.message).toContain("initialized");
 		});
 
@@ -99,10 +99,10 @@ describe("LiveCompactionPlugin", () => {
 			const dotDir = join(TMP_DIR, ".opencode");
 			if (!existsSync(dotDir)) mkdirSync(dotDir, { recursive: true });
 			writeFileSync(
-				join(dotDir, "live-compaction.json"),
+				join(dotDir, "compaction.json"),
 				JSON.stringify({ enabled: false }),
 			);
-			const hooks = await LiveCompactionPlugin({
+			const hooks = await CompactionPlugin({
 				...mockCtx,
 				directory: TMP_DIR,
 			} as any);
@@ -403,7 +403,7 @@ describe("LiveCompactionPlugin", () => {
 		});
 
 		it("purges large inputs from errored tools outside the recent window", async () => {
-			const hooks = await LiveCompactionPlugin(mockCtx as any, {
+			const hooks = await CompactionPlugin(mockCtx as any, {
 				purgeErrors: { wholeAttempt: false },
 			} as any);
 			const bigInput = "x".repeat(500);
@@ -432,7 +432,7 @@ describe("LiveCompactionPlugin", () => {
 		});
 
 		it("purges the whole failed attempt when wholeAttempt is enabled", async () => {
-			const hooks = await LiveCompactionPlugin(mockCtx as any, {
+			const hooks = await CompactionPlugin(mockCtx as any, {
 				purgeErrors: { wholeAttempt: true },
 			} as any);
 			const bigInput = "x".repeat(500);
@@ -462,7 +462,7 @@ describe("LiveCompactionPlugin", () => {
 		});
 
 		it("cascades the purge to dependent tool calls when enabled", async () => {
-			const hooks = await LiveCompactionPlugin(mockCtx as any, {
+			const hooks = await CompactionPlugin(mockCtx as any, {
 				purgeErrors: { cascade: true },
 			} as any);
 			const messages = [
@@ -538,7 +538,7 @@ describe("LiveCompactionPlugin", () => {
 
 	describe("config", () => {
 		it("honors plugin options", async () => {
-			const hooks = await LiveCompactionPlugin(mockCtx as any, {
+			const hooks = await CompactionPlugin(mockCtx as any, {
 				enabled: false,
 			} as any);
 			expect((hooks as any)["tool.execute.after"]).toBeUndefined();
@@ -681,7 +681,7 @@ describe("LiveCompactionPlugin", () => {
 		});
 
 		it("applies a queued compression", async () => {
-			const hooks = await LiveCompactionPlugin(mockCtx as any, {});
+			const hooks = await CompactionPlugin(mockCtx as any, {});
 
 			await afterTool(hooks, "compress", "sess-low", "c-low", { topic: "T", start: 0, end: 1, summary: "S" });
 
@@ -746,7 +746,7 @@ describe("LiveCompactionPlugin", () => {
 
 	describe("compaction prompt mode", () => {
 		it("augments the default prompt when promptMode is augment", async () => {
-			const hooks = await LiveCompactionPlugin(mockCtx as any, {
+			const hooks = await CompactionPlugin(mockCtx as any, {
 				promptMode: "augment",
 			} as any);
 			const output = {
@@ -769,7 +769,7 @@ describe("LiveCompactionPlugin", () => {
 					},
 				],
 			});
-			const hooks = await LiveCompactionPlugin({
+			const hooks = await CompactionPlugin({
 				...mockCtx,
 				client: {
 					app: { log: logMock() },
@@ -793,7 +793,7 @@ describe("LiveCompactionPlugin", () => {
 					},
 				],
 			});
-			const hooks = await LiveCompactionPlugin({
+			const hooks = await CompactionPlugin({
 				...mockCtx,
 				client: {
 					app: { log: logMock() },
@@ -840,7 +840,7 @@ describe("LiveCompactionPlugin", () => {
 					},
 				],
 			});
-			const hooks = await LiveCompactionPlugin({
+			const hooks = await CompactionPlugin({
 				...mockCtx,
 				client: {
 					app: { log: logMock() },
@@ -857,7 +857,7 @@ describe("LiveCompactionPlugin", () => {
 
 		it("does not fetch the previous summary in augment mode", async () => {
 			const messages = mock().mockResolvedValue({ data: [] });
-			const hooks = await LiveCompactionPlugin(
+			const hooks = await CompactionPlugin(
 				{
 					...mockCtx,
 					client: {
@@ -877,7 +877,7 @@ describe("LiveCompactionPlugin", () => {
 	describe("adapter diagnostics", () => {
 		const makeHooks = async (debug: boolean) => {
 			const logs: Array<{ level: string; message: string }> = [];
-			await LiveCompactionPlugin(
+			await CompactionPlugin(
 				{
 					...mockCtx,
 					client: {

@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "opencode-live-compaction",
+      "name": "opencode-compaction-plugin",
       "dependencies": {
         "@opencode-ai/plugin": "^1.18.0",
       },

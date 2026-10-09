@@ -11,7 +11,7 @@ import { applyTransform } from "../src/core/transform.ts";
 import { mergeConfig } from "../src/config/config.ts";
 import { CompressionStore } from "../src/core/compress.ts";
 import { parseScore, resolveScorer } from "../src/opencode/adapters.ts";
-import { LiveCompactionPlugin } from "../src/index.ts";
+import { CompactionPlugin } from "../src/index.ts";
 import { makeTmpSetup, recordingLogger } from "./helpers.ts";
 import type { Scorer } from "../src/core/adapters.ts";
 
@@ -373,7 +373,7 @@ describe("scorer command provider & transform integration", () => {
 			worktree: TMP_DIR,
 			serverUrl: new URL("http://localhost:4096"),
 		};
-		const hooks = await LiveCompactionPlugin(ctx as any, {
+		const hooks = await CompactionPlugin(ctx as any, {
 			debug: true,
 			eviction: { enabled: true, thresholdTokens: 50, levels: ["reasoning"], protectPrologue: false },
 			adapters: {

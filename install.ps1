@@ -1,7 +1,7 @@
-# opencode-live-compaction installer for Windows
+# opencode-compaction-plugin installer for Windows
 #
 # Usage:
-#   irm https://raw.githubusercontent.com/BaconDroid/opencode-live-compaction/master/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/BaconDroid/opencode-compaction-plugin/master/install.ps1 | iex
 #   # or from a local clone:
 #   .\install.ps1
 #   .\install.ps1 C:\path\to\project
@@ -14,11 +14,11 @@ $ErrorActionPreference = "Stop"
 
 # Resolve target
 $TargetDir = (Resolve-Path $TargetDir).Path
-$PluginDir = Join-Path $TargetDir ".opencode\plugins\live-compaction"
+$PluginDir = Join-Path $TargetDir ".opencode\plugins\compaction"
 $PluginBase = Join-Path $TargetDir ".opencode\plugins"
-$EntryFile = Join-Path $PluginBase "live-compaction.ts"
+$EntryFile = Join-Path $PluginBase "compaction.ts"
 
-Write-Host "[info]  Installing opencode-live-compaction into $TargetDir" -ForegroundColor Cyan
+Write-Host "[info]  Installing opencode-compaction-plugin into $TargetDir" -ForegroundColor Cyan
 
 # Locate source files
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -28,8 +28,8 @@ if (Test-Path (Join-Path $ScriptDir "src\index.ts")) {
     $SrcDir = Join-Path $ScriptDir "src"
 } else {
     Write-Host "[info]  Downloading from GitHub..." -ForegroundColor Cyan
-    $TmpDir = Join-Path $env:TEMP "opencode-live-compaction-$(Get-Random)"
-    git clone --depth 1 https://github.com/BaconDroid/opencode-live-compaction.git "$TmpDir" 2>$null
+    $TmpDir = Join-Path $env:TEMP "opencode-compaction-plugin-$(Get-Random)"
+    git clone --depth 1 https://github.com/BaconDroid/opencode-compaction-plugin.git "$TmpDir" 2>$null
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[error] Failed to clone repository" -ForegroundColor Red
         exit 1
@@ -58,7 +58,7 @@ Write-Host "[ok]    Plugin installed to $PluginDir\ ($installed TypeScript files
 
 # Create entry point barrel file
 # OpenCode scans .opencode/plugins/*.ts (not subdirs)
-$barrelContent = '/** opencode-live-compaction entry point */' + [Environment]::NewLine + 'export { LiveCompactionPlugin, default } from "./live-compaction/index.ts"' + [Environment]::NewLine
+$barrelContent = '/** opencode-compaction-plugin entry point */' + [Environment]::NewLine + 'export { CompactionPlugin, default } from "./compaction/index.ts"' + [Environment]::NewLine
 Set-Content -Path $EntryFile -Value $barrelContent -NoNewline
 Write-Host "[ok]    Entry point: $EntryFile" -ForegroundColor Green
 
@@ -66,12 +66,12 @@ Write-Host "[ok]    Entry point: $EntryFile" -ForegroundColor Green
 $ConfigFile = Join-Path $TargetDir "opencode.json"
 if (Test-Path $ConfigFile) {
     $content = Get-Content $ConfigFile -Raw
-    if ($content -match "opencode-live-compaction") {
+    if ($content -match "opencode-compaction-plugin") {
         Write-Host "[ok]    opencode.json already references the plugin" -ForegroundColor Green
     } else {
         Write-Host "[warn]  For npm-style loading, add to opencode.json:" -ForegroundColor Yellow
         Write-Host ""
-        Write-Host '  { "plugin": ["opencode-live-compaction"] }'
+        Write-Host '  { "plugin": ["opencode-compaction-plugin"] }'
         Write-Host ""
         Write-Host "[info]  Local plugin is already active - no config change needed." -ForegroundColor Cyan
     }

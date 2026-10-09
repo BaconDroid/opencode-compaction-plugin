@@ -1,4 +1,4 @@
-# opencode-live-compaction
+# opencode-compaction-plugin
 
 Enhanced context compaction plugin for [OpenCode](https://opencode.ai) — structured summaries with files-touched manifests, deterministic triggering, model-driven folding, deduplication, error purging, and graduated eviction.
 
@@ -6,9 +6,9 @@ Enhanced context compaction plugin for [OpenCode](https://opencode.ai) — struc
 
 OpenCode's built-in compaction produces a 7-section summary. This plugin replaces it with an **11-section structured summary** and adds proactive context optimization strategies that reduce token usage *before* compaction triggers.
 
-### Built-in vs opencode-live-compaction
+### Built-in vs opencode-compaction-plugin
 
-| | OpenCode Built-in | opencode-live-compaction |
+| | OpenCode Built-in | opencode-compaction-plugin |
 |---|---|---|
 | **Summary sections** | 7 (Goal, Constraints, Progress, Decisions, Next Steps, Critical Context, Relevant Files) | **11** (Brief, User Intent Trail, Constraints, Errors/Dead Ends, Decisions, Status, Task Continuity, Open Issues, Next Steps, Mandatory Reading, Files Touched) |
 | **User intent** | Captured as "Goal" | **Chronological intent trail** with direction changes |
@@ -31,17 +31,17 @@ OpenCode's built-in compaction produces a 7-section summary. This plugin replace
 ### Option 1: One-liner (curl + bash) — macOS / Linux
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/BaconDroid/opencode-live-compaction/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BaconDroid/opencode-compaction-plugin/master/install.sh | bash
 # or specify a project directory:
-curl -fsSL https://raw.githubusercontent.com/BaconDroid/opencode-live-compaction/master/install.sh | bash -s /path/to/project
+curl -fsSL https://raw.githubusercontent.com/BaconDroid/opencode-compaction-plugin/master/install.sh | bash -s /path/to/project
 ```
 
 ### Option 2: One-liner (PowerShell) — Windows
 
 ```powershell
-irm https://raw.githubusercontent.com/BaconDroid/opencode-live-compaction/master/install.ps1 | iex
+irm https://raw.githubusercontent.com/BaconDroid/opencode-compaction-plugin/master/install.ps1 | iex
 # or specify a project directory (iex does not forward parameters):
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/BaconDroid/opencode-live-compaction/master/install.ps1))) -TargetDir C:\path\to\project
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/BaconDroid/opencode-compaction-plugin/master/install.ps1))) -TargetDir C:\path\to\project
 ```
 
 ### Option 3: npm plugin
@@ -50,7 +50,7 @@ Add to your `opencode.json`:
 
 ```json
 {
-  "plugin": ["opencode-live-compaction"]
+  "plugin": ["opencode-compaction-plugin"]
 }
 ```
 
@@ -59,12 +59,12 @@ Add to your `opencode.json`:
 ### Option 4: Manual
 
 ```bash
-git clone https://github.com/BaconDroid/opencode-live-compaction.git
-mkdir -p .opencode/plugins/live-compaction
-cp -r opencode-live-compaction/src/. .opencode/plugins/live-compaction/
+git clone https://github.com/BaconDroid/opencode-compaction-plugin.git
+mkdir -p .opencode/plugins/compaction
+cp -r opencode-compaction-plugin/src/. .opencode/plugins/compaction/
 # OpenCode scans .opencode/plugins/*.ts (not subdirs), so add the barrel entry:
-cat > .opencode/plugins/live-compaction.ts <<'EOF'
-export { LiveCompactionPlugin, default } from "./live-compaction/index.ts"
+cat > .opencode/plugins/compaction.ts <<'EOF'
+export { CompactionPlugin, default } from "./compaction/index.ts"
 EOF
 ```
 
@@ -236,8 +236,8 @@ Override rules:
 No configuration needed — the plugin works out of the box with sensible defaults. To customize, create a config file at one of:
 
 ```
-.opencode/live-compaction.json          # project-local
-$XDG_CONFIG_HOME/opencode/live-compaction.json   # global (~/.config/opencode/...)
+.opencode/compaction.json          # project-local
+$XDG_CONFIG_HOME/opencode/compaction.json   # global (~/.config/opencode/...)
 ```
 
 or the same names with the `.jsonc` extension (comments and trailing commas allowed).
@@ -247,7 +247,7 @@ You can also configure the plugin inline through the `opencode.json` plugin entr
 ```json
 {
   "plugin": [
-    ["github:BaconDroid/opencode-live-compaction", { "purgeErrors": { "turns": 6 } }]
+    ["github:BaconDroid/opencode-compaction-plugin", { "purgeErrors": { "turns": 6 } }]
   ]
 }
 ```
@@ -440,7 +440,7 @@ Recommended `plugin` order in `opencode.json`:
 
 ```json
 {
-  "plugin": ["oh-my-opencode-slim@latest", "github:BaconDroid/opencode-live-compaction"]
+  "plugin": ["oh-my-opencode-slim@latest", "github:BaconDroid/opencode-compaction-plugin"]
 }
 ```
 
