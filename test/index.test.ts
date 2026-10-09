@@ -26,8 +26,8 @@ describe("CompactionPlugin", () => {
 		serverUrl: new URL("http://localhost:4096"),
 	};
 
-	async function getHooks() {
-		return await CompactionPlugin(mockCtx as any);
+	async function getHooks(options?: unknown) {
+		return await CompactionPlugin(mockCtx as any, options as any);
 	}
 
 	const emit = (hooks: any, type: string, properties: unknown) =>
@@ -117,7 +117,7 @@ describe("CompactionPlugin", () => {
 
 	describe("tool.execute.after", () => {
 		it("records read/write/edit operations in the compaction prompt", async () => {
-			const hooks = await getHooks();
+			const hooks = await getHooks({ promptMode: "replace" });
 			const cases: Array<[string, string, string, string]> = [
 				["read", "sess-1", "call-1", "src/a.ts"],
 				["write", "sess-2", "call-2", "lib/b.ts"],
@@ -143,7 +143,7 @@ describe("CompactionPlugin", () => {
 		});
 
 		it("ignores calls without sessionID or args", async () => {
-			const hooks = await getHooks();
+			const hooks = await getHooks({ promptMode: "replace" });
 			await afterTool(hooks, "read", "", "call-4", { filePath: "x.ts" });
 			await afterTool(hooks, "read", "sess-5", "call-5", null as any);
 
@@ -159,7 +159,7 @@ describe("CompactionPlugin", () => {
 
 	describe("experimental.session.compacting", () => {
 		it("replaces output.prompt with enhanced prompt", async () => {
-			const hooks = await getHooks();
+			const hooks = await getHooks({ promptMode: "replace" });
 			const output = { context: [], prompt: undefined };
 			await compact(hooks, "sess-compact", output);
 			expect(output.prompt).toBeDefined();
@@ -169,7 +169,7 @@ describe("CompactionPlugin", () => {
 		});
 
 		it("includes files manifest when files were tracked", async () => {
-			const hooks = await getHooks();
+			const hooks = await getHooks({ promptMode: "replace" });
 			await afterTool(hooks, "read", "sess-files", "c1", { filePath: "readme.md" });
 
 			const output = { context: [], prompt: undefined };
@@ -179,7 +179,7 @@ describe("CompactionPlugin", () => {
 		});
 
 		it("clears tracker after compaction", async () => {
-			const hooks = await getHooks();
+			const hooks = await getHooks({ promptMode: "replace" });
 			await afterTool(hooks, "read", "sess-clear", "c1", { filePath: "x.ts" });
 
 			// First compaction should include the file
@@ -194,7 +194,7 @@ describe("CompactionPlugin", () => {
 		});
 
 		it("works without any tracked files", async () => {
-			const hooks = await getHooks();
+			const hooks = await getHooks({ promptMode: "replace" });
 			const output = { context: [], prompt: undefined };
 			await compact(hooks, "sess-empty", output);
 			expect(output.prompt).toBeDefined();
@@ -263,7 +263,7 @@ describe("CompactionPlugin", () => {
 
 	describe("event", () => {
 		it("cleans up trackers on session.deleted for both payload shapes", async () => {
-			const hooks = await getHooks();
+			const hooks = await getHooks({ promptMode: "replace" });
 			const cases: Array<[string, string, Record<string, unknown>]> = [
 				["sess-del", "y.ts", { sessionID: "sess-del" }],
 				["sess-del2", "z.ts", { info: { id: "sess-del2" } }],
@@ -290,7 +290,7 @@ describe("CompactionPlugin", () => {
 
 	describe("dispose", () => {
 		it("clears all session trackers", async () => {
-			const hooks = await getHooks();
+			const hooks = await getHooks({ promptMode: "replace" });
 
 			await afterTool(hooks, "read", "sess-a", "c1", { filePath: "a.ts" });
 			await afterTool(hooks, "write", "sess-b", "c2", { filePath: "b.ts" });
@@ -745,17 +745,17 @@ describe("CompactionPlugin", () => {
 	});
 
 	describe("compaction prompt mode", () => {
-		it("augments the default prompt when promptMode is augment", async () => {
-			const hooks = await CompactionPlugin(mockCtx as any, {
-				promptMode: "augment",
-			} as any);
+		it("augments the default prompt with the delta (no full template)", async () => {
+			const hooks = await getHooks();
 			const output = {
 				context: [] as string[],
 				prompt: undefined as string | undefined,
 			};
 			await compact(hooks, "sess-aug", output);
 			expect(output.prompt).toBeUndefined();
-			expect(output.context.join("\n")).toContain("<template>");
+			const text = output.context.join("\n");
+			expect(text).toContain("## Task Continuity");
+			expect(text).not.toContain("<template>");
 		});
 	});
 
@@ -776,7 +776,7 @@ describe("CompactionPlugin", () => {
 					session: { messages },
 				},
 				directory: TMP_DIR,
-			} as any);
+			} as any, { promptMode: "replace" });
 
 			const output = { context: [] as string[], prompt: undefined as string | undefined };
 			await compact(hooks, "sess-prev", output);
@@ -800,7 +800,7 @@ describe("CompactionPlugin", () => {
 					session: { messages },
 				},
 				directory: TMP_DIR,
-			} as any);
+			} as any, { promptMode: "replace" });
 
 			const out1 = { context: [] as string[], prompt: undefined as string | undefined };
 			await compact(hooks, "sess-slide", out1);
@@ -847,7 +847,7 @@ describe("CompactionPlugin", () => {
 					session: { messages },
 				},
 				directory: TMP_DIR,
-			} as any);
+			} as any, { promptMode: "replace" });
 
 			const output = { context: [] as string[], prompt: undefined as string | undefined };
 			await compact(hooks, "sess-ask", output);
@@ -855,8 +855,16 @@ describe("CompactionPlugin", () => {
 			expect(output.prompt).toContain("please fix the login bug");
 		});
 
-		it("does not fetch the previous summary in augment mode", async () => {
-			const messages = mock().mockResolvedValue({ data: [] });
+		it("adds the delta without the previous summary in augment mode", async () => {
+			const messages = mock().mockResolvedValue({
+				data: [
+					{
+						info: { role: "assistant", summary: true },
+						parts: [{ type: "text", text: "PRIOR SUMMARY" }],
+					},
+					{ info: { role: "user" }, parts: [{ type: "text", text: "do the thing" }] },
+				],
+			});
 			const hooks = await CompactionPlugin(
 				{
 					...mockCtx,
@@ -870,7 +878,12 @@ describe("CompactionPlugin", () => {
 			);
 			const output = { context: [] as string[], prompt: undefined as string | undefined };
 			await compact(hooks, "sess-aug2", output);
-			expect(messages).not.toHaveBeenCalled();
+			expect(output.prompt).toBeUndefined();
+			const text = output.context.join("\n");
+			// The default prompt already carries the previous summary.
+			expect(text).not.toContain("<previous-summary>");
+			expect(text).toContain("<latest-user-ask>");
+			expect(text).toContain("## Task Continuity");
 		});
 	});
 

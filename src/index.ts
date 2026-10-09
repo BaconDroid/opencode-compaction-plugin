@@ -21,7 +21,11 @@
  *   eviction.ts · config.ts · …
  */
 
-import { buildCompactionPrompt, extractLatestUserAsk } from "./core/prompt.js";
+import {
+	buildAugmentPrompt,
+	buildCompactionPrompt,
+	extractLatestUserAsk,
+} from "./core/prompt.js";
 import { FilesTouchedTracker } from "./core/files-touched.js";
 import { loadConfig } from "./config/config-loader.js";
 import type { CompactionConfig } from "./config/config.js";
@@ -214,22 +218,24 @@ export const CompactionPlugin: Plugin = async (ctx, options) => {
 
 		"experimental.session.compacting": async (input, output) => {
 			const { sessionID } = input;
-
-			// In replace mode the default prompt (which carries the previous
-			// summary) is discarded, so fetch and re-inject it ourselves.
-			const wantSummary = config.promptMode !== "augment";
+			const augment = config.promptMode === "augment";
 
 			let previousSummary: string | undefined;
 			let latestAsk: string | undefined;
 			const fetchMessages = ctx.client.session?.messages;
-			if (fetchMessages && wantSummary) {
+			if (fetchMessages) {
 				try {
 					const response = await fetchMessages({ path: { id: sessionID } });
 					const list = unwrapList(response);
-					const state = slidingState.get(sessionID) ?? {};
-					previousSummary = extractPreviousSummary(list, state);
 					latestAsk = extractLatestUserAsk(list);
-					slidingState.set(sessionID, state);
+					// In replace mode the default prompt (which carries the previous
+					// summary) is discarded, so fetch and re-inject it ourselves. In
+					// augment mode the default prompt already carries it.
+					if (!augment) {
+						const state = slidingState.get(sessionID) ?? {};
+						previousSummary = extractPreviousSummary(list, state);
+						slidingState.set(sessionID, state);
+					}
 				} catch (error) {
 					logger.info("message fetch failed", { error: String(error) });
 				}
@@ -241,18 +247,19 @@ export const CompactionPlugin: Plugin = async (ctx, options) => {
 			// Clear tracker after compaction since old operations are now in the summary.
 			tracker.clear();
 
-			const enhancedPrompt = buildCompactionPrompt({
-				filesTouched: filesManifest,
-				previousSummary,
-				focus: latestAsk,
-			});
-
-			if (config.promptMode === "augment") {
-				// Keep OpenCode's default prompt and append our instructions.
-				output.context.push(enhancedPrompt);
+			if (augment) {
+				// Keep OpenCode's default prompt and append only the delta (the
+				// sections the default summary lacks).
+				output.context.push(
+					buildAugmentPrompt({ filesTouched: filesManifest, focus: latestAsk }),
+				);
 			} else {
-				// Replace the default compaction prompt entirely.
-				output.prompt = enhancedPrompt;
+				// Replace the default compaction prompt with the full 11-section template.
+				output.prompt = buildCompactionPrompt({
+					filesTouched: filesManifest,
+					previousSummary,
+					focus: latestAsk,
+				});
 			}
 
 			logger.info("compaction triggered", {

@@ -13,7 +13,7 @@ describe("mergeConfig()", () => {
 		const cfg = mergeConfig({});
 		expect(cfg.enabled).toBe(true);
 		expect(cfg.debug).toBe(false);
-		expect(cfg.promptMode).toBe("replace");
+		expect(cfg.promptMode).toBe("augment");
 		expect(cfg.dedup).toEqual({ enabled: true, protectedTools: [] });
 		expect(cfg.purgeErrors).toMatchObject({
 			enabled: true,
@@ -101,7 +101,7 @@ describe("mergeConfig()", () => {
 		} as any);
 		expect(cfg.enabled).toBe(true);
 		expect(cfg.debug).toBe(false);
-		expect(cfg.promptMode).toBe("replace");
+		expect(cfg.promptMode).toBe("augment");
 		expect(cfg.dedup.enabled).toBe(true);
 		expect(cfg.purgeErrors.cascade).toBe(true);
 		expect(cfg.purgeErrors.wholeAttempt).toBe(true);

@@ -120,7 +120,7 @@ export const DEFAULT_CONFIG: Required<
 } = {
 	enabled: true,
 	debug: false,
-	promptMode: "replace",
+	promptMode: "augment",
 	dedup: {
 		enabled: true,
 		protectedTools: [],
