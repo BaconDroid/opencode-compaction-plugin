@@ -1,12 +1,12 @@
 /**
  * A per-session queue of items, keyed by session id.
  *
- * The compression / expand stores share this queue/clear surface and
- * only differ in how `drain` orders or retains items.
+ * The compression store extends this with a session-ordered `drain`.
  */
 export class KeyedQueue<T> {
 	private queues = new Map<string, T[]>();
 
+	/** Append an item to a session's queue. */
 	queue(sessionID: string, item: T): void {
 		let queue = this.queues.get(sessionID);
 		if (!queue) {
@@ -28,10 +28,12 @@ export class KeyedQueue<T> {
 		return queue;
 	}
 
+	/** Drop a session's queue. */
 	clear(sessionID: string): void {
 		this.queues.delete(sessionID);
 	}
 
+	/** Drop every session's queue. */
 	clearAll(): void {
 		this.queues.clear();
 	}

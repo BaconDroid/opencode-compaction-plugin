@@ -38,6 +38,7 @@ export interface RequestDeps {
 	compressions: CompressionStore;
 }
 
+/** Apply queued compressions to the messages; defer requests from other sessions. */
 export function applyPendingRequests(
 	messages: Message[],
 	deps: RequestDeps,

@@ -34,6 +34,9 @@ function stripTags(text: string, tag: string): string {
 	return text.split(`<${tag}>`).join("").split(`</${tag}>`).join("");
 }
 
+/**
+ * Full 11-section template, used as `output.prompt` in `replace` mode.
+ */
 export function buildCompactionPrompt(input: {
 	filesTouched?: string;
 	previousSummary?: string;

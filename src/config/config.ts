@@ -70,7 +70,7 @@ export interface AdapterTransportConfig {
 }
 
 /**
- * Optional residual/perplexity scorer adapter (E5/E9). Refines the eviction
+ * Optional residual/perplexity scorer adapter. Refines the eviction
  * budget estimate; absent → heuristic.
  */
 export interface ScorerAdapterConfig extends AdapterTransportConfig {
@@ -148,6 +148,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** Deep-merge `override` over `base`; an `undefined` value keeps the lower layer. */
 export function deepMerge(
 	base: CompactionConfig,
 	override: CompactionConfig,

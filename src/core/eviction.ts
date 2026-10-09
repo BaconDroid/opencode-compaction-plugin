@@ -7,7 +7,12 @@
  */
 
 import { blockId, type BlockMessage } from "./blocks.js";
-import { EVICTED_BULK_SUFFIX } from "./markers.js";
+import {
+	EPISODE_MARKER,
+	EVICTED_BULK_SUFFIX,
+	INTERMEDIATE_MARKER,
+	REASONING_MARKER,
+} from "./markers.js";
 
 export type EvictionLevel =
 	| "reasoning"
@@ -24,7 +29,7 @@ export interface EvictionConfig {
 	/** Protect the first message (prologue) from eviction (default: true). */
 	protectPrologue?: boolean;
 	/**
-	 * Optional per-text token resolver (e.g. a scorer adapter, E5). When set,
+	 * Optional per-text token resolver (e.g. a scorer adapter). When set,
 	 * eviction tracks the exact char/token totals itself using the same
 	 * accounting as `estimateTokens` (including this resolver), so tool outputs
 	 * and unscored texts keep the heuristic.
@@ -47,9 +52,6 @@ const DEFAULT_LEVELS: EvictionLevel[] = [
 ];
 
 const BULK_OUTPUT_LIMIT = 200;
-const EPISODE_MARKER = "[evicted episode]";
-const REASONING_MARKER = "[evicted reasoning]";
-const INTERMEDIATE_MARKER = "[evicted intermediate]";
 
 /**
  * Scripts that are roughly one token per character (CJK and the space-less
@@ -73,7 +75,7 @@ function weightedLength(text: string): number {
  * (CJK) characters are weighted as ~1 token each rather than a quarter.
  *
  * `resolveText` optionally overrides the estimate for a given text (e.g. a
- * scorer adapter, E5); unresolved texts keep the heuristic.
+ * scorer adapter); unresolved texts keep the heuristic.
  */
 export function estimateTokens(
 	messages: BlockMessage[],
