@@ -36,8 +36,6 @@ export interface CompressBlock {
 	index: number;
 	/** Durable id of the block (`id="..."` attribute or derived). */
 	id: string;
-	/** Stable `bN` label assigned by {@link orderCompressBlocks}. */
-	label?: string;
 }
 
 const attrRegexCache = new Map<string, RegExp>();
@@ -72,16 +70,6 @@ export function parseCompressBlocks(messages: BlockMessage[]): CompressBlock[] {
 		}
 	}
 	return blocks;
-}
-
-/**
- * Sort blocks by anchor index and renumber them `b0`, `b1`, ... Labels are
- * stable as long as new blocks are appended after existing ones.
- */
-export function orderCompressBlocks(blocks: CompressBlock[]): CompressBlock[] {
-	return [...blocks]
-		.sort((a, b) => a.index - b.index)
-		.map((block, i) => ({ ...block, label: `b${i}` }));
 }
 
 /** Render the body of a compressed block: `[bN]` followed by the summary. */
