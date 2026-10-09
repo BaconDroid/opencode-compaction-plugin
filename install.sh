@@ -111,4 +111,4 @@ else
 fi
 
 echo ''
-ok "Done! OpenCode will use enhanced 11-section compaction on next session."
+ok "Done! OpenCode will use the enhanced compaction prompt on next session."
