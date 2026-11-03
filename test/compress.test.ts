@@ -11,27 +11,27 @@ import { buildCompressToolDef } from "../src/opencode/tools.ts";
 // ---------------------------------------------------------------------------
 
 describe("buildCompressToolDef()", () => {
-	it("returns a valid tool definition with description, args and execute", () => {
+	it("returns a valid tool definition with name, description, JSON-Schema input and execute", () => {
 		const def = buildCompressToolDef();
+		expect(def.name).toBe("compress");
 		expect(def.description).toContain("Compress");
-		expect(def.args).toHaveProperty("topic");
-		expect(def.args).toHaveProperty("start");
-		expect(def.args).toHaveProperty("end");
-		expect(def.args).toHaveProperty("summary");
-		expect(def.args).toHaveProperty("scale");
+		// OpenCode 2 registers tools from JSON Schema, not the V1 zod arg shape.
+		const properties = (def.input as { properties: Record<string, unknown> }).properties;
+		expect(properties).toHaveProperty("topic");
+		expect(properties).toHaveProperty("start");
+		expect(properties).toHaveProperty("end");
+		expect(properties).toHaveProperty("summary");
+		expect(properties).toHaveProperty("scale");
 		expect(typeof def.execute).toBe("function");
 	});
 
 	it("executes for auto-selected and explicit ranges", async () => {
 		const def = buildCompressToolDef();
+		expect(await def.execute({ topic: "T", summary: "S" })).toContain(
+			"auto-selected range",
+		);
 		expect(
-			await def.execute({ topic: "T", summary: "S" }, {} as any),
-		).toContain("auto-selected range");
-		expect(
-			await def.execute(
-				{ topic: "T", summary: "S", start: 0, end: 1 },
-				{} as any,
-			),
+			await def.execute({ topic: "T", summary: "S", start: 0, end: 1 }),
 		).toContain("messages 0-1");
 	});
 });
