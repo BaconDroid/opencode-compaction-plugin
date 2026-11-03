@@ -50,9 +50,13 @@ Add to your `opencode.json`:
 
 ```json
 {
-  "plugin": ["opencode-compaction-plugin"]
+  "plugins": ["opencode-compaction-plugin"]
 }
 ```
+
+OpenCode 2 loads plugins from `plugins` (plural); each entry is either a package name
+or an object carrying `package` and `options`. The default export is a definition
+object with a stable `id` and a `setup(ctx)` function.
 
 > Requires the package to be published on npm. Until then, use Option 1, 2 or 4.
 
@@ -72,7 +76,7 @@ EOF
 
 The plugin hooks into several OpenCode plugin events:
 
-### 1. `tool.execute.after` — Files tracking
+### 1. `tool.execute.after` → `ctx.tool.hook("execute.after")` — Files tracking
 
 Records every file operation (read, write, edit, delete) during the session. Produces a manifest like:
 
@@ -82,7 +86,7 @@ Records every file operation (read, write, edit, delete) during the session. Pro
 - `test/app.test.ts` `R`
 ```
 
-### 2. `experimental.chat.messages.transform` — Context optimization
+### 2. `experimental.chat.messages.transform` → `ctx.session.hook("context")` — Context optimization
 
 Runs on every message batch sent to the LLM. Applies the following strategies in order:
 
@@ -91,7 +95,7 @@ Runs on every message batch sent to the LLM. Applies the following strategies in
 3. **Error purge** — Purges the whole failed attempt (input + output, with a compact error extract) from errored tool calls older than N turns; `cascade` (on by default) extends the purge to calls that depend on a purged call.
 4. **Graduated eviction** — LLM-free eviction (`reasoning → bulk output → intermediate → episode`) once the estimated budget is exceeded; user turns are never evicted.
 
-### 3. `experimental.session.compacting` — Enhanced prompt
+### 3. `experimental.session.compacting` → `ctx.session.hook("compaction")` — Enhanced prompt
 
 When compaction triggers (automatic or manual `/compact`), the default `promptMode: "augment"` keeps OpenCode's default prompt and appends only the **delta** — the sections the default summary lacks (Brief, User Intent Trail, Errors & Dead Ends, Status, Task Continuity, Open Issues & Questions, Mandatory Reading) plus the rules that make them usable. With `"replace"` the plugin substitutes the full **11-section template** instead. Both modes carry `<latest-user-ask>` (the current user request); in `replace` mode the previous compaction summary is fetched and re-injected as `<previous-summary>` (a sliding state avoids re-emitting the same summary). A reference copy of the 11-section template lives in [`prompts/compaction-11-section.md`](prompts/compaction-11-section.md).
 
@@ -107,9 +111,13 @@ When compaction triggers (automatic or manual `/compact`), the default `promptMo
 10. **Mandatory Reading** — Files that must be read first
 11. **Files Touched Manifest** — All files with operation badges
 
-### 4. `experimental.compaction.autocontinue` — Auto-resume
+### 4. Auto-resume
 
-Enables the synthetic "continue" turn after compaction, except for the compaction agent itself and duplicate triggers (a short per-session guard prevents auto-continue loops).
+OpenCode 2 has no `experimental.compaction.autocontinue` registration: the session
+runner continues the step loop after auto-compaction itself and refuses to compact
+again while the last message is a completed compaction, so the duplicate-trigger
+loop the V1 guard suppressed cannot form. Auto-continue stays enabled; nothing is
+registered.
 
 ## Compression Tools
 
@@ -246,8 +254,11 @@ You can also configure the plugin inline through the `opencode.json` plugin entr
 
 ```json
 {
-  "plugin": [
-    ["github:BaconDroid/opencode-compaction-plugin", { "purgeErrors": { "turns": 6 } }]
+  "plugins": [
+    {
+      "package": "github:BaconDroid/opencode-compaction-plugin",
+      "options": { "purgeErrors": { "turns": 6 } }
+    }
   ]
 }
 ```
@@ -434,15 +445,15 @@ Compatible with [`oh-my-opencode-slim`](https://github.com/alvinunreal/oh-my-ope
 
 - `experimental.session.compacting` — omo-slim only marks the session (it does not touch `output.prompt`/`output.context`), so this plugin's prompt handling is unaffected.
 - `experimental.chat.messages.transform` — omo-slim rewrites user text and image parts; this plugin dedups/purges tool parts and applies compressions. Load omo-slim **before** this plugin so its in-place rewrites run before this plugin's structural compression.
-- `config` — omo-slim manages agents, MCPs and commands; this plugin only ensures permissions for its own tool (`compress`) and leaves a global permission string untouched.
+- `config` — omo-slim manages agents, MCPs and commands. This plugin registers no global config hook in 2.0 (the host exposes none); its `compress` tool runs under the default allow-all agent permissions.
 - No shared tool names (omo-slim: `task*`, `waitForUser`, `acpRun`, `webfetch`, `ast_grep_*`, `marketplace_*`; this plugin: `compress`).
 - omo-slim does not use `experimental.compaction.autocontinue` and does not mutate `permission`.
 
-Recommended `plugin` order in `opencode.json`:
+Recommended `plugins` order in `opencode.json`:
 
 ```json
 {
-  "plugin": ["oh-my-opencode-slim@latest", "github:BaconDroid/opencode-compaction-plugin"]
+  "plugins": ["oh-my-opencode-slim@latest", "github:BaconDroid/opencode-compaction-plugin"]
 }
 ```
 

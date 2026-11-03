@@ -11,7 +11,7 @@ import { applyTransform } from "../src/core/transform.ts";
 import { mergeConfig } from "../src/config/config.ts";
 import { CompressionStore } from "../src/core/compress.ts";
 import { parseScore, resolveScorer } from "../src/opencode/adapters.ts";
-import { CompactionPlugin } from "../src/index.ts";
+import { callHook, contextEvent, setupPlugin } from "./harness.ts";
 import { makeTmpSetup, recordingLogger } from "./helpers.ts";
 import type { Scorer } from "../src/core/adapters.ts";
 
@@ -365,37 +365,40 @@ describe("scorer command provider & transform integration", () => {
 	afterEach(cleanup);
 
 	async function runTransform(script: string) {
+		// Plugin diagnostics go to the server stderr stream in OpenCode 2.
 		const logs: string[] = [];
-		const ctx = {
-			client: { app: { log: (input: { body: { message: string } }) => { logs.push(input.body.message); return Promise.resolve(); } } },
-			project: { id: "p", name: "p" },
-			directory: TMP_DIR,
-			worktree: TMP_DIR,
-			serverUrl: new URL("http://localhost:4096"),
+		const original = process.stderr.write.bind(process.stderr);
+		(process.stderr as any).write = (chunk: unknown) => {
+			logs.push(String(chunk));
+			return true;
 		};
-		const hooks = await CompactionPlugin(ctx as any, {
-			debug: true,
-			eviction: { enabled: true, thresholdTokens: 50, levels: ["reasoning"], protectPrologue: false },
-			adapters: {
-				scorer: { provider: "command", command: `"${process.execPath}" "${script}"` },
-			},
-		} as any);
-		const messages = [
-			{ info: { role: "assistant" }, parts: [{ type: "reasoning", text: "x".repeat(100) }] },
-		];
-		await hooks["experimental.chat.messages.transform"]!({} as any, { messages } as any);
-		return { logs, messages };
+		try {
+			const harness = await setupPlugin(TMP_DIR, {
+				debug: true,
+				eviction: { enabled: true, thresholdTokens: 50, levels: ["reasoning"], protectPrologue: false },
+				adapters: {
+					scorer: { provider: "command", command: `"${process.execPath}" "${script}"` },
+				},
+			});
+			const messages = [
+				{ info: { role: "assistant" }, parts: [{ type: "reasoning", text: "x".repeat(100) }] },
+			];
+			await callHook(harness, "context", contextEvent("sess", messages));
+			return { logs, messages };
+		} finally {
+			(process.stderr as any).write = original;
+		}
 	}
 
 	it("uses the scorer estimate to trigger eviction", async () => {
 		const { logs, messages } = await runTransform(highScript);
-		expect(logs).toContain("eviction applied");
+		expect(logs.some((line) => line.includes("eviction applied"))).toBe(true);
 		expect((messages[0].parts[0] as any).text).toBe("[evicted reasoning]");
 	});
 
 	it("falls back to the heuristic when the scorer errors", async () => {
 		const { logs, messages } = await runTransform(failScript);
-		expect(logs).toContain("scorer adapter failed; using heuristic estimate");
+		expect(logs.some((line) => line.includes("scorer adapter failed; using heuristic estimate"))).toBe(true);
 		// Heuristic (~25 tokens) is below the 50 budget → untouched.
 		expect((messages[0].parts[0] as any).text).toBe("x".repeat(100));
 	});
